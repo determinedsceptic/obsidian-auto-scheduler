@@ -1,0 +1,23 @@
+{
+  "author": "Codex",
+  "date": "2026-10-01",
+  "codeCommit": "f716db1c493769d5ef415c2668eb35e85b716cf6",
+  "artifacts": {
+    "main.js": {
+      "bytes": 42223,
+      "sha256": "40f7cd86370a504d456e8e7890e7018d6c955fa363bc14b52d2c3da6e9d37350"
+    },
+    "manifest.json": {
+      "bytes": 264,
+      "sha256": "8fddb3f16f177583e9c3f3d4663d004d902ddbf08da1cf3d6eed5af626112dda"
+    },
+    "styles.css": {
+      "bytes": 447,
+      "sha256": "69cca83a43c7562d252d592b0cbbffcf6226c1a9cde366da6b1392f39b51ce6a"
+    },
+    "package-lock.json": {
+      "bytes": 71349,
+      "sha256": "ec52523cbb09c59dc9a3fe01073ad4c950319ad340e97bfee73b99e5cd341024"
+    }
+  }
+}

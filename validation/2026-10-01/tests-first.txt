@@ -1,0 +1,45 @@
+
+> obsidian-auto-scheduler@0.1.0 test
+> TZ=Asia/Shanghai vitest run
+
+
+ RUN  v4.1.11 /Users/alexhu/Projects/research/obsidian-auto-scheduler
+
+ ❯ tests/scheduler.test.ts (32 tests | 1 failed) 51ms
+     × 固定事件两侧缓冲与重叠事件只算并集 4ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/scheduler.test.ts > 确定性排程 > 固定事件两侧缓冲与重叠事件只算并集
+AssertionError: expected [ [ '09:00', '09:45' ], …(1) ] to deeply equal [ [ '09:00', '09:45' ], …(1) ]
+
+- Expected
++ Received
+
+@@ -3,8 +3,8 @@
+      "09:00",
+      "09:45",
+    ],
+    [
+      "11:00",
+-     "12:00",
++     "11:45",
+    ],
+  ]
+
+ ❯ tests/scheduler.test.ts:26:68
+     24|   it('固定事件两侧缓冲与重叠事件只算并集', () => {
+     25|     const result = schedule([task({ remaining: 120 })], [interval('10:…
+     26|     expect(result.blocks.map(b => [clock(b.start), clock(b.end)])).toE…
+       |                                                                    ^
+     27|     expect(result.unscheduled[0].remaining).toBe(15); expect(result.da…
+     28|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 4 passed (5)
+      Tests  1 failed | 88 passed (89)
+   Start at  19:57:59
+   Duration  216ms (transform 205ms, setup 0ms, import 266ms, tests 93ms, environment 0ms)
+

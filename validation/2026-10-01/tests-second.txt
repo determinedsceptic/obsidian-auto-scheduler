@@ -1,0 +1,81 @@
+
+> obsidian-auto-scheduler@0.1.0 test
+> TZ=Asia/Shanghai vitest run
+
+
+ RUN  v4.1.11 /Users/alexhu/Projects/research/obsidian-auto-scheduler
+
+file:///Users/alexhu/Projects/research/obsidian-auto-scheduler/[eval1]:1
+import {assertStableWeek,addDays} from './src/time.ts'; try { assertStableWeek('2026-03-03'); console.log(addDays('2026-03-03',7)); } catch(e) { console.log(e.message); }
+                         ^^^^^^^
+SyntaxError: The requested module './src/time.ts' does not provide an export named 'addDays'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:272:26)
+    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:268:20)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.22.2
+file:///Users/alexhu/Projects/research/obsidian-auto-scheduler/[eval1]:1
+import {assertStableWeek,addDays} from './src/time.ts'; try { assertStableWeek('2026-10-01'); console.log(addDays('2026-10-01',7)); } catch(e) { console.log(e.message); }
+                         ^^^^^^^
+SyntaxError: The requested module './src/time.ts' does not provide an export named 'addDays'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:272:26)
+    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:268:20)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.22.2
+ ❯ tests/timezone.test.ts (2 tests | 2 failed) 262ms
+   × 春季与秋季夏令时跳变周拒绝排程 139ms
+   × 上海及非跳变纽约周可使用本地日期 122ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/timezone.test.ts > 春季与秋季夏令时跳变周拒绝排程
+Error: Command failed: /opt/homebrew/Cellar/node@22/22.22.2_1/bin/node --import tsx --input-type=module -e import {assertStableWeek,addDays} from './src/time.ts'; try { assertStableWeek('2026-03-03'); console.log(addDays('2026-03-03',7)); } catch(e) { console.log(e.message); }
+file:///Users/alexhu/Projects/research/obsidian-auto-scheduler/[eval1]:1
+import {assertStableWeek,addDays} from './src/time.ts'; try { assertStableWeek('2026-03-03'); console.log(addDays('2026-03-03',7)); } catch(e) { console.log(e.message); }
+                         ^^^^^^^
+SyntaxError: The requested module './src/time.ts' does not provide an export named 'addDays'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:272:26)
+    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:268:20)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.22.2
+
+ ❯ check tests/timezone.test.ts:4:10
+
+ ❯ tests/timezone.test.ts:7:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/timezone.test.ts > 上海及非跳变纽约周可使用本地日期
+Error: Command failed: /opt/homebrew/Cellar/node@22/22.22.2_1/bin/node --import tsx --input-type=module -e import {assertStableWeek,addDays} from './src/time.ts'; try { assertStableWeek('2026-10-01'); console.log(addDays('2026-10-01',7)); } catch(e) { console.log(e.message); }
+file:///Users/alexhu/Projects/research/obsidian-auto-scheduler/[eval1]:1
+import {assertStableWeek,addDays} from './src/time.ts'; try { assertStableWeek('2026-10-01'); console.log(addDays('2026-10-01',7)); } catch(e) { console.log(e.message); }
+                         ^^^^^^^
+SyntaxError: The requested module './src/time.ts' does not provide an export named 'addDays'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:272:26)
+    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:268:20)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.22.2
+
+ ❯ check tests/timezone.test.ts:4:10
+
+ ❯ tests/timezone.test.ts:11:10
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  2 failed | 91 passed (93)
+   Start at  20:00:02
+   Duration  398ms (transform 248ms, setup 0ms, import 332ms, tests 353ms, environment 0ms)
+

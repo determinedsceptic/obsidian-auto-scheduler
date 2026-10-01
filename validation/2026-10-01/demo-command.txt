@@ -1,0 +1,17 @@
+
+> obsidian-auto-scheduler@0.1.0 demo
+> node scripts/run.mjs demo
+
+{
+  "smallBlocks": 3,
+  "weekBlocks": 12,
+  "unscheduled": [
+    {
+      "taskId": "overflow",
+      "title": "大量额外工作",
+      "remaining": 1710,
+      "reason": "可行时间或每日容量不足"
+    }
+  ],
+  "benchmarkMs": 12.18
+}

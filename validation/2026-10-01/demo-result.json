@@ -1,0 +1,122 @@
+{
+  "author": "Codex",
+  "date": "2026-10-01",
+  "codeCommit": "f716db1c493769d5ef415c2668eb35e85b716cf6",
+  "codeDirty": false,
+  "fixtureChecksums": {
+    "tasks": "00f037f9f053f19d75eabd90a309a64d6f92547a7e3d12629f1c1f052ff7ad38",
+    "fixed": "d2acabdf5ec928b2b8a0fd27fb156cc582aa9144ac315a6de4565d2c3066078e"
+  },
+  "node": "v22.22.2",
+  "timezone": "Asia/Shanghai",
+  "now": "2026-10-01T00:00:00.000Z",
+  "seed": null,
+  "inputs": [
+    "demo-vault/Tasks/Project.md",
+    "demo-vault/Scheduler/Fixed.md"
+  ],
+  "dataVersion": "Git fixtures",
+  "environment": "package-lock.json",
+  "command": "npm run demo",
+  "configuration": {
+    "taskFolder": "Tasks",
+    "fixedFile": "Scheduler/Fixed.md",
+    "outputFile": "Scheduler/Schedule.md",
+    "weekdays": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "periods": [
+      "09:00-12:00",
+      "14:00-18:00"
+    ],
+    "dailyCapacity": 360,
+    "fixedBuffer": 15,
+    "blockBuffer": 15,
+    "outputMode": "plain"
+  },
+  "smallSample": {
+    "blocks": 3,
+    "unscheduled": [
+      {
+        "taskId": "figures",
+        "title": "检查结果图",
+        "remaining": 120,
+        "reason": "最早开始时间在排程范围外"
+      },
+      {
+        "taskId": "materials",
+        "title": "连续整理材料",
+        "remaining": 90,
+        "reason": "缺少满足容量和缓冲约束的连续区间"
+      }
+    ]
+  },
+  "week": {
+    "blocks": 12,
+    "unscheduled": [
+      {
+        "taskId": "overflow",
+        "title": "大量额外工作",
+        "remaining": 1710,
+        "reason": "可行时间或每日容量不足"
+      }
+    ],
+    "days": [
+      {
+        "date": "2026-10-01",
+        "occupied": 360,
+        "capacity": 360,
+        "overCapacity": false
+      },
+      {
+        "date": "2026-10-02",
+        "occupied": 345,
+        "capacity": 360,
+        "overCapacity": false
+      },
+      {
+        "date": "2026-10-03",
+        "occupied": 0,
+        "capacity": 360,
+        "overCapacity": false
+      },
+      {
+        "date": "2026-10-04",
+        "occupied": 0,
+        "capacity": 360,
+        "overCapacity": false
+      },
+      {
+        "date": "2026-10-05",
+        "occupied": 345,
+        "capacity": 360,
+        "overCapacity": false
+      },
+      {
+        "date": "2026-10-06",
+        "occupied": 360,
+        "capacity": 360,
+        "overCapacity": false
+      },
+      {
+        "date": "2026-10-07",
+        "occupied": 360,
+        "capacity": 360,
+        "overCapacity": false
+      }
+    ]
+  },
+  "performance": {
+    "tasks": 1000,
+    "milliseconds": 12.18,
+    "blocks": 11
+  },
+  "output": [
+    "validation/2026-10-01/demo-plain.md",
+    "validation/2026-10-01/demo-day-planner.md"
+  ]
+}
