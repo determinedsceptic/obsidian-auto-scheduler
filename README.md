@@ -95,7 +95,7 @@ ID 和预计用时是自动排程必需信息。普通任务没有这些信息�
 
 GitHub：[determinedsceptic/obsidian-auto-scheduler](https://github.com/determinedsceptic/obsidian-auto-scheduler)。主分支 main；源码、依赖锁文件、设计和验证记录由 Git 管理。
 
-参考 Gantt Calendar 的 TypeScript / Obsidian 插件结构，职责划分见 [docs/architecture.md](docs/architecture.md)。versions.json 记录各版本最低 Obsidian 版本。GitHub CI 在 Node 22/24 上执行类型检查、测试、宿主 smoke、打包及固定上游版本格式互操作，提供可下载的插件构建产物。
+参考 Gantt Calendar 的 TypeScript / Obsidian 插件结构，职责划分见 [docs/architecture.md](docs/architecture.md)。versions.json 记录各版本最低 Obsidian 版本。CI 模板 [.github/ci.yml.example](.github/ci.yml.example) 在 Node 22/24 上执行类型检查、测试、宿主 smoke、打包及固定上游版本格式互操作。现有 GitHub 凭据没有 workflow 权限，因此模板尚未启用；取得该权限后放入 .github/workflows/ci.yml 即可。
 
 ## 构建与本地试用
 

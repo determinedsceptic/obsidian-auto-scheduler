@@ -21,6 +21,6 @@
 
 tests/ 测试纯逻辑与事务边界；scripts/smoke.mjs 验证构建产物在模拟宿主中的行为；scripts/gantt-interop.mjs 直接执行固定版本上游 parser/serializer；demo-vault/ 仅含合成示例；validation/ 保存验证记录。
 
-Git 管理源码、锁文件、配置、设计及验证文档。node_modules/、main.js、dist/ 和本地测试库不入库。构建产物由 npm run package 生成，CI 提供 artifact；本次同步不创建 Release 或版本标签。
+Git 管理源码、锁文件、配置、设计及验证文档。node_modules/、main.js、dist/ 和本地测试库不入库。构建产物由 npm run package 生成，CI 模板配置 artifact（尚未启用）；本次同步不创建 Release 或版本标签。
 
 运行时仅依赖 Obsidian；上游源码不是 vendored 依赖。不引入其 React、日历界面或飞书同步系统。本插件仍支持 Obsidian 桌面端 1.6.6+，Gantt 互操作的参考版本本身要求 1.13.0+。

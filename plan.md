@@ -92,3 +92,5 @@ Alex 明确要求新建 Obsidian 库测试，随后指定 `/Users/alexhu/Project
 ## 2026-10-01：GitHub 同步及仓库结构
 
 Alex 授权将项目同步到 determinedsceptic/obsidian-auto-scheduler，并参考 Gantt Calendar 的项目架构。保留现有按职责拆分的 src 模块与测试，补齐 Obsidian versions.json、EditorConfig、架构说明及 GitHub CI；不复制上游 UI/飞书依赖。执行类型检查、118 项测试、宿主 smoke、打包与上游互操作，提交后推送完整本地历史至空远程 main。目标仓库已通过 GitHub API 确认为空；不使用 force push，不覆盖远程已有工作。
+
+GitHub 同步调整：Git 传输超时，改用 GitHub Git 对象 API，所有原始 blob/tree/commit SHA 逐一校验一致。API 更新含 .github/workflows 文件的 ref 返回 404；现有 OAuth scope 包含 repo，但没有 workflow。CI 改为 .github/ci.yml.example 模板，避免扩大账户授权。完整源码和既有历史继续同步；若历史中的工作流也触发限制，保留本地 ci-ready 分支，并从原功能提交建立不含工作流的架构提交。

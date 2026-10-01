@@ -38,3 +38,7 @@
 ## 2026-10-01：GitHub Git 传输超时
 
 现象：三次 shallow clone 在连接 github.com:443 / packfile 阶段超时；GitHub API 可访问。影响：参考源码获取延迟。处理：下载固定提交归档及 Git commit 元数据，恢复原始 Git 对象；文件树 SHA cccc5e02f97d348882554da16decdacffb9bcb08 与 commit a06130967bd862a642416e10970ca4bf4cfc7e11 均匹配，配置 shallow 边界与 origin，fsck 通过。未使用未知镜像或修改源码。预防：记录源码提交与 tree 哈希，互操作脚本检查固定提交和干净工作树。
+
+## 2026-10-01：GitHub 同步通道及 CI 权限
+
+Git push 到 github.com:443 持续连接超时，GitHub API 可达。使用 Git 对象 API 验证并上传原始 blob/tree/commit，保留完整本地提交。空仓库经 README 初始化，初始化提交作为同步合并的第二父提交保留，ref 只做 fast-forward 更新。更新含工作流的目标 ref 返回 404；API 响应显示 OAuth scope 为 repo 等，不含 workflow。CI 改为 .github/ci.yml.example 模板，未读取或修改凭据、未扩大授权。启用 CI 需另行取得 workflow 权限。
