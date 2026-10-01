@@ -1,0 +1,6 @@
+.auto-scheduler-modal { width: min(850px, 90vw); }
+.auto-scheduler-modal .modal-content { max-height: 75vh; overflow-y: auto; }
+.auto-scheduler-modal pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-smallest); }
+.auto-scheduler-modal li { margin-block: 0.3em; }
+.auto-scheduler-warning { color: var(--text-warning); }
+.auto-scheduler-actions { display: flex; gap: 0.75em; justify-content: flex-end; margin-top: 1.5em; }

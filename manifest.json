@@ -1,0 +1,9 @@
+{
+  "id": "auto-scheduler",
+  "name": "Auto Scheduler",
+  "version": "0.1.0",
+  "minAppVersion": "1.6.6",
+  "description": "Preview and schedule local Markdown tasks with capacity limits, locked blocks, and undo.",
+  "author": "Alex Hu",
+  "isDesktopOnly": true
+}

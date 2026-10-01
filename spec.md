@@ -3,7 +3,7 @@
 - 作者：Codex；需求负责人：Alex Hu
 - 日期：2026-10-01
 - 状态：2026-10-01 Alex 已阅读规格并授权实现；兼容要求按同次指示补充
-- Git commit：尚未建立 Git 仓库
+- Git commit：设计基线 0aed1e0；实现版本见 Git 历史及 validation/2026-10-01/demo-result.json
 - 上游：intend.md
 - 下游：plan.md、src/、tests/、demo-vault/、review.md
 - 接受/拒绝历史：2026-10-01 创建；同日 Alex 阅读 spec.md 后指示“开始做吧”，接受实现，并要求参考 Day Planner 和尽量兼容

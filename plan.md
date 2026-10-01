@@ -3,7 +3,7 @@
 - 作者：Codex
 - 日期：2026-10-01
 - 状态：2026-10-01 Alex 授权按规格开始实现；随同规格接受本计划
-- Git commit：尚未建立 Git 仓库
+- Git commit：设计基线 0aed1e0；实现版本见 Git 历史及 validation/2026-10-01/demo-result.json
 - 上游：intend.md、spec.md
 - 下游：src/、tests/、demo-vault/、validation/、review.md、README.md
 - 接受/拒绝历史：2026-10-01 创建；同日 Alex 阅读 spec.md 后指示“开始做吧”，接受实现，并要求参考 Day Planner 和尽量兼容
@@ -63,3 +63,13 @@ npm run demo
 ## 兼容实现调整（2026-10-01）
 
 根据 Alex 同次授权，在实现前补充可选 Day Planner 输出模式和两种输出格式的读回测试；校验 scheduled 与块日期一致，保护已勾选工作块。记录参考源码版本和过滤器/拖动限制。保持单文件写入边界，不接管 Daily Notes，也不调用第三方插件私有 API。新增 `compatibility.md` 和 `tests/compatibility.test.ts`，说明源码核查与实机验证的区别。
+
+## 实现内的调整与说明
+
+- 添加 `src/queue.ts` 及队列回归测试：代码复查发现设置输入与写入必须统一串行，避免丢失输入或覆盖备份。功能范围和单文件写入边界不变。
+- 添加 `scripts/run.mjs`：测试时区由 Node 子进程统一设置，支持非 Unix 开发环境。项目源码使用 ESM；Obsidian 构建产物明确保持 CJS。
+- 添加 `scripts/package.mjs` 和本地 package 命令：仅把已构建文件复制到 dist，不安装到真实库、不上传。
+- SDK 固定为 1.6.6，最低宿主版本相同；审计修复开发依赖并固定 npm peer 解析策略。失败证据见 incident.md，未隐藏。
+- 验证记录的 codeDirty 字段区分已提交源码与工作区试验；fixture 用 SHA-256 标识。
+
+- 最终加入 `scripts/smoke.mjs`：在内存模拟宿主中加载真正的 CJS 产物，测试命令注册、预览、公开 Vault 写入、重启撤销；不把模拟结果当作真实 Obsidian UI 验收。
