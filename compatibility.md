@@ -26,3 +26,7 @@
 格式依据：[Day Planner README](https://github.com/ivan-lednev/obsidian-day-planner#how-to-use-it)、[任意文件索引代码](https://github.com/ivan-lednev/obsidian-day-planner/blob/78672f68d2e96343c0875cd76dd4b7c442e31fd6/src/service/index/extensions/obsidian-tasks-extension-service.ts)、[日期属性格式](https://github.com/ivan-lednev/obsidian-day-planner/blob/78672f68d2e96343c0875cd76dd4b7c442e31fd6/src/regexp.ts)。只参考格式，不复制实现代码或捆绑其依赖。
 
 Day Planner 过滤器可能隐藏输出；拖动若破坏注释/格式会阻止重排；拖动后未锁定的块会被替换。切换格式只转换当前可重排块，保护块保留原行。源任务 remaining 是用户维护的数据；勾选块不代表整个任务完成，也不将业务 due 当作块结束。
+
+## 真实宿主补充（2026-10-01）
+
+macOS Obsidian 1.13.7（安装程序 1.7.7）已在独立 test 库通过加载、设置、预览/应用、重载撤销、锁定、并发输入/撤销保护和阅读视图显示。参见 validation/2026-10-01/native-ui/result.json。Day Planner 格式已由实际插件 UI 生成和显示，但测试库未安装 Day Planner，故仍不声称两插件实机互操作已通过。

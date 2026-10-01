@@ -6,3 +6,5 @@ dist/
 .DS_Store
 *.log
 demo-vault/.obsidian/
+
+local-test-vaults/

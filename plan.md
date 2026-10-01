@@ -73,3 +73,7 @@ npm run demo
 - 验证记录的 codeDirty 字段区分已提交源码与工作区试验；fixture 用 SHA-256 标识。
 
 - 最终加入 `scripts/smoke.mjs`：在内存模拟宿主中加载真正的 CJS 产物，测试命令注册、预览、公开 Vault 写入、重启撤销；不把模拟结果当作真实 Obsidian UI 验收。
+
+## 实机验证授权与执行（2026-10-01）
+
+Alex 明确要求新建 Obsidian 库测试，随后指定 `/Users/alexhu/Projects/research/test/`。在该新测试库安装已构建插件并添加虚构 fixture，保留欢迎笔记。通过真实 macOS Obsidian 1.13.7 UI 执行预览、应用、重载撤销、锁定重排、失效预览拒绝、撤销冲突拒绝以及设置切换和兼容输出。优先级与固定文件的临时测试修改在结束前恢复；排程和虚构手动备注保留供检查。未操作原有笔记库。证据见 validation/2026-10-01/native-ui/。
