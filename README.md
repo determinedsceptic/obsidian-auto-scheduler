@@ -91,6 +91,12 @@ ID 和预计用时是自动排程必需信息。普通任务没有这些信息�
 
 参考库位于相邻 `../obsidian-gantt-calendar`，固定提交 `a06130967bd862a642416e10970ca4bf4cfc7e11`。运行 `node scripts/gantt-interop.mjs` 可重复上游格式互操作测试。
 
+## 仓库与架构
+
+GitHub：[determinedsceptic/obsidian-auto-scheduler](https://github.com/determinedsceptic/obsidian-auto-scheduler)。主分支 main；源码、依赖锁文件、设计和验证记录由 Git 管理。
+
+参考 Gantt Calendar 的 TypeScript / Obsidian 插件结构，职责划分见 [docs/architecture.md](docs/architecture.md)。versions.json 记录各版本最低 Obsidian 版本。GitHub CI 在 Node 22/24 上执行类型检查、测试、宿主 smoke、打包及固定上游版本格式互操作，提供可下载的插件构建产物。
+
 ## 构建与本地试用
 
 开发使用 Node 20/22 LTS 或 24+，npm。项目 `.npmrc` 固定 peer 解析策略，锁文件固定实际依赖。

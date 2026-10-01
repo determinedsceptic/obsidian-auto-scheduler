@@ -88,3 +88,7 @@ Alex 明确要求新建 Obsidian 库测试，随后指定 `/Users/alexhu/Project
 4. typecheck、全套单元测试、bundle smoke 与打包；在合成测试库验证产物。记录兼容范围及实测限制。
 
 成本：本地小型 TypeScript 测试和构建，无个人笔记迁移、外部发布或共享环境变更。
+
+## 2026-10-01：GitHub 同步及仓库结构
+
+Alex 授权将项目同步到 determinedsceptic/obsidian-auto-scheduler，并参考 Gantt Calendar 的项目架构。保留现有按职责拆分的 src 模块与测试，补齐 Obsidian versions.json、EditorConfig、架构说明及 GitHub CI；不复制上游 UI/飞书依赖。执行类型检查、118 项测试、宿主 smoke、打包与上游互操作，提交后推送完整本地历史至空远程 main。目标仓库已通过 GitHub API 确认为空；不使用 force push，不覆盖远程已有工作。
