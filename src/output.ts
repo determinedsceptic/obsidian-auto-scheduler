@@ -1,3 +1,4 @@
+import { calendarDate, normalizeMetadata } from './calendar-format';
 import { fields, idField } from './parser';
 import { clock, dateKey, atDate, localMinute } from './time';
 import type { Block, OutputDocument, Settings } from './types';
@@ -15,9 +16,19 @@ export function parseOutput(content: string | null): OutputDocument {
   const blocks: Block[] = []; const ids = new Set<string>();
   const region = content.slice(start + START.length, end);
   for (const raw of region.split(/\r?\n/)) {
+    let normalized = normalizeMetadata(raw, 'as-block');
+    const fullStart = calendarDate(normalized, 'start'), fullEnd = calendarDate(normalized, 'due');
+    if (fullStart !== undefined || fullEnd !== undefined) {
+      if (fullStart === undefined || fullEnd === undefined || fullEnd <= fullStart) throw new Error('Gantt 工作块须有有效的 start/due 时间');
+      const scheduledTime = calendarDate(normalized, 'scheduled');
+      if (scheduledTime !== fullStart) throw new Error('Gantt scheduled 与 start 不一致');
+      const metadata = /<!-- as-block .+? -->/.exec(normalized)?.[0];
+      if (metadata) normalized = normalized.replace(metadata, '').trim() + ' ' + metadata;
+      normalized = normalized.replace(/\[(?:start|due)::[^\]]+\]/gi, '').replace(/\[scheduled::[^\]]+\]/i, `[scheduled:: ${dateKey(atDate(fullStart))}]`).replace(/ +/g, ' ');
+    }
     if (!raw.trim()) continue;
     if (/^## \d{4}-\d{2}-\d{2}$/.test(raw)) { localMinute(raw.slice(3), '00:00'); continue; }
-    const match = /^- (?:\[([ xX])\] )?(?:(\d{4}-\d{2}-\d{2}) )?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*<!-- as-block (.+?) -->$/.exec(raw);
+    const match = /^- (?:\[([ xX])\] (?:[^\r\n]*? )?)?(?:(\d{4}-\d{2}-\d{2}) )?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*<!-- as-block (.+?) -->$/.exec(normalized);
     if (!match) throw new Error(`管理区含不可识别内容：${raw}`);
     const f = fields(match[6], ['id', 'task', 'locked']);
     const id = idField(f.id), taskId = idField(f.task);
@@ -29,6 +40,7 @@ export function parseOutput(content: string | null): OutputDocument {
     if (!date || (match[1] !== undefined && (scheduled.length !== 1 || match[2] !== undefined)) || (match[1] === undefined && scheduled.length > 0)) throw new Error(`块 ${id} 日期/格式不一致`);
     const startTime = localMinute(date, match[3]), endTime = localMinute(date, match[4]);
     if (endTime <= startTime || dateKey(atDate(startTime)) !== date) throw new Error(`块 ${id} 结束时间须晚于开始时间`);
+    if (fullStart !== undefined && (startTime !== fullStart || endTime !== fullEnd)) throw new Error('Gantt 时钟范围与日期时间不一致');
     const links = [...match[5].matchAll(/\[\[([^\[\]]+)\]\]/g)];
     const path = links[links.length - 1]?.[1] ?? '';
     if (!path) throw new Error(`块 ${id} 缺少源笔记链接`);
@@ -39,29 +51,36 @@ export function parseOutput(content: string | null): OutputDocument {
 /** Strip scheduling display fields only; the source Markdown is never changed. */
 export function displayTitle(title: string): string {
   return title.replace(/<!--.*?-->/g, '')
-    .replace(/[\[(](?:scheduled|due|start)\s*::\s*[^\])]*[\])]/g, '')
-    .replace(/[⏳📅🛫✅]\s*\d{4}-\d{2}-\d{2}/gu, '')
+    .replace(/%%.*?%%/g, '')
+    .replace(/[🔺⏫🔼🔽⏬]/gu, '')
+    .replace(/🔁.*$/gu, '')
+    .replace(/[\[(](?:priority|created|completion|cancelled|repeat|scheduled|due|start)\s*::\s*[^\])]*[\])]/g, '')
+    .replace(/[➕⏳📅🛫✅❌]\s*\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?/gu, '')
     .replace(/\[scheduled\s*::/g, '')
     .replace(/[\r\n]/g, ' ').trim();
 }
 export function endClock(block: Block): string {
   return clock(block.end) === '00:00' && dateKey(atDate(block.end)) > block.date ? '24:00' : clock(block.end);
 }
-export function blockLine(block: Block, mode: Settings['outputMode']): string {
+export function blockLine(block: Block, mode: Settings['outputMode'], ganttFilter = '🎯'): string {
   if (block.raw) return block.raw;
   const link = block.path.replace(/\.md$/, '');
   if (/[\[\]|\r\n]/.test(link)) throw new Error(`源笔记路径不能安全表示为 wikilink：${block.path}`);
   const body = `工作块：${displayTitle(block.title)} [[${link}]]`;
   const metadata = `<!-- as-block id=${block.id} task=${block.taskId} locked=${block.locked} -->`;
+  if (mode === 'gantt') {
+    const stamp = (minute: number): string => `${dateKey(atDate(minute))} ${clock(minute)}`;
+    return `- [ ] ${ganttFilter ? ganttFilter.trim() + ' ' : ''}${clock(block.start)} - ${endClock(block)} ${body} %%[as-block:: id=${block.id} task=${block.taskId} locked=${block.locked}]%% [start:: ${stamp(block.start)}] [scheduled:: ${stamp(block.start)}] [due:: ${stamp(block.end)}]`;
+  }
   return mode === 'day-planner'
     ? `- [ ] ${clock(block.start)} - ${endClock(block)} ${body} [scheduled:: ${block.date}] ${metadata}`
     : `- ${block.date} ${clock(block.start)}-${endClock(block)} ${body} ${metadata}`;
 }
-export function renderOutput(document: OutputDocument, blocks: Block[], mode: Settings['outputMode']): string {
+export function renderOutput(document: OutputDocument, blocks: Block[], mode: Settings['outputMode'], ganttFilter = '🎯'): string {
   const lines = [START]; let previous = '';
   for (const block of [...blocks].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))) {
     if (block.date !== previous) { lines.push('', `## ${block.date}`); previous = block.date; }
-    lines.push(blockLine(block, mode));
+    lines.push(blockLine(block, mode, ganttFilter));
   }
   lines.push('', END);
   return document.prefix + lines.join(document.newline) + document.suffix;

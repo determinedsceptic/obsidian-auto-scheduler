@@ -82,4 +82,17 @@ assert(customRestart.state.undo, 'Custom path undo was discarded at restart');
 customRestart.commands.find(command => command.id === 'undo-last').callback(); await customRestart.operations.tail;
 assert.equal(saved.undo, null); assert(!files.get('Scheduler/Fixed.md').includes('as-block'));
 assert.equal(files.get('Tasks/Host.md'), original);
-console.log('PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source');
+// Daily batch survives restart and restores all files through public Vault methods.
+files.set('Tasks/Host.md', original.replace('remaining=60', 'remaining=360'));
+files.set('DailyNotes/2026-10-01.md', '# Day planner\n- [ ] 09:00 - 10:00 会议\n# 日记\n保留');
+const dailyOriginal = files.get('DailyNotes/2026-10-01.md');
+await customRestart.updateSettings({ outputLocation: 'daily', outputMode: 'gantt', weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 180, fixedBuffer: 0, blockBuffer: 0 });
+customRestart.commands.find(command => command.id === 'preview-week').callback(); await customRestart.operations.tail;
+const dailyApply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+assert.equal(dailyApply.disabled, false); dailyApply.events.click(); await customRestart.operations.tail;
+assert(saved.undo.entries.length >= 2); assert(files.get('DailyNotes/2026-10-01.md').includes('[start:: 2026-10-01 10:00]'));
+const dailyRestart = new AutoScheduler(app); await dailyRestart.onload(); assert(dailyRestart.state.undo);
+dailyRestart.commands.find(command => command.id === 'undo-last').callback(); await dailyRestart.operations.tail;
+assert.equal(saved.undo, null); assert.equal(files.get('DailyNotes/2026-10-01.md'), dailyOriginal);
+assert(!files.get('DailyNotes/2026-10-02.md').includes('as-block'));
+console.log('PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo');

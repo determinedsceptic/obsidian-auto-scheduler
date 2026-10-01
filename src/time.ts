@@ -84,7 +84,11 @@ export function validateSettings(settings: Settings): string[] {
   if (settings.fixedFile === settings.outputFile) errors.push('固定日程和输出文件不能相同');
   if (settings.taskFolder === settings.outputFile || settings.taskFolder === settings.fixedFile) errors.push('任务目录不能是输入/输出文件');
   if (!Array.isArray(settings.weekdays) || !settings.weekdays.length || new Set(settings.weekdays).size !== settings.weekdays.length || settings.weekdays.some(n => !Number.isInteger(n) || n < 0 || n > 6)) errors.push('工作日需为不重复的 0–6（0 为周日）');
-  if (!['plain', 'day-planner'].includes(settings.outputMode)) errors.push('未知输出格式');
+  if (!['plain', 'day-planner', 'gantt'].includes(settings.outputMode)) errors.push('未知输出格式');
+  if (!['single', 'daily'].includes(settings.outputLocation)) errors.push('未知输出位置');
+  if (typeof settings.ganttFilter !== 'string' || settings.ganttFilter.length > 100 || /[\r\n<>\[\]%]/.test(settings.ganttFilter)) errors.push('Gantt 前缀须为单行普通文本');
+  if (!safeVaultPath(settings.dailyFolder)) errors.push('dailyFolder 必须是安全的库内目录');
+  if (settings.outputLocation === 'daily' && settings.outputMode === 'plain') errors.push('每日笔记需要 Day Planner 或 Gantt 格式');
   for (const field of ['dailyCapacity', 'fixedBuffer', 'blockBuffer'] as const) {
     if (!Number.isInteger(settings[field]) || settings[field] < (field === 'dailyCapacity' ? 15 : 0) || settings[field] > 1440 || settings[field] % GRID) errors.push(`${field} 需为 15 分钟倍数，且在合法范围内`);
   }

@@ -1,3 +1,4 @@
+import { calendarDate, calendarPriority, normalizeMetadata } from './calendar-format';
 import { GRID, localMinute, parseBoundary } from './time';
 import type { Diagnostic, Interval, Task } from './types';
 export interface Source { path: string; content: string }
@@ -34,23 +35,28 @@ function integer(value: string | undefined, name: string): number {
 }
 export function parseTasks(sources: Source[]): { tasks: Task[]; errors: Diagnostic[] } {
   const tasks: Task[] = [], errors: Diagnostic[] = []; const ids = new Map<string, string>();
-  for (const source of sources) for (const { text, line } of visibleLines(source.content)) {
+  for (const source of sources) for (const { text: original, line } of visibleLines(source.content)) {
+    let text = normalizeMetadata(original, 'as');
+    if (original.includes('%%[as::')) {
+      const metadata = /<!-- as .+? -->/.exec(text)?.[0];
+      if (metadata) text = text.replace(metadata, '').trimEnd() + ' ' + metadata;
+    }
     if (!/<!--\s*as(?:\s|-->)/.test(text)) continue;
     try {
-      const match = /^\s*(?:[-*+]|\d+[.)])\s+\[([ xX])\]\s+(.+?)\s*<!--\s*as\s+(.+?)\s*-->\s*$/.exec(text);
+      const match = /^\s*(?:[-*+]|\d+[.)])\s+\[([ xX/!?n-])\]\s+(.+?)\s*<!--\s*as\s+(.+?)\s*-->\s*$/.exec(text);
       if (!match || (text.match(/<!--\s*as\s/g) || []).length !== 1) throw new Error('任务格式错误：元数据须在复选框列表项末尾，且仅出现一次');
       const f = fields(match[3], ['id', 'remaining', 'priority', 'due', 'earliest', 'split', 'min']);
-      const id = idField(f.id), remaining = integer(f.remaining, 'remaining'), priority = integer(f.priority, 'priority');
+      const id = idField(f.id), remaining = integer(f.remaining, 'remaining'), priority = f.priority ? integer(f.priority, 'priority') : calendarPriority(match[2]);
       const min = integer(f.min ?? '30', 'min');
       if (remaining <= 0 || remaining % GRID || min <= 0 || min % GRID || min > remaining) throw new Error('remaining/min 须为正的 15 分钟倍数，且 min <= remaining');
       if (priority < 1 || priority > 5) throw new Error('priority 范围为 1–5');
       if (f.split !== undefined && !['true', 'false'].includes(f.split)) throw new Error('split 只能为 true 或 false');
-      const due = f.due ? parseBoundary(f.due, true) : undefined;
-      const earliest = f.earliest ? parseBoundary(f.earliest) : undefined;
+      const due = f.due ? parseBoundary(f.due, true) : calendarDate(match[2], 'due');
+      const earliest = f.earliest ? parseBoundary(f.earliest) : calendarDate(match[2], 'start') ?? calendarDate(match[2], 'scheduled');
       if (due !== undefined && earliest !== undefined && earliest >= due) throw new Error('earliest 必须早于 due');
       if (ids.has(id)) throw new Error(`重复 ID ${id}，已存在于 ${ids.get(id)}`);
       ids.set(id, `${source.path}:${line}`);
-      tasks.push({ id, title: match[2], path: source.path, line, remaining, priority, due, earliest, split: f.split !== 'false', min, completed: match[1] !== ' ' });
+      tasks.push({ id, title: match[2], path: source.path, line, remaining, priority, due, earliest, split: f.split !== 'false', min, completed: ['x', 'X', '-'].includes(match[1]) });
     } catch (error) { errors.push({ path: source.path, line, message: (error as Error).message }); }
   }
   return { tasks, errors };

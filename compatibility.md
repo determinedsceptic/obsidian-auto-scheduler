@@ -30,3 +30,13 @@ Day Planner 过滤器可能隐藏输出；拖动若破坏注释/格式会阻止�
 ## 真实宿主补充（2026-10-01）
 
 macOS Obsidian 1.13.7（安装程序 1.7.7）已在独立 test 库通过加载、设置、预览/应用、重载撤销、锁定、并发输入/撤销保护和阅读视图显示。参见 validation/2026-10-01/native-ui/result.json。Day Planner 格式已由实际插件 UI 生成和显示，但测试库未安装 Day Planner，故仍不声称两插件实机互操作已通过。
+
+## Gantt Calendar 1.6.2：2026-10-01
+
+- 上游 commit：a06130967bd862a642416e10970ca4bf4cfc7e11；相邻仓库 `../obsidian-gantt-calendar` 为浅克隆。普通 git clone 的 github.com 连接反复超时，改用 GitHub API 下载固定提交归档及 commit 元数据；工作树 tree SHA 与原始 commit SHA 均精确匹配，`git fsck --full` 通过，origin/master 和 master 指向原提交。
+- 日期：Dataview `[start:: YYYY-MM-DD HH:mm]`、`[scheduled:: ...]`、`[due:: ...]`。源约束亦支持对应 Tasks emoji。
+- 全局过滤器默认 🎯；本插件可配置相同前缀。避免输出混合 emoji/Dataview，因为上游混合格式会选择 Tasks 解析。
+- 结构化隐藏元数据 `%%[as:: ...]%%` / `%%[as-block:: ...]%%` 在上游解析及序列化中保留。源 guid 不复制到输出。
+- `scripts/gantt-interop.mjs` 直接捆绑执行上游真实 parser/serializer，模拟最小 Obsidian host；验证默认过滤器、分钟精度、时间、ID、锁定和源元数据往返。结果见 `validation/2026-10-01/gantt-interop.json`。未运行完整 Gantt UI，不声称界面实测。
+- 当前严格校验时钟与日期字段一致；Gantt 拖动后需同步 clock/start/scheduled/due，跨日还需移动至相应每日文件。循环任务不展开，自定义状态仅支持空白、x/X、-、/、!、?、n。输出工作块只支持空白、x/X。
+- 运行时不依赖 Gantt Calendar，不调用其私有 API；仍支持单独运行和旧单文件输出。

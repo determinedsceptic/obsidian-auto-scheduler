@@ -45,9 +45,11 @@ class ObsidianVault implements VaultPort {
 function validUndo(value: unknown): value is UndoRecord {
   if (!value || typeof value !== 'object') return false;
   const record = value as UndoRecord;
-  return safeVaultPath(record.path) && record.path.endsWith('.md')
-    && (record.before === null || typeof record.before === 'string') && typeof record.after === 'string'
-    && typeof record.createdAt === 'string';
+  const validEntry = (entry: import('./types').FileChange): boolean => safeVaultPath(entry.path) && entry.path.endsWith('.md')
+    && (entry.before === null || typeof entry.before === 'string') && typeof entry.after === 'string'
+    && (entry.restored === undefined || typeof entry.restored === 'string');
+  return validEntry(record) && typeof record.createdAt === 'string'
+    && (record.entries === undefined || (Array.isArray(record.entries) && record.entries.length > 0 && record.entries.every(e => !!e && typeof e === 'object' && validEntry(e)) && new Set(record.entries.map(e => e.path)).size === record.entries.length));
 }
 export default class AutoScheduler extends Plugin {
   state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null };
@@ -104,8 +106,8 @@ class PreviewModal extends Modal {
     this.modalEl.addClass('auto-scheduler-modal');
     const { contentEl } = this; const { result, settings, diff } = this.preview;
     contentEl.createEl('h2', { text: '一周排程预览' });
-    contentEl.createEl('p', { text: `${this.preview.today} 起一周 · ${this.preview.timezone} · 输出：${settings.outputFile}` });
-    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，请先在输出注释中设 locked=true。勾选工作块不更新源任务。' });
+    contentEl.createEl('p', { text: `${this.preview.today} 起一周 · ${this.preview.timezone} · 输出：${settings.outputLocation === 'daily' ? settings.dailyFolder + '/YYYY-MM-DD.md' : settings.outputFile}` });
+    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，请先在工作块元数据中设 locked=true。勾选工作块不更新源任务。' });
     if (this.preview.snapshot[settings.fixedFile] === null) contentEl.createEl('p', { text: `固定日程文件不存在：${settings.fixedFile}。本次按无固定日程处理，请确认空闲时段。`, cls: 'auto-scheduler-warning' });
     if (result.errors.length) {
       contentEl.createEl('h3', { text: '需要修正的输入' }); const list = contentEl.createEl('ul');
@@ -153,13 +155,16 @@ class SchedulerSettings extends PluginSettingTab {
     const { containerEl } = this; containerEl.empty();
     const settings = this.plugin.state.settings;
     containerEl.createEl('h2', { text: 'Auto Scheduler' });
-    containerEl.createEl('p', { text: `本地时区：${timezone()}。只读源任务，预览确认后写入专用文件。初版不读取其他日历插件的事件。` });
+    containerEl.createEl('p', { text: `本地时区：${timezone()}。预览确认后写入专用文件或每日笔记的 Day planner 管理区。每日笔记中的手写时间段计入占用。` });
     const text = (name: string, description: string, value: string, update: (value: string) => Partial<Settings>): void => {
       new Setting(containerEl).setName(name).setDesc(description).addText(input => input.setValue(value).onChange(value => { void this.plugin.updateSettings(update(value.trim())); }));
     };
     text('任务目录', '库内目录，仅扫描该目录下 Markdown', settings.taskFolder, taskFolder => ({ taskFolder }));
     text('固定日程文件', '格式：- YYYY-MM-DD HH:mm-HH:mm 标题；不存在时按空日程处理', settings.fixedFile, fixedFile => ({ fixedFile }));
     text('输出文件', '专用 Markdown；已有普通笔记不会被接管', settings.outputFile, outputFile => ({ outputFile }));
+    new Setting(containerEl).setName('输出位置').addDropdown(input => input.addOption('single', '专用文件').addOption('daily', '每日笔记：Day planner').setValue(settings.outputLocation).onChange(value => { void this.plugin.updateSettings({ outputLocation: value as Settings['outputLocation'] }); }));
+    text('每日笔记目录', 'YYYY-MM-DD.md；保留 Day planner 下的手写内容和其他章节', settings.dailyFolder, dailyFolder => ({ dailyFolder }));
+    text('Gantt 任务前缀', '与 Gantt Calendar 的全局任务过滤器一致，默认 🎯；可清空', settings.ganttFilter, ganttFilter => ({ ganttFilter }));
     text('工作日', '逗号分隔：0 为周日，1 为周一，…，6 为周六', Array.isArray(settings.weekdays) ? settings.weekdays.join(',') : String(settings.weekdays), value => ({ weekdays: value.split(',').map(v => v.trim() ? Number(v.trim()) : NaN) }));
     text('工作时段', '逗号分隔，如 09:00-12:00,14:00-18:00；15 分钟网格', Array.isArray(settings.periods) ? settings.periods.join(',') : String(settings.periods), value => ({ periods: value.split(',').map(v => v.trim()) }));
     for (const [field, name, description] of [
@@ -167,7 +172,7 @@ class SchedulerSettings extends PluginSettingTab {
       ['fixedBuffer', '固定日程两侧缓冲', '分钟，15 的倍数，可设 0'],
       ['blockBuffer', '工作块后缓冲', '分钟，15 的倍数，可设 0'],
     ] as const) text(name, description, String(settings[field]), value => ({ [field]: value ? Number(value) : NaN }));
-    new Setting(containerEl).setName('输出格式').setDesc('Day Planner 模式使用复选框工作块及 scheduled 日期；不会修改源任务或每日笔记。').addDropdown(input => input.addOption('plain', '普通 Markdown 列表').addOption('day-planner', 'Day Planner').setValue(settings.outputMode).onChange(value => { void this.plugin.updateSettings({ outputMode: value as Settings['outputMode'] }); }));
-    containerEl.createEl('p', { text: '工作块需保留完整 as-block 注释。改变设置后重新预览；剩余用时请在源任务中维护。' });
+    new Setting(containerEl).setName('输出格式').setDesc('Gantt 使用完整 start/scheduled/due 日期时间；每日模式请选择 Day Planner 或 Gantt。').addDropdown(input => input.addOption('plain', '普通 Markdown 列表').addOption('day-planner', 'Day Planner').addOption('gantt', 'Gantt Calendar（Dataview）').setValue(settings.outputMode).onChange(value => { void this.plugin.updateSettings({ outputMode: value as Settings['outputMode'] }); }));
+    containerEl.createEl('p', { text: '工作块需保留完整 as-block 注释或结构化元数据。Gantt 锁定字段为 locked=true。改变设置后重新预览；剩余用时请在源任务中维护。' });
   }
 }
