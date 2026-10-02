@@ -10,14 +10,20 @@ export interface LlmReply { text: string; tasks: TaskDraft[]; habits: HabitDraft
 export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<{ status: number; json: unknown }>;
 const properties = {
   title: { type: 'string', description: 'Single-line task name without Markdown or management fields' },
-  minutes: { type: 'integer', description: 'User-confirmed duration in minutes, a multiple of 15' },
+  minutes: { type: ['integer', 'null'], description: 'Explicit duration in minutes, a multiple of 15; null if unspecified, to use the configured default' },
   priority: { type: 'integer', enum: [1, 2, 3, 4, 5] }, split: { type: 'boolean' },
-  minMinutes: { type: 'integer', description: 'Minimum block duration in minutes, a multiple of 15' },
+  minMinutes: { type: ['integer', 'null'], description: 'Minimum block duration in minutes; null to use min(30, duration)' },
   due: { type: ['string', 'null'], description: 'Local YYYY-MM-DD or YYYY-MM-DDTHH:mm; null if unspecified' },
   earliest: { type: ['string', 'null'], description: 'Local YYYY-MM-DD or YYYY-MM-DDTHH:mm; null if unspecified' },
 };
 export const taskTool = { name: 'create_tasks', description: 'Create new tasks for host validation and local scheduling. The host chooses actual times; not all work is guaranteed to fit.', strict: true,
   parameters: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false } } }, required: ['tasks'], additionalProperties: false } };
+export const planTool = { name: 'create_plan', description: 'Schedule a mixed request containing flexible tasks, exact one-off events and/or recurring habits in one validated write. Use empty arrays for unused kinds.', strict: true,
+  parameters: { type: 'object', properties: { tasks: taskTool.parameters.properties.tasks, events: eventTool.parameters.properties.events, habits: habitTool.parameters.properties.habits }, required: ['tasks','events','habits'], additionalProperties: false } };
+/** Drop non-text control/private/unassigned code points from provider prose. */
+export function cleanModelText(text: string): string {
+  return text.replace(/[\p{Co}\p{Cs}\p{Cn}\uFFFD\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/gu, '');
+}
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid model response format');
   return value as Record<string, any>;
@@ -25,11 +31,13 @@ function object(value: unknown): Record<string, any> {
 function keys(value: Record<string, unknown>, expected: string[]): void {
   if (Object.keys(value).some(k => !expected.includes(k)) || expected.some(k => !(k in value))) throw new Error('Invalid model task fields');
 }
-export function validateDrafts(value: unknown): TaskDraft[] {
+export function validateDrafts(value: unknown, defaultDuration = 30): TaskDraft[] {
   const args = object(value); keys(args, ['tasks']);
   if (!Array.isArray(args.tasks) || !args.tasks.length || args.tasks.length > 20) throw new Error('Create 1–20 tasks per request');
   return args.tasks.map((input: unknown) => {
-    const t = object(input); keys(t, Object.keys(properties));
+    const raw = object(input); keys(raw, Object.keys(properties));
+    const t: Record<string, any> = { ...raw, minutes: raw.minutes === null ? defaultDuration : raw.minutes };
+    if (t.minMinutes === null) t.minMinutes = Math.min(30, t.minutes);
     if (typeof t.title !== 'string' || !t.title.trim() || t.title.length > 200 || /[\r\n\x00-\x1f<>\[\]%]/.test(t.title)) throw new Error('Task titles must be single-line text without management fields');
     if (!Number.isInteger(t.minutes) || t.minutes < 15 || t.minutes > 10080 || t.minutes % 15) throw new Error('Task duration must be 15–10080 minutes, in multiples of 15');
     if (!Number.isInteger(t.priority) || t.priority < 1 || t.priority > 5 || typeof t.split !== 'boolean') throw new Error('Invalid task priority or splitting settings');
@@ -79,9 +87,9 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
   if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('Configure an API key in the sidebar');
   if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('Conversation too long. Clear the chat and try again.');
   const system = `You are an Obsidian scheduling assistant. Local date and time: ${dateKey(now)} ${now.toTimeString().slice(0, 5)}. Working days: ${settings.weekdays.join(',')} (0 is Sunday); hours: ${settings.periods.join(',')}; daily capacity: ${settings.dailyCapacity} minutes.
-Use create_tasks for flexible tasks, create_events for one-off events with an exact start, and create_habits for fixed-time recurring habits. For an exact start with no duration/end, use null minutes in create_events or null end in create_habits; the host applies ${settings.defaultEventDuration} minutes and reports this assumption. Resolve today/tomorrow relative to the supplied local date; ask when the event date is ambiguous. Never turn an exact event start into a flexible earliest-start constraint. Reply in the user's language; use English by default. Ask for missing durations only when no exact start is supplied, unclear intent, or times that do not fit the 15-minute grid. Do not invent constraints. Important means priority 4; normal means 3. Unspecified dates are null. Tasks are splittable by default, with 30-minute minimum blocks (15 for shorter tasks). Unnamed courses can be Course 1 and Course 2. Do not create anything unless the user asks. Do not promise a time or claim files have been written: the host validates, schedules, and reports actual results. You cannot delete or modify existing tasks or choose output paths. The local scheduler chooses ordinary task times; habits use the user's confirmed fixed times, including outside working hours.
+Use create_plan for requests mixing action kinds so every requested item is processed together. Use create_tasks for flexible tasks, create_events for one-off events with an exact start, and create_habits for fixed-time recurring habits. For an exact start with no duration/end, use null minutes in create_events or null end in create_habits; the host applies ${settings.defaultEventDuration} minutes and reports this assumption. Resolve today/tomorrow relative to the supplied local date. When no date is supplied for a one-off event, use null date; the host uses today if its start has not passed, otherwise tomorrow, and reports that assumption. For flexible tasks, null earliest/due means the next available slot; do not ask which day unless the user gives contradictory dates. Never turn an exact event start into a flexible earliest-start constraint. Reply in the user's language; use English by default. For flexible tasks with no duration, use null minutes and null minMinutes; the host applies the same configured default and reports it. Do not ask for a duration or date merely because it is missing. Ask about contradictory intent or times that do not fit the 15-minute grid. Do not invent explicit constraints. Important means priority 4; normal means 3. Unspecified dates are null. Tasks are splittable by default, with 30-minute minimum blocks (15 for shorter tasks). Unnamed courses can be Course 1 and Course 2. Do not create anything unless the user asks. Do not promise a time or claim files have been written: the host validates, schedules, and reports actual results. You cannot delete or modify existing tasks or choose output paths. The local scheduler chooses ordinary task times; habits use the user's confirmed fixed times, including outside working hours.
 ${habitInstructions(settings)}`;
-  const tools = [taskTool, habitTool, eventTool];
+  const tools = [taskTool, habitTool, eventTool, planTool];
   const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: tools.map(tool => ({ type: 'function', ...tool })), parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
     : config.protocol === 'anthropic' ? { model: config.model, system, messages, max_tokens: 4096,
       tools: tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) }
@@ -126,11 +134,29 @@ ${habitInstructions(settings)}`;
       for (const call of message.tool_calls) calls.push(object(call.function) as { name: string; arguments: string });
     }
   }
-  if (calls.length > 1 || calls.some(c => !['create_tasks', 'create_habits', 'create_events'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('The model requested an unsupported tool call');
+  if (calls.length > 3 || new Set(calls.map(c => c.name)).size !== calls.length || (calls.length > 1 && calls.some(c => c.name === 'create_plan')) || calls.some(c => !['create_tasks', 'create_habits', 'create_events', 'create_plan'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('The model requested an unsupported tool call');
   let tasks: TaskDraft[] = []; let habits: HabitDraft[] = []; let events: EventDraft[] = []; const defaultsUsed: string[] = [];
-  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('Invalid tool argument JSON'); } if (calls[0].name === 'create_events') events = validateEvents(args);
-    else if (calls[0].name === 'create_habits') { habits = validateHabitDrafts(args, settings.defaultEventDuration); const raw = args as { habits: {end:unknown}[] }; raw.habits.forEach((h,i) => { if (h.end === null) defaultsUsed.push(habits[i].title); }); } else tasks = validateDrafts(args); }
-  const text = texts.join('\n').trim();
+  const readTasks = (args: unknown): void => {
+    tasks = validateDrafts(args, settings.defaultEventDuration);
+    const raw = args as {tasks: {minutes:unknown}[]}; raw.tasks.forEach((t,i) => { if (t.minutes === null) defaultsUsed.push(tasks[i].title); });
+  };
+  const readHabits = (args: unknown): void => {
+    habits = validateHabitDrafts(args, settings.defaultEventDuration);
+    const raw = args as {habits: {end:unknown}[]}; raw.habits.forEach((h,i) => { if (h.end === null) defaultsUsed.push(habits[i].title); });
+  };
+  for (const call of calls) {
+    let args: unknown; try { args = JSON.parse(call.arguments); } catch { throw new Error('Invalid tool argument JSON'); }
+    if (call.name === 'create_plan') {
+      const plan = object(args); keys(plan, ['tasks','habits','events']);
+      if (![plan.tasks,plan.habits,plan.events].every(Array.isArray) || ![plan.tasks,plan.habits,plan.events].some(a => a.length)) throw new Error('A plan requires at least one item');
+      if (plan.tasks.length) readTasks({tasks:plan.tasks});
+      if (plan.habits.length) readHabits({habits:plan.habits});
+      if (plan.events.length) events = validateEvents({events:plan.events});
+    } else if (call.name === 'create_events') events = validateEvents(args);
+    else if (call.name === 'create_habits') readHabits(args);
+    else readTasks(args);
+  }
+  const text = cleanModelText(texts.join('\n')).trim();
   if (text.length > 12000) throw new Error('Model reply too long. Retry with fewer tasks.');
   if (!text && !tasks.length && !habits.length && !events.length) throw new Error('The model returned no reply or action');
   return { text: text || 'Parameters received; the local scheduler will choose actual times.', tasks, habits, events, defaultsUsed };

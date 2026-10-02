@@ -6,7 +6,7 @@ import { parseHabits, HABIT_TEMPLATE } from './habits';
 import { Credentials } from './credentials';
 import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
-import { activeConfig, migrateByok, validateByok, validateProvider } from './providers';
+import { activeConfig, migrateByok, validateByok, validateProvider, modelChoices } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
 import { materializeTasks, validAiTasks } from './llm';
 import { describeAiSchedule } from './ai-result';
@@ -135,7 +135,10 @@ export default class AutoScheduler extends Plugin {
   openProvider(existing?: ProviderConfig, done?: () => void): void { new ProviderModal(this, existing, done).open(); }
   async selectModel(providerId: string, model: string): Promise<void> {
     await this.operations.run(async () => {
-      const byok = { ...this.byok, activeProviderId: providerId, activeModel: model }; validateByok(byok);
+      const provider = this.byok.providers.find(p => p.id === providerId);
+      if (!provider || !modelChoices(provider).includes(model)) throw new Error('Select an available model for this provider');
+      const providers = this.byok.providers.map(p => p.id === providerId ? { ...p, models: [...new Set([...p.models, model])] } : p);
+      const byok = { ...this.byok, providers, activeProviderId: providerId, activeModel: model }; validateByok(byok);
       const next = { ...this.state, byok, llm: activeConfig(byok) }; await this.saveData(next); this.state = next; this.refreshChats();
     });
   }
@@ -235,6 +238,51 @@ export default class AutoScheduler extends Plugin {
     });
   }
 
+  async schedulePlan(tasks: TaskDraft[], habits: HabitDraft[], drafts: EventDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
+    return this.operations.run(async () => {
+      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
+      if (this.state.aiTasks.length + tasks.length > 10000) throw new Error('AI task limit reached');
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+        outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      const now = new Date(), events = drafts.length ? resolveEvents(drafts, settings, now) : [];
+      const added = tasks.length ? materializeTasks(tasks, settings, now, crypto.randomUUID().replace(/-/g, '')) : [];
+      const updates: Record<string,string> = {}, createdHabits = new Set<string>();
+      let originalHabit: string | null = null;
+      if (habits.length) {
+        const path = habitPath(settings); originalHabit = await this.vaultPort.read(path);
+        updates[path] = appendHabits(originalHabit, habits, settings.defaultEventDuration);
+        const previous = new Set(parseHabits([{path,content:originalHabit ?? ''}], settings.defaultEventDuration).habits.map(h => h.id));
+        for (const h of parseHabits([{path,content:updates[path]}],settings.defaultEventDuration).habits) if (!previous.has(h.id)) createdHabits.add(h.id);
+      }
+      const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, added, updates, events);
+      if (habits.length && preview.snapshot[habitPath(settings)] !== originalHabit) throw new Error('Habits template changed. Send your message again.');
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
+      let backupSaved = false;
+      const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+        saveUndo: async (undo,tracking,aiTasks) => {
+          const next = { ...this.state, settings, undo, tracking:tracking ?? this.state.tracking, aiTasks:aiTasks ?? this.state.aiTasks };
+          await this.saveData(next); this.state = next; backupSaved = true;
+        } };
+      try {
+        const applied = await applyPreview(this.vaultPort, storage, preview, settings, new Date());
+        const ids = new Set(added.map(t => t.id));
+        const blocks = preview.result.blocks.filter(b => ids.has(b.taskId) || [...createdHabits].some(id => b.taskId === `habit_${id}_${b.date.replace(/-/g, '')}`));
+        const lines = ['Saved to daily notes:'];
+        for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}${e.dateDefaulted ? ' (default date: next occurrence of this time)' : ''}`);
+        for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)`);
+        if (habits.length) lines.push(`Recurring habits saved to ${habitPath(settings)}.`);
+        for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
+        if (applied.warning) lines.push(applied.warning);
+        lines.push('Run Undo last schedule to restore the entire operation.');
+        const notes = [...new Set([...events.map(e => e.date), ...blocks.map(b => b.date)])].sort().map(date => ({date,path:`${settings.dailyFolder}/${date}.md`}));
+        return {text:lines.join('\n'),notes};
+      } catch (error) {
+        if (backupSaved) throw new Error(`Plan creation did not finish; a recovery backup is saved. Inspect the notes and run Undo last schedule. ${(error as Error).message}`);
+        throw error;
+      }
+    });
+  }
+
   async scheduleEvents(drafts: EventDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
@@ -252,7 +300,7 @@ export default class AutoScheduler extends Plugin {
       try {
         const applied = await applyPreview(this.vaultPort, storage, preview, settings, new Date());
         const lines = ['Fixed events saved to daily notes:'];
-        for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}`);
+        for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}${e.dateDefaulted ? ' (default date: next occurrence of this time)' : ''}`);
         if (preview.diff.removed.length) lines.push('Existing flexible work was replanned around these events.');
         if (preview.result.unscheduled.length) lines.push('Some ordinary tasks could not fit. Adjust capacity and replan later.');
         if (applied.warning) lines.push(applied.warning);
@@ -366,7 +414,7 @@ class SchedulerSettings extends PluginSettingTab {
     containerEl.createEl('p', { text: `API key storage: ${this.plugin.credentialMode}. Cancel discards changes; keys are not written to data.json or notes.` });
     new Setting(containerEl).setName('Add provider').setDesc('Choose a template, enter your key, and select or enter model IDs.').addButton(b => b.setButtonText('Add provider').onClick(() => this.plugin.openProvider(undefined, () => this.display())));
     if (this.plugin.byok.providers.length) new Setting(containerEl).setName('Chat model').addDropdown(input => {
-      for (const provider of this.plugin.byok.providers) for (const model of provider.models) input.addOption(JSON.stringify([provider.id, model]), `${provider.name} / ${model}`);
+      for (const provider of this.plugin.byok.providers) for (const model of modelChoices(provider)) input.addOption(JSON.stringify([provider.id, model]), `${provider.name} / ${model}`);
       input.setValue(JSON.stringify([this.plugin.byok.activeProviderId, this.plugin.byok.activeModel])).onChange(value => {
         const [id, model] = JSON.parse(value); void this.plugin.selectModel(id, model).catch(error => new Notice((error as Error).message));
       });
@@ -395,7 +443,7 @@ class SchedulerSettings extends PluginSettingTab {
       ['dailyCapacity', 'Daily capacity (minutes)', 'Includes events, time blocks, and buffers within working hours'],
       ['fixedBuffer', 'Buffer around fixed events', 'Minutes, in multiples of 15; 0 is allowed'],
       ['blockBuffer', 'Buffer after time blocks', 'Minutes, in multiples of 15; 0 is allowed'],
-      ['defaultEventDuration', 'Default event duration (minutes)', 'For events or habits with only a start time; 15–1440 minutes in multiples of 15'],
+      ['defaultEventDuration', 'Default duration (minutes)', 'For tasks, events and habits without a duration; 15–1440 minutes in multiples of 15'],
     ] as const) text(name, description, String(settings[field]), value => ({ [field]: value ? Number(value) : NaN }));
     new Setting(containerEl).setName('Output format').setDesc('Gantt uses full start/scheduled/due dates. Choose Day Planner or Gantt for daily notes.').addDropdown(input => input.addOption('plain', 'Plain Markdown list').addOption('day-planner', 'Day Planner').addOption('gantt', 'Gantt Calendar（Dataview）').setValue(settings.outputMode).onChange(value => { void this.plugin.updateSettings({ outputMode: value as Settings['outputMode'] }); }));
     containerEl.createEl('p', { text: 'Metadata mode requires complete as-block fields; use locked=true to preserve a position. Clean lists keep tracking in plugin data. Preview again after changing settings.' });

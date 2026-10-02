@@ -33,7 +33,7 @@ Do not install GitHub's source-code ZIP as a plugin; it does not contain the bui
 ## Quick start
 
 1. Click the calendar-clock ribbon icon, or run **Auto Scheduler: Open AI assistant**.
-2. In **Settings → Community plugins → Auto Scheduler**, choose **Add provider**. Select its endpoint and a tool-capable model, then enter your own key if required. Model discovery is optional; exact model IDs can be entered manually. The sidebar's **Configure provider / API key** button edits the active provider.
+2. In **Settings → Community plugins → Auto Scheduler**, choose **Add provider**. Select its endpoint and a tool-capable model, then enter your own key if required. Choose a model from the list; **Refresh model list** loads provider choices. Manual IDs are an optional advanced fallback. The sidebar's **Configure provider / API key** button edits the active provider.
 
 3. Try: **“Review two courses, two hours each, high priority. Please schedule them.”**
 4. Use the **Model** selector above the conversation to switch between saved providers and models. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
@@ -52,7 +52,7 @@ For offline scheduling, configure **Output location → Daily notes: Day planner
 
 Run **Preview weekly schedule**, inspect the result, then select **Apply schedule**. Ordinary tasks without explicit IDs and estimates are left alone.
 
-A start-only request such as **“Exercise tomorrow at 19:00”** reserves **19:00–19:30** by default. Change **Default event duration (minutes)** in plugin settings. The answer reports that assumption; an explicit duration takes precedence. Handwritten start-only daily rows and habit templates use the same setting. Conflicts or cross-midnight ranges require a correction. See [usage](docs/usage.md#events-with-only-a-start-time).
+A start-only request such as **“Exercise tomorrow at 19:00”** reserves **19:00–19:30** by default. Change **Default duration (minutes)** in plugin settings. The answer reports that assumption; an explicit duration takes precedence. Flexible tasks without an estimate also use this default and report the assumption. An undated appointment uses the next occurrence of its start time. Mixed requests schedule every kind in one operation. Handwritten start-only daily rows and habit templates use the same setting. Conflicts or cross-midnight ranges require a correction. See [usage](docs/usage.md#events-with-only-a-start-time).
 
 ## Examples
 

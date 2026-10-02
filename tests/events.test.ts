@@ -86,3 +86,8 @@ it('refuses an unclosed daily code fence that would hide the new event',async()=
   expect(p.result.errors.some(e=>e.message.includes('hide new events'))).toBe(true);
   await expect(applyPreview(v,v,p,settings,now)).rejects.toThrow('errors');expect(v.writes).toBe(0);
 });
+
+it('defaults an unspecified event date to the next occurrence and reports it',()=>{
+  expect(resolveEvents([{...event,date:null}],settings,now)[0]).toMatchObject({date:'2026-10-01',dateDefaulted:true});
+  expect(resolveEvents([{...event,date:null,start:'07:00'}],settings,now)[0]).toMatchObject({date:'2026-10-02',dateDefaulted:true});
+});

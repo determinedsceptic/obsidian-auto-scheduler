@@ -108,3 +108,24 @@ describe('AI tasks daily transaction', () => {
     await expect(applyPreview(vault, vault, blocked, noWork, now)).rejects.toThrow('No blocks can be written'); expect(vault.aiTasks).toEqual([]);
   });
 });
+
+it.each(['responses','chat-completions','anthropic','gemini'] as const)('uses a host default for flexible tasks through %s without asking duration/date',async protocol=>{
+  const tasks=[{title:'Get a phone number',minutes:null,priority:3,split:true,minMinutes:null,due:null,earliest:null}];
+  const call={name:'create_tasks',arguments:JSON.stringify({tasks})};
+  const json=protocol==='responses'?{output:[{type:'function_call',...call}]}:protocol==='chat-completions'?{choices:[{finish_reason:'tool_calls',message:{tool_calls:[{type:'function',function:call}]}}]}:protocol==='anthropic'?{stop_reason:'tool_use',content:[{type:'tool_use',name:call.name,input:{tasks}}]}:{candidates:[{finishReason:'STOP',content:{parts:[{functionCall:{name:call.name,args:{tasks}}}]}}]};
+  const r=await chat({protocol,baseUrl:'https://example.test/v1',model:'fixture'},'test-only',messages,config({defaultEventDuration:45}),now,async(_,__,body)=>{
+    expect(body).toContain('Do not ask for a duration or date merely because it is missing');return {status:200,json};
+  });
+  expect(r.tasks[0]).toMatchObject({minutes:45,minMinutes:30,due:null,earliest:null});expect(r.defaultsUsed).toEqual(['Get a phone number']);
+});
+it('removes noncharacters, private-use glyphs, broken surrogates and replacement characters from model prose',async()=>{
+  const r=await chat(DEFAULT_LLM,'test-only',messages,config(),now,async()=>({status:200,json:{output:[{type:'message',content:[{type:'output_text',text:'安排健身 🏋️ 19:00\u{5ffff}\u{e000}\ud800\ufffd'}]}]}}));
+  expect(r.text).toBe('安排健身 🏋️ 19:00');
+});
+
+it('validates a mixed plan with a default-duration task and an undated exact event',async()=>{
+  const plan={tasks:[{title:'Phone number',minutes:null,minMinutes:null,priority:3,split:true,due:null,earliest:null}],events:[{title:'Gym',date:null,start:'11:30',minutes:60}],habits:[]};
+  const r=await chat(DEFAULT_LLM,'test-only',messages,config(),now,async()=>({status:200,json:{output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify(plan)}]}}));
+  expect(r.tasks[0].minutes).toBe(30);expect(r.events[0].date).toBeNull();expect(r.events[0].minutes).toBe(60);expect(r.defaultsUsed).toEqual(['Phone number']);
+  await expect(chat(DEFAULT_LLM,'test-only',messages,config(),now,async()=>({status:200,json:{output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify({tasks:[],habits:[],events:[]})}]}}))).rejects.toThrow('at least one');
+});

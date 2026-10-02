@@ -7,7 +7,7 @@ A TypeScript Obsidian plugin with an esbuild CommonJS bundle. Runtime imports on
 | `main.ts` | Lifecycle, commands, settings, native vault adapter, and serialized operations. |
 | `chat-view.ts`, `provider-modal.ts` | Sidebar conversation, copying, and BYOK setup. |
 | `providers.ts`, `credentials.ts` | Provider/model routing, discovery, isolated host Keychain or session credentials. |
-| `llm.ts` | Four transport schemas and strict task/habit/event tool dispatch. |
+| `llm.ts` | Four transport schemas and strict task/habit/event/mixed-plan tool dispatch. |
 | `habit-tool.ts`, `skills/habits/SKILL.md` | Bundled model instructions, host-controlled paths, validated template creation. |
 | `parser.ts`, `calendar-format.ts` | Source estimates, event syntax, Tasks/Dataview compatibility. |
 | `event-tool.ts` | Exact one-off events, nullable duration defaults, local date/time validation. |

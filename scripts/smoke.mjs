@@ -7,14 +7,30 @@ process.env.TZ = 'Asia/Shanghai';
 const notices = []; let saved = null; let latestModal;
 let mockResponse; const requests = []; const openedNotes = [];
 class Node {
-  constructor(tag = '', options = {}) { this.tag = tag; this.options = options; this.children = []; this.events = {}; }
+  constructor(tag = '', options = {}) { this.tag = tag; this.options = options; this.children = []; this.events = {}; this.value = options.value ?? ''; }
   createEl(tag, options) { const node = new Node(tag, options); this.children.push(node); return node; }
   createDiv(options) { return this.createEl('div', options); }
   createSpan(options) { return this.createEl('span', options); }
   addEventListener(name, callback) { this.events[name] = callback; }
   addClass() {}
+  replaceChildren() { this.children = []; }
+  querySelectorAll() { return this.all().filter(n => ['input','select','textarea'].includes(n.tag)); }
   empty() { this.children = []; }
   all() { return [this, ...this.children.flatMap(child => child.all())]; }
+}
+class Setting {
+  constructor(container) { this.node = container.createDiv({}); }
+  setName(name) { this.node.options.settingName = name; return this; }
+  setDesc() { return this; }
+  control(tag, callback, prop) {
+    const node = this.node.createEl(tag, {});
+    const c = { [prop]: node, setValue(v) { node.value = v; return this; }, onChange(fn) { node.events.change = () => fn(node.value); return this; }, setDisabled(v) { node.disabled = v; return this; }, addOption(value, text) { node.createEl('option', {text,value}); return this; } };
+    callback(c); return this;
+  }
+  addDropdown(fn) { return this.control('select', fn, 'selectEl'); }
+  addText(fn) { return this.control('input', fn, 'inputEl'); }
+  addTextArea(fn) { return this.control('textarea', fn, 'inputEl'); }
+  addToggle(fn) { return this.control('input', fn, 'toggleEl'); }
 }
 class TFile { constructor(path) { this.path = path; } }
 class TFolder { constructor(path) { this.path = path; } }
@@ -44,7 +60,7 @@ vm.runInNewContext(await readFile('main.js', 'utf8'), {
   module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
-    return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting: class {},
+    return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting,
       requestUrl: async request => { requests.push(request); return { status: 200, json: mockResponse }; },
       Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
   },
@@ -278,3 +294,52 @@ const eventRestart = new AutoScheduler(app); await eventRestart.onload();
 eventRestart.commands.find(c => c.id === 'undo-last').callback(); await eventRestart.operations.tail;
 assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
 console.log('PASS: actual chat start-only fixed events, configurable default, clean note, navigation, no preview modal and restart undo');
+
+// Ordinary tasks default locally, not only fixed appointments.
+mockResponse = { output: [{ type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [{ title: 'Get a phone number', minutes: null, minMinutes: null, priority: 3, split: true, due: null, earliest: null }] }) }] };
+await eventView.send('Please schedule getting a phone number');
+assert(eventView.messages.at(-1).content.includes('Default duration (45 min) used for: Get a phone number'));
+assert.equal(saved.aiTasks[0].remaining, 45);
+// Discovery directly populates the dropdown and persists its choices; manual IDs are collapsed.
+eventChat.openProvider(eventChat.byok.providers.find(p => p.id === eventChat.byok.activeProviderId));
+let providerModal = latestModal;
+let advanced = providerModal.contentEl.all().find(n => n.tag === 'details');
+assert(advanced); assert(!advanced.open);
+mockResponse = { data: [{ id: 'discovered-fast' }, { id: 'discovered-pro' }] };
+await providerModal.test();
+let modelSetting = providerModal.contentEl.all().find(n => n.options.settingName === 'Model for chat');
+let dropdown = modelSetting.all().find(n => n.tag === 'select');
+assert(dropdown.children.some(n => n.options.value === 'discovered-pro'), providerModal.status);
+dropdown.value = 'discovered-pro'; dropdown.events.change();
+await providerModal.save();
+assert.equal(saved.byok.activeModel, 'discovered-pro');
+assert(saved.byok.providers.find(p => p.id === 'event-fixture').models.includes('discovered-fast'));
+// A legacy one-model OpenAI provider can select another preset directly from the sidebar.
+await eventChat.saveProvider({ id:'openai-fixture',name:'OpenAI',protocol:'responses',baseUrl:'https://api.openai.com/v1',requiresKey:false,models:['gpt-6-luna'] },'');
+eventView.refresh();
+const legacyPicker = eventView.contentEl.all().find(n => n.tag === 'select' && n.options.attr?.['aria-label'] === 'Chat model');
+assert(legacyPicker.children.some(n => n.options.text === 'OpenAI / gpt-6-sol'));
+await eventChat.selectModel('openai-fixture','gpt-6-sol');assert.equal(saved.byok.activeModel,'gpt-6-sol');
+console.log('PASS: flexible-task default reported, discovered-model dropdown save, collapsed manual fallback, legacy provider preset selection');
+
+saved = null; files.clear(); folders.clear();
+const mixedChat = new AutoScheduler(app); await mixedChat.onload();
+await mixedChat.saveProvider({id:'mixed-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
+const mixedView = mixedChat.views.get('auto-scheduler-chat')({}); await mixedView.onOpen();
+mockResponse = {output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify({
+  tasks:[{title:'Phone number',minutes:null,minMinutes:null,priority:3,split:true,due:null,earliest:null}],
+  events:[{title:'Gym',date:null,start:'11:30',minutes:60}],
+  habits:[{title:'Read',start:'19:00',end:null,days:[0,1,2,3,4,5,6],priority:3}]
+})}]};
+await mixedView.send('Gym at 11:30 for an hour, get a phone number, and read every evening at 19:00');
+assert(mixedView.messages.at(-1).content.includes('default date: next occurrence'));
+assert(mixedView.messages.at(-1).content.includes('Default duration (30 min) used for: Phone number, Read'));
+assert(files.get('DailyNotes/2026-10-01.md').includes('11:30 - 12:30 Gym'));
+assert(files.get('DailyNotes/2026-10-01.md').includes('Phone number'));
+assert(files.get('Habits/AI-Habits.md').includes('19:00-19:30'));
+assert.equal(saved.aiTasks[0].remaining,30);
+const mixedRestart = new AutoScheduler(app); await mixedRestart.onload();
+mixedRestart.commands.find(c => c.id === 'undo-last').callback(); await mixedRestart.operations.tail;
+assert.equal(saved.aiTasks.length,0);assert.equal(files.get('Habits/AI-Habits.md'),'');
+assert.equal(files.get('DailyNotes/2026-10-01.md'),'# Day planner\n');
+console.log('PASS: mixed plan preserves exact gym time, defaults phone task/habit durations and event date, writes all kinds together and undoes after restart');

@@ -1,6 +1,7 @@
 import { ItemView, Notice, requestUrl, WorkspaceLeaf } from 'obsidian';
 import type AutoScheduler from './main';
 import { chat, endpoint } from './llm';
+import { modelChoices } from './providers';
 import type { ChatMessage } from './llm';
 import type { ScheduledNote } from './ai-result';
 export const CHAT_VIEW = 'auto-scheduler-chat';
@@ -26,7 +27,7 @@ export class ChatView extends ItemView {
       const picker = header.createEl('label', { cls: 'auto-scheduler-chat-model' });
       picker.createSpan({ text: 'Model' });
       const select = picker.createEl('select', { attr: { 'aria-label': 'Chat model' } });
-      for (const provider of this.plugin.byok.providers) for (const model of provider.models) {
+      for (const provider of this.plugin.byok.providers) for (const model of modelChoices(provider)) {
         const value = JSON.stringify([provider.id, model]);
         select.createEl('option', { text: `${provider.name} / ${model}`, value });
       }
@@ -56,7 +57,7 @@ export class ChatView extends ItemView {
     }
     if (this.busy) log.createEl('p', { text: 'Creating tasks and scheduling…' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
-    const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task or habit, its duration, and priority…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
+    const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task, appointment or habit…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; });
     input.disabled = this.busy;
     const actions = composer.createDiv({ cls: 'auto-scheduler-actions' });
@@ -86,7 +87,8 @@ export class ChatView extends ItemView {
       if (this.closed) return;
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
       if (reply.tasks.length || reply.habits.length || reply.events.length) {
-        const result = reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
+        const mixed = [reply.tasks, reply.habits, reply.events].filter(a => a.length).length > 1;
+        const result = mixed ? await this.plugin.schedulePlan(reply.tasks, reply.habits, reply.events, settingsKey) : reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
         if (reply.defaultsUsed.length) result.text += `\nDefault duration (${settings.defaultEventDuration} min) used for: ${reply.defaultsUsed.join(', ')}.`;
         if (!this.closed) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
         if (!this.closed && result.notes.length) {

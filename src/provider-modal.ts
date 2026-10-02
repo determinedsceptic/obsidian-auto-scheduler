@@ -1,7 +1,7 @@
 import { Modal, Notice, Setting, requestUrl } from 'obsidian';
 import type AutoScheduler from './main';
 import type { ProviderConfig } from './types';
-import { PROVIDER_TEMPLATES, discoverModels, validateProvider } from './providers';
+import { PROVIDER_TEMPLATES, discoverModels, validateProvider, modelChoices } from './providers';
 import { endpoint } from './llm';
 export class ProviderModal extends Modal {
   private draft: ProviderConfig;
@@ -9,7 +9,6 @@ export class ProviderModal extends Modal {
   private token = '';
   private clearKey = false;
   private discovered: string[] = [];
-  private search = '';
   private busy = false;
   private closed = false;
   private status = '';
@@ -44,34 +43,29 @@ export class ProviderModal extends Modal {
       t.setValue(this.token).onChange(v => { this.token = v; if (v) this.clearKey = false; });
     });
     new Setting(root).setName('Clear API key').setDesc('Only clears this provider key when you save.').addToggle(t => t.setValue(this.clearKey).onChange(v => { this.clearKey = v; if (v) { this.token = ''; tokenInput.value = ''; } }));
-    const test = root.createEl('button', { text: 'Test connection and discover models' }); test.disabled = this.busy;
+    const test = root.createEl('button', { text: 'Refresh model list' }); test.disabled = this.busy;
     test.addEventListener('click', () => { void this.test(); });
     root.createEl('p', { text: this.status || 'Testing requests the model list, not an inference. A successful list does not guarantee tool calling.', attr: { 'aria-live': 'polite' } });
-    let modelInput: HTMLTextAreaElement;
-    new Setting(root).setName('Model IDs').setDesc('One per line. Enter IDs manually if model discovery is unavailable.').addTextArea(t => {
-      modelInput = t.inputEl; t.inputEl.rows = 4; t.setValue(this.draft.models.join('\n')).onChange(v => { this.draft.models = [...new Set(v.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]; refreshModels(); });
-    });
     let modelSelect: HTMLSelectElement;
     const refreshModels = (): void => {
-      if (!this.draft.models.includes(this.selectedModel)) this.selectedModel = this.draft.models[0] ?? '';
+      const choices = modelChoices(this.draft, this.discovered);
+      if (!choices.includes(this.selectedModel)) this.selectedModel = choices[0] ?? '';
       modelSelect.replaceChildren();
-      for (const model of this.draft.models) modelSelect.createEl('option', { text: model, value: model });
+      if (!choices.length) modelSelect.createEl('option', { text: 'Refresh model list to choose a model', value: '' });
+      for (const model of choices) modelSelect.createEl('option', { text: model, value: model });
       modelSelect.value = this.selectedModel;
-      modelSelect.disabled = this.busy || !this.draft.models.length;
+      modelSelect.disabled = this.busy || !choices.length;
     };
-    new Setting(root).setName('Model for chat').setDesc('Choose which saved model to use now; change it later in the assistant sidebar.').addDropdown(d => {
+    new Setting(root).setName('Model for chat').setDesc('Select from preset, saved or discovered models. Refresh the model list above to load models from your provider.').addDropdown(d => {
       modelSelect = d.selectEl;
-      for (const model of this.draft.models) d.addOption(model, model);
-      d.setValue(this.selectedModel).onChange(value => { this.selectedModel = value; });
-      d.setDisabled(this.busy || !this.draft.models.length);
+      d.onChange(value => { this.selectedModel = value; });
     });
-    if (this.discovered.length) {
-      const list = root.createDiv({ cls: 'auto-scheduler-model-list' });
-      const display = (): void => { list.empty(); const choices = this.discovered.filter(m => m.toLowerCase().includes(this.search.toLowerCase())).slice(0, 100);
-        for (const model of choices) new Setting(list).setName(model).addToggle(t => t.setValue(this.draft.models.includes(model)).onChange(v => { this.draft.models = v ? [...new Set([...this.draft.models, model])] : this.draft.models.filter(m => m !== model); modelInput.value = this.draft.models.join('\n'); refreshModels(); }));
-      };
-      new Setting(root).setName('Search discovered models').setDesc('Shows up to 100 matches; filter and choose your models.').addText(t => t.setValue(this.search).onChange(v => { this.search = v; display(); })); display();
-    }
+    refreshModels();
+    const advanced = root.createEl('details');
+    advanced.createEl('summary', { text: 'Advanced: custom model IDs' });
+    new Setting(advanced).setName('Custom model IDs').setDesc('Optional fallback when your provider cannot return a model list. One ID per line.').addTextArea(t => {
+      t.inputEl.rows = 3; t.setValue(this.draft.models.join('\n')).onChange(v => { this.draft.models = [...new Set(v.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]; refreshModels(); });
+    });
     const actions = root.createDiv({ cls: 'auto-scheduler-actions' });
     const save = actions.createEl('button', { text: 'Save provider', cls: 'mod-cta' }); save.disabled = this.busy;
     save.addEventListener('click', () => { void this.save(); });
@@ -94,6 +88,8 @@ export class ProviderModal extends Modal {
     if (this.busy) return;
     this.busy = true; this.render();
     try {
+      if (!this.selectedModel || !modelChoices(this.draft, this.discovered).includes(this.selectedModel)) throw new Error('Refresh the model list and select a model first');
+      this.draft.models = [...new Set([this.selectedModel, ...this.draft.models, ...this.discovered])].slice(0, 100);
       validateProvider(this.draft); endpoint({ ...this.draft, model: this.draft.models[0] });
       const key = await this.candidateKey();
       if (this.draft.requiresKey && !key) throw new Error('This provider requires an API key');

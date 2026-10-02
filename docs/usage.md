@@ -4,7 +4,7 @@
 
 All paths are relative to the vault. Hidden folders and `..` are rejected.
 
-To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Scheduler → Add provider**, choose **DeepSeek**, enter your DeepSeek API key, and select **Model for chat** before saving. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Switch between saved models or providers with the **Model** selector above the sidebar conversation; **Chat model** in plugin settings remains available. The sidebar's **Configure provider / API key** button edits the active provider. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
+To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Scheduler → Add provider**, choose **DeepSeek**, enter your DeepSeek API key, and select **Model for chat** from the list before saving. **Refresh model list** loads provider models directly into that dropdown; the manual-ID fallback is collapsed under **Advanced: custom model IDs**. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Switch between saved models or providers with the **Model** selector above the sidebar conversation; **Chat model** in plugin settings remains available. The sidebar's **Configure provider / API key** button edits the active provider. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Sched
 | Working days | `1,2,3,4,5` | Monday through Friday; `0` means Sunday. |
 | Working hours | `09:00-12:00,14:00-18:00` | Local time, 15-minute grid. |
 | Daily capacity | 360 minutes | Occupied time and buffers inside working hours. |
-| Default event duration | 30 minutes | Used when an event or habit has only a start time; 15–1440 minutes, in multiples of 15. |
+| Default duration | 30 minutes | Used when a task, event or habit has no explicit duration; 15–1440 minutes, in multiples of 15. |
 | Event buffer | 15 minutes | Before and after fixed events. |
 | Block buffer | 15 minutes | After each task or habitual block. |
 
@@ -56,7 +56,7 @@ Daily-note mode also reads handwritten time ranges under `# Day planner`, outsid
 
 ## Events with only a start time
 
-Ask **“Exercise tomorrow at 19:00.”** The AI calls `create_events` with an unspecified duration; the host uses **Default event duration**, initially 30 minutes. The reply reports the actual date, **19:00–19:30**, and the default-duration assumption, then opens the daily note. An explicit duration or end time takes precedence. An ambiguous date prompts a follow-up question.
+Ask **“Exercise tomorrow at 19:00.”** The AI calls `create_events` with an unspecified duration; the host uses **Default duration**, initially 30 minutes. The reply reports the actual date, **19:00–19:30**, and the default-duration assumption, then opens the daily note. An explicit duration or end time takes precedence. If a one-off event has no date, the host uses the next occurrence of its start time (today or tomorrow) and reports the assumption. Contradictory dates still require clarification.
 
 One-off events retain their exact start even outside working hours. Flexible work is replanned around them. A conflict with an existing event, habit, protected block, or event buffer rejects the operation before any note changes. Cross-midnight intervals are rejected; specify a shorter same-day duration. Chat-created one-off events must start within the next seven local dates and cannot be in the past. Times use the existing 15-minute grid.
 
@@ -69,7 +69,7 @@ Start-only handwritten rows also reserve the configured default without rewritin
 
 The fixed-events file accepts `- 2026-10-05 11:30 Appointment`. Habit templates accept `- 19:00 Exercise (Mon, Wed, Fri)`. Recurring AI habits may omit duration too: the host writes an explicit end time to their template and reports the default. Changing the setting changes how handwritten start-only rows are interpreted on the next replan; saved AI events and habits already have explicit end times.
 
-One-off event rows are ordinary fixed appointments; edit them directly in the daily note. They are not flexible AI tasks or generated habit occurrences. Unspecified duration in an ordinary flexible task still requires clarification.
+One-off event rows are ordinary fixed appointments; edit them directly in the daily note. They are not flexible AI tasks or generated habit occurrences. Ordinary flexible tasks without an estimate use the same configured default, reported in the answer. With no date, they use the next available working slot. Mixed requests use one validated operation for tasks, events and habits, with a shared undo backup.
 
 ## Habits
 

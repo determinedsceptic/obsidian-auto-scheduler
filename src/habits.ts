@@ -16,7 +16,7 @@ Add time-based list items outside code fences to enable habits. Without a recurr
 Use (every day), (weekdays), (weekends), or a list such as (Mon, Wed, Fri).
 Priority symbols: 🔺 highest, ⏫ high, 🔼 normal, 🔽 low, ⏬ lowest. Omit for normal priority.
 Times must be within one day on a 15-minute grid. Habits reserve time before ordinary tasks.
-Start-only rows use the configured Default event duration (30 minutes initially).
+Start-only rows use the configured Default duration (30 minutes initially).
 
 Examples below are inactive. Copy a line outside this code fence to enable it:
 

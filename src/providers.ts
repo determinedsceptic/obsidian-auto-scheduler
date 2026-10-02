@@ -12,6 +12,12 @@ export const PROVIDER_TEMPLATES: Record<string, ProviderTemplate> = {
   lmstudio: { name: 'LM Studio', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: [] },
   custom: { name: 'Custom provider', protocol: 'chat-completions', baseUrl: '', requiresKey: true, models: [] },
 };
+/** Include built-in choices for existing providers without changing their active model. */
+export function modelChoices(p: ProviderConfig, discovered: string[] = []): string[] {
+  const canonical = (url: string): string => url.replace(/\/+$/, '');
+  const preset = Object.values(PROVIDER_TEMPLATES).find(t => t.protocol === p.protocol && canonical(t.baseUrl) === canonical(p.baseUrl));
+  return [...new Set([...p.models, ...(preset?.models ?? []), ...discovered])];
+}
 const safeId = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9-]{1,32}$/.test(v);
 export function providerConfig(provider: ProviderConfig, model: string): LlmSettings {
   return { protocol: provider.protocol, baseUrl: provider.baseUrl, model, requiresKey: provider.requiresKey };

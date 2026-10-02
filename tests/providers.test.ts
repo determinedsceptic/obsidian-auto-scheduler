@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Credentials } from '../src/credentials';
-import { activeConfig, discoverModels, migrateByok, providerConfig, PROVIDER_TEMPLATES, validateByok, validateProvider } from '../src/providers';
+import { activeConfig, modelChoices, discoverModels, migrateByok, providerConfig, PROVIDER_TEMPLATES, validateByok, validateProvider } from '../src/providers';
 import { DEFAULT_LLM } from '../src/types';
 import type { ProviderConfig } from '../src/types';
 import { chat } from '../src/llm';
@@ -122,4 +122,11 @@ describe('credential isolation and compatibility', () => {
     const c = new Credentials('vault-one', { getSecret: () => { throw new Error('test-secret'); }, setSecret: () => { throw new Error('test-secret'); } });
     await expect(c.get('a')).rejects.toThrow('Could not read Obsidian Keychain'); await expect(c.set('a', 'test-only')).rejects.toThrow('not saved as plain text');
   });
+});
+
+it('offers preset and discovered models in lists for an existing single-model provider',()=>{
+  const p=provider({protocol:'responses',baseUrl:'https://api.openai.com/v1/',models:['gpt-6-luna']});
+  expect(modelChoices(p,['custom-chat','gpt-6-sol'])).toEqual(['gpt-6-luna','gpt-6-sol','custom-chat']);
+  expect(p.models).toEqual(['gpt-6-luna']);
+  expect(modelChoices(provider(),['new-model'])).toEqual(['manual-model','new-model']);
 });
