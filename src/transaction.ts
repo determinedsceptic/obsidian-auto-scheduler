@@ -14,18 +14,18 @@ export interface VaultPort {
 }
 export interface StatePort { saveUndo(record: UndoRecord | null, tracking?: Tracking, aiTasks?: Task[]): Promise<void>; getTracking?(): Tracking; getAiTasks?(): Task[] }
 export interface Preview {
-  historyPaths: string[]; aiTasksBefore: Task[]; aiTasksAfter: Task[]; settings: Settings; settingsKey: string; timezone: string; today: string;
+  sourcePaths: string[]; historyPaths: string[]; aiTasksBefore: Task[]; aiTasksAfter: Task[]; settings: Settings; settingsKey: string; timezone: string; today: string;
   snapshot: Record<string, string | null>; result: ScheduleResult;
   tracking: Tracking; nextTracking: Tracking; outputs?: Record<string, string>; output: string | null; diff: ReturnType<typeof diffBlocks>;
 }
 export const timezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
 function settingKey(settings: Settings): string { return JSON.stringify(settings); }
-async function snapshot(vault: VaultPort, settings: Settings, today: string, historyPaths: string[] = []): Promise<Record<string, string | null>> {
+async function snapshot(vault: VaultPort, settings: Settings, today: string, historyPaths: string[] = [], sourcePaths: string[] = []): Promise<Record<string, string | null>> {
   const targets = settings.outputLocation === 'daily' ? dailyPaths(settings, today) : [settings.outputFile];
   if (targets.includes(settings.fixedFile)) throw new Error('每日输出不能与固定日程文件相同');
   const paths = await vault.listTasks(settings.taskFolder, [settings.fixedFile, ...(settings.outputLocation === 'single' ? targets : [])]);
   const habitPaths = await vault.listTasks(settings.habitFolder, []);
-  const all = [...new Set([...paths, ...habitPaths, settings.fixedFile, ...targets, ...historyPaths])].sort();
+  const all = [...new Set([...paths, ...habitPaths, settings.fixedFile, ...targets, ...historyPaths, ...sourcePaths])].sort();
   const contents = await Promise.all(all.map(async path => [path, await vault.read(path)] as const));
   return Object.fromEntries(contents);
 }
@@ -33,13 +33,16 @@ function same(a: Record<string, string | null>, b: Record<string, string | null>
   const keys = Object.keys(a).sort();
   return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every(key => a[key] === b[key]);
 }
-export async function createPreview(vault: VaultPort, settings: Settings, now = new Date(), tracking: Tracking = {}, formatOnly = false, aiTasks: Task[] = [], addedTasks: Task[] = []): Promise<Preview> {
+export async function createPreview(vault: VaultPort, settings: Settings, now = new Date(), tracking: Tracking = {}, formatOnly = false, aiTasks: Task[] = [], addedTasks: Task[] = [], habitUpdates: Record<string, string> = {}): Promise<Preview> {
   const frozen: Settings = JSON.parse(JSON.stringify(settings)) as Settings;
   const invalid = validateSettings(frozen);
   if (invalid.length) throw new Error(invalid.join('\n'));
   const today = dateKey(now);
   const historyPaths = aiTasks.length && frozen.outputLocation === 'daily' ? Object.keys(tracking).filter(p => safeVaultPath(p) && p.startsWith(frozen.dailyFolder + '/') && /\/\d{4}-\d{2}-\d{2}\.md$/.test(p) && p.slice(-13, -3) < today) : [];
-  const inputs = await snapshot(vault, frozen, today, historyPaths);
+  const sourcePaths = Object.keys(habitUpdates);
+  if (formatOnly && sourcePaths.length) throw new Error('格式清理不能修改习惯');
+  if (sourcePaths.some(p => !safeVaultPath(p) || !p.startsWith(frozen.habitFolder + '/') || !p.endsWith('.md'))) throw new Error('习惯工具只能写入配置的习惯目录');
+  const inputs = await snapshot(vault, frozen, today, historyPaths, sourcePaths);
   const targets = frozen.outputLocation === 'daily' ? dailyPaths(frozen, today) : [frozen.outputFile];
   const trackingSnapshot: Tracking = JSON.parse(JSON.stringify(tracking));
   const virtual = { ...inputs };
@@ -71,12 +74,12 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     return { ...t, remaining, min: Math.min(t.min, remaining), completed: t.completed || remaining === 0 };
   }));
   if (parsed.tasks.some(t => isHabit(t.id))) parsed.errors.push({ path: frozen.taskFolder, line: 0, message: 'habit_ 是习惯实例的保留 ID 前缀' });
-  const habits = parseHabits(Object.entries(inputs).filter(([path]) => path.startsWith(frozen.habitFolder + '/')).map(([path, content]) => ({ path, content: content ?? '' })));
+  const habits = parseHabits(Object.entries({ ...inputs, ...habitUpdates }).filter(([path]) => path.startsWith(frozen.habitFolder + '/')).map(([path, content]) => ({ path, content: content ?? '' })));
   parsed.errors.push(...habits.errors, ...dailyErrors, ...[...daily.values()].flatMap(d => d.errors));
   const fixed = parseFixed({ path: frozen.fixedFile, content: inputs[frozen.fixedFile] ?? '' });
   fixed.intervals.push(...[...daily.values()].flatMap(d => d.intervals));
   const preview: Preview = {
-    historyPaths, aiTasksBefore: JSON.parse(JSON.stringify(aiTasks)), aiTasksAfter: allAiTasks, settings: frozen, settingsKey: settingKey(frozen), timezone: timezone(), today: dateKey(now),
+    sourcePaths, historyPaths, aiTasksBefore: JSON.parse(JSON.stringify(aiTasks)), aiTasksAfter: allAiTasks, settings: frozen, settingsKey: settingKey(frozen), timezone: timezone(), today: dateKey(now),
     tracking: trackingSnapshot, nextTracking: { ...trackingSnapshot }, snapshot: inputs, result: { blocks: [], unscheduled: [], days: [], errors: [...parsed.errors, ...fixed.errors] },
     output: null, diff: { added: [], removed: [], retained: [] },
   };
@@ -93,7 +96,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     result.errors.unshift(...parsed.errors, ...fixed.errors); preview.result = result;
     if (!result.errors.length) {
       const plainSourceIds = new Set([...allAiTasks.map(t => t.id), ...oldBlocks.filter(b => isHabit(b.taskId)).map(b => b.taskId), ...expanded.tasks.map(t => t.id)]);
-      preview.outputs = {};
+      preview.outputs = { ...habitUpdates };
       for (const [path, document] of Object.entries(documents)) {
         const blocks = frozen.outputLocation === 'daily' ? result.blocks.filter(b => path.endsWith(`/${b.date}.md`)) : result.blocks;
         // Avoid creating empty future notes. Existing notes with blocks still get cleaned.
@@ -116,12 +119,12 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
 export async function applyPreview(vault: VaultPort, state: StatePort, preview: Preview, settings: Settings, now = new Date()): Promise<{ changed: boolean; warning?: string }> {
   if (preview.result.errors.length || preview.output === null) throw new Error('预览含错误，不能应用');
   if (preview.settingsKey !== settingKey(settings) || preview.timezone !== timezone() || preview.today !== dateKey(now)) throw new Error('设置、时区或日期已变化，请重新预览');
-  if (!same(preview.snapshot, await snapshot(vault, preview.settings, preview.today, preview.historyPaths))) throw new Error('任务、习惯模板、固定日程或输出已变化，请重新预览');
+  if (!same(preview.snapshot, await snapshot(vault, preview.settings, preview.today, preview.historyPaths, preview.sourcePaths))) throw new Error('任务、习惯模板、固定日程或输出已变化，请重新预览');
   if (state.getTracking && JSON.stringify(state.getTracking()) !== JSON.stringify(preview.tracking)) throw new Error('工作块跟踪数据已变化，请重新预览');
   if (state.getAiTasks && JSON.stringify(state.getAiTasks()) !== JSON.stringify(preview.aiTasksBefore)) throw new Error('AI 任务已变化，请重新预览');
   const outputs = preview.outputs ?? { [settings.outputFile]: preview.output };
   const entries: FileChange[] = Object.entries(outputs).filter(([path, after]) => preview.snapshot[path] !== after).map(([path, after]) => ({ path, before: preview.snapshot[path], after, trackingBefore: preview.nextTracking[path]?.before, trackingAfter: preview.nextTracking[path]?.after,
-    restored: settings.outputLocation === 'daily' && preview.snapshot[path] === null ? (settings.cleanDaily ? '# Day planner\n' : renderDaily(dailyDocument(null), [], settings.outputMode, settings.ganttFilter)) : undefined }));
+    restored: preview.sourcePaths.includes(path) && preview.snapshot[path] === null ? '' : settings.outputLocation === 'daily' && preview.snapshot[path] === null ? (settings.cleanDaily ? '# Day planner\n' : renderDaily(dailyDocument(null), [], settings.outputMode, settings.ganttFilter)) : undefined }));
   if (!entries.length) {
     if (JSON.stringify(preview.aiTasksBefore) !== JSON.stringify(preview.aiTasksAfter)) throw new Error('本周没有可写入的工作块，请调整容量或时段后重新安排');
     return { changed: false };
@@ -133,7 +136,7 @@ export async function applyPreview(vault: VaultPort, state: StatePort, preview: 
   await state.saveUndo(undo, preview.nextTracking, preview.aiTasksAfter);
   for (const entry of entries) await vault.writeChecked(entry.path, entry.before, entry.after);
   try {
-    const after = await snapshot(vault, preview.settings, preview.today, preview.historyPaths);
+    const after = await snapshot(vault, preview.settings, preview.today, preview.historyPaths, preview.sourcePaths);
     const expected = { ...preview.snapshot, ...Object.fromEntries(entries.map(e => [e.path, e.after])) };
     if (!same(expected, after)) return { changed: true, warning: '写入期间输入或输出发生变化；请检查结果，可撤销后重新预览' };
   } catch { return { changed: true, warning: '排程已写入，但写后检查失败；请检查结果，撤销备份已保存' }; }

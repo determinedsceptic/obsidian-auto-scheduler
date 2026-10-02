@@ -27,6 +27,10 @@ export class ChatView extends ItemView {
       const row = log.createDiv({ cls: `auto-scheduler-message auto-scheduler-${message.role}` });
       row.createEl('strong', { text: message.role === 'user' ? '你' : '助手' });
       row.createEl('p', { text: message.content });
+      const copy = row.createEl('button', { text: '复制', cls: 'auto-scheduler-message-copy', attr: { 'aria-label': '复制消息' } });
+      copy.addEventListener('click', () => {
+        void navigator.clipboard.writeText(message.content).then(() => { copy.textContent = '已复制'; }, () => new Notice('复制失败，请选中文字后复制'));
+      });
       if (message.notes?.length) {
         const links = row.createDiv({ cls: 'auto-scheduler-note-links' });
         for (const note of message.notes) {
@@ -66,8 +70,8 @@ export class ChatView extends ItemView {
       });
       if (this.closed) return;
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('接口或排程设置已变化，请重新发送');
-      if (reply.tasks.length) {
-        const result = await this.plugin.scheduleAi(reply.tasks, settingsKey);
+      if (reply.tasks.length || reply.habits.length) {
+        const result = reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
         if (!this.closed) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
         if (!this.closed && result.notes.length) {
           try { await this.plugin.openScheduledNote(result.notes[0].path); }

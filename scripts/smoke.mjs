@@ -37,8 +37,10 @@ class Clock extends Date {
   constructor(...args) { super(...(args.length ? args : [fixedDate])); }
   static now() { return new Date(fixedDate).getTime(); }
 }
+const clipboardCopies = [];
 const module = { exports: {} };
 vm.runInNewContext(await readFile('main.js', 'utf8'), {
+  navigator: { clipboard: { writeText: async text => { clipboardCopies.push(text); } } },
   module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
@@ -229,3 +231,25 @@ habitRestart.commands.find(c => c.id === 'undo-last').callback(); await habitRes
 assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
 assert(files.get('Habits/Template.md').includes('晚间习惯'));
 console.log('PASS: actual bundle clean habit output, restart deduplication, and undo without changing template');
+// Full chat -> skill/tool -> host -> template and schedule, without a real LLM.
+saved = null; files.clear(); folders.clear();
+const habitChat = new AutoScheduler(app); await habitChat.onload();
+await habitChat.saveProvider({ id: 'habit-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
+await habitChat.updateSettings({ habitFolder: 'Templates/Habits', fixedBuffer: 0, blockBuffer: 0 });
+const habitView = habitChat.views.get('auto-scheduler-chat')({}); await habitView.onOpen();
+const habitDraft = { title: '饭后慢走', start: '19:00', end: '19:30', days: [0,1,2,3,4,5,6], priority: 3 };
+mockResponse = { output: [{ type: 'function_call', name: 'create_habits', arguments: JSON.stringify({ habits: [habitDraft] }) }] };
+const oldModal = latestModal;
+await habitView.send('每天19点饭后慢走半小时');
+assert.equal(latestModal, oldModal); assert.equal(saved.aiTasks.length, 0);
+assert(files.get('Templates/Habits/AI-Habits.md').includes('19:00-19:30 🔼 饭后慢走（周日、周一、周二、周三、周四、周五、周六）'));
+assert(habitView.messages.at(-1).content.includes('2026-10-01 19:00–19:30：饭后慢走'));
+assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
+assert(JSON.parse(requests.at(-1).body).instructions.includes('Templates/Habits/AI-Habits.md'));
+const copyButton = habitView.contentEl.all().find(n => n.options.attr?.['aria-label'] === '复制消息');
+copyButton.events.click(); await Promise.resolve(); assert.equal(clipboardCopies.at(-1), '每天19点饭后慢走半小时');
+const css = await readFile('styles.css', 'utf8'); assert(css.includes('-webkit-user-select: text')); assert(css.includes('user-select: text'));
+const habitSaved = new AutoScheduler(app); await habitSaved.onload();
+habitSaved.commands.find(c => c.id === 'undo-last').callback(); await habitSaved.operations.tail;
+assert.equal(files.get('Templates/Habits/AI-Habits.md'), ''); assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
+console.log('PASS: actual chat habit tool uses configured path, writes recurring template and dates, copies messages, and undo restores both after restart');

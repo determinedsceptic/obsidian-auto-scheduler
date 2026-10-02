@@ -1,4 +1,6 @@
-import { HABIT_TEMPLATE } from './habits';
+import { appendHabits, habitPath } from './habit-tool';
+import type { HabitDraft } from './habit-tool';
+import { parseHabits, HABIT_TEMPLATE } from './habits';
 import { Credentials } from './credentials';
 import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
@@ -187,6 +189,44 @@ export default class AutoScheduler extends Plugin {
         return describeAiSchedule(preview, result.warning);
       } catch (error) {
         if (backupSaved) throw new Error(`排程写入未完成，可能已有部分日期写入；恢复备份已保存。请检查笔记并运行“撤销最近一次排程”。${(error as Error).message}`);
+        throw error;
+      }
+    });
+  }
+
+  async scheduleHabits(drafts: HabitDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
+    return this.operations.run(async () => {
+      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('排程设置已变化，请重新发送');
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+        outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      const path = habitPath(settings), before = await this.vaultPort.read(path);
+      const after = appendHabits(before, drafts);
+      const previous = new Set(parseHabits([{ path, content: before ?? '' }]).habits.map(h => h.id));
+      const created = new Set(parseHabits([{ path, content: after }]).habits.filter(h => !previous.has(h.id)).map(h => h.id));
+      const now = new Date();
+      const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], { [path]: after });
+      if (preview.snapshot[path] !== before) throw new Error('习惯模板已变化，请重新发送');
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}:${e.line}：${e.message}`).join('\n'));
+      let backupSaved = false;
+      const storage: StatePort = {
+        getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+        saveUndo: async (undo, tracking, aiTasks) => {
+          const next = { ...this.state, settings, undo, tracking: tracking ?? this.state.tracking, aiTasks: aiTasks ?? this.state.aiTasks };
+          await this.saveData(next); this.state = next; backupSaved = true;
+        },
+      };
+      try {
+        const applied = await applyPreview(this.vaultPort, storage, preview, settings, now);
+        const blocks = preview.result.blocks.filter(b => [...created].some(id => b.taskId === `habit_${id}_${b.date.replace(/-/g, '')}`));
+        const notes = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${settings.dailyFolder}/${date}.md` }));
+        const lines = [`已保存周期习惯到 ${path}；以后每次排程会先调用此模板。`, '已写入每日笔记：'];
+        for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}：${b.title}（重要性 ${b.priority ?? 3}/5）`);
+        if (preview.result.unscheduled.length) lines.push('部分普通任务暂时无法安排，可调整容量后重新排程。');
+        if (applied.warning) lines.push(applied.warning);
+        lines.push('运行“撤销最近一次排程”可同时恢复模板和日计划。');
+        return { text: lines.join('\n'), notes };
+      } catch (error) {
+        if (backupSaved) throw new Error(`习惯写入未完成，可能已有部分文件写入；请运行“撤销最近一次排程”。${(error as Error).message}`);
         throw error;
       }
     });

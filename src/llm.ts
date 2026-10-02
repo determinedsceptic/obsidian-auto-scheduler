@@ -1,8 +1,10 @@
+import { habitInstructions, habitTool, validateHabitDrafts } from './habit-tool';
+import type { HabitDraft } from './habit-tool';
 import type { LlmSettings, Settings, Task } from './types';
 import { dateKey, parseBoundary, safeVaultPath } from './time';
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 export interface TaskDraft { title: string; minutes: number; priority: number; split: boolean; minMinutes: number; due: string | null; earliest: string | null }
-export interface LlmReply { text: string; tasks: TaskDraft[] }
+export interface LlmReply { text: string; tasks: TaskDraft[]; habits: HabitDraft[] }
 export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<{ status: number; json: unknown }>;
 const properties = {
   title: { type: 'string', description: '单行任务名称，不含 Markdown 或管理字段' },
@@ -74,14 +76,15 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
   const url = endpoint(config);
   if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('请在侧栏填写 API 令牌');
   if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('对话过长，请清空对话后重试');
-  const system = `你是 Obsidian 任务助手。当前本地日期时间 ${dateKey(now)} ${now.toTimeString().slice(0, 5)}。工作日 ${settings.weekdays.join(',')}（0周日）；时段 ${settings.periods.join(',')}；每日容量 ${settings.dailyCapacity} 分钟。只允许调用 create_tasks 创建用户明确请求的新任务。用中文回复；缺少用时、意图不明确或不满足15分钟网格时先问用户，不自行猜测。重要=优先级4，普通=3。未指定日期设null；可拆分默认true，最小块默认30分钟（任务不足30则15）。课程未命名可用课程1、课程2。用户没有请求创建时只对话。不要猜测或承诺具体安排和已写入：工具只生成任务参数，宿主校验、排程、写入后会给出实际结果。不能删除、修改现有任务或指定输出路径，时段由本地排程器决定。`;
-  const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: [{ type: 'function', ...taskTool }], parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
+  const system = `你是 Obsidian 任务助手。当前本地日期时间 ${dateKey(now)} ${now.toTimeString().slice(0, 5)}。工作日 ${settings.weekdays.join(',')}（0周日）；时段 ${settings.periods.join(',')}；每日容量 ${settings.dailyCapacity} 分钟。允许 create_tasks 创建单次任务，create_habits 创建周期习惯。用中文回复；缺少用时、意图不明确或不满足15分钟网格时先问用户，不自行猜测。重要=优先级4，普通=3。未指定日期设null；可拆分默认true，最小块默认30分钟（任务不足30则15）。课程未命名可用课程1、课程2。用户没有请求创建时只对话。不要猜测或承诺具体安排和已写入：工具只生成任务参数，宿主校验、排程、写入后会给出实际结果。不能删除、修改现有任务或指定输出路径，时段由本地排程器决定。\n${habitInstructions(settings)}`;
+  const tools = [taskTool, habitTool];
+  const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: tools.map(tool => ({ type: 'function', ...tool })), parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
     : config.protocol === 'anthropic' ? { model: config.model, system, messages, max_tokens: 4096,
-      tools: [{ name: taskTool.name, description: taskTool.description, input_schema: taskTool.parameters }] }
+      tools: tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) }
     : config.protocol === 'gemini' ? { systemInstruction: { parts: [{ text: system }] },
       contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
-      tools: [{ functionDeclarations: [{ name: taskTool.name, description: taskTool.description, parametersJsonSchema: taskTool.parameters }] }], generationConfig: { maxOutputTokens: 4096 } }
-    : { model: config.model, messages: [{ role: 'system', content: system }, ...messages], tools: [{ type: 'function', function: taskTool }], parallel_tool_calls: false,
+      tools: [{ functionDeclarations: tools.map(tool => ({ name: tool.name, description: tool.description, parametersJsonSchema: tool.parameters })) }], generationConfig: { maxOutputTokens: 4096 } }
+    : { model: config.model, messages: [{ role: 'system', content: system }, ...messages], tools: tools.map(tool => ({ type: 'function', function: tool })), parallel_tool_calls: false,
       ...(config.model.startsWith('gpt-6') ? { reasoning_effort: 'none', max_completion_tokens: 4096 } : { max_tokens: 4096 }) };
   let timer: ReturnType<typeof setTimeout> | undefined;
   let response: Awaited<ReturnType<Transport>>;
@@ -119,11 +122,11 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
       for (const call of message.tool_calls) calls.push(object(call.function) as { name: string; arguments: string });
     }
   }
-  if (calls.length > 1 || calls.some(c => c.name !== 'create_tasks' || typeof c.arguments !== 'string')) throw new Error('模型请求了不支持的工具调用');
-  let tasks: TaskDraft[] = [];
-  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('模型任务 JSON 无效'); } tasks = validateDrafts(args); }
+  if (calls.length > 1 || calls.some(c => !['create_tasks', 'create_habits'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('模型请求了不支持的工具调用');
+  let tasks: TaskDraft[] = []; let habits: HabitDraft[] = [];
+  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('模型任务 JSON 无效'); } if (calls[0].name === 'create_habits') habits = validateHabitDrafts(args); else tasks = validateDrafts(args); }
   const text = texts.join('\n').trim();
   if (text.length > 12000) throw new Error('模型回复过长，请减少任务数量后重试');
-  if (!text && !tasks.length) throw new Error('模型未返回回复或任务');
-  return { text: text || '任务参数已生成，由本地排程器安排时间。', tasks };
+  if (!text && !tasks.length && !habits.length) throw new Error('模型未返回回复或任务');
+  return { text: text || '任务参数已生成，由本地排程器安排时间。', tasks, habits };
 }

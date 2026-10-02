@@ -1,6 +1,6 @@
 {
   "name": "obsidian-auto-scheduler",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Local, preview-first scheduling for Markdown tasks",
   "scripts": {
