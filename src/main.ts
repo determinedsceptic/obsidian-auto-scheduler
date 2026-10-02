@@ -3,7 +3,9 @@ import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
 import { activeConfig, migrateByok, validateByok, validateProvider } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
-import { endpoint, materializeTasks, validAiTasks } from './llm';
+import { materializeTasks, validAiTasks } from './llm';
+import { describeAiSchedule } from './ai-result';
+import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
 import { validTracking } from './tracking';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath } from 'obsidian';
@@ -152,17 +154,40 @@ export default class AutoScheduler extends Plugin {
       this.state = next; this.refreshChats();
     });
   }
-  async previewAi(drafts: TaskDraft[], done: () => void): Promise<void> {
-    await this.operations.run(async () => {
-      endpoint(this.state.llm);
+  async scheduleAi(drafts: TaskDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
+    return this.operations.run(async () => {
+      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('排程设置已变化，请重新发送');
       if (this.state.aiTasks.length + drafts.length > 10000) throw new Error('AI 任务数量超过上限');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const added = materializeTasks(drafts, settings, new Date(), crypto.randomUUID().replace(/-/g, ''));
-      // Keep original settings until applying: cancellation leaves them unchanged.
       const preview = await createPreview(this.vaultPort, settings, new Date(), this.state.tracking, false, this.state.aiTasks, added);
-      new PreviewModal(this.app, preview, this, done, JSON.stringify(this.state.settings)).open();
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}${e.line ? ':' + e.line : ''}：${e.message}`).join('\n'));
+      const ids = new Set(added.map(t => t.id));
+      if (!preview.result.blocks.some(b => ids.has(b.taskId))) throw new Error('未来七天没有可安排这些新任务的时间，未创建新任务。请调整工作时段、容量或截止时间后重试');
+      let backupSaved = false;
+      const storage: StatePort = {
+        getTracking: this.storage.getTracking,
+        getAiTasks: this.storage.getAiTasks,
+        saveUndo: async (undo, tracking, aiTasks) => {
+          const next = { ...this.state, settings, undo, tracking: tracking ?? this.state.tracking, aiTasks: aiTasks ?? this.state.aiTasks };
+          await this.saveData(next); this.state = next; backupSaved = true;
+        },
+      };
+      try {
+        const result = await applyPreview(this.vaultPort, storage, preview, settings);
+        return describeAiSchedule(preview, result.warning);
+      } catch (error) {
+        if (backupSaved) throw new Error(`排程写入未完成，可能已有部分日期写入；恢复备份已保存。请检查笔记并运行“撤销最近一次排程”。${(error as Error).message}`);
+        throw error;
+      }
     });
+  }
+
+  async openScheduledNote(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`日期笔记不存在：${path}`);
+    await this.app.workspace.getLeaf('tab').openFile(file);
   }
 
   async action(work: () => Promise<void>): Promise<void> {

@@ -5,6 +5,7 @@ import { webcrypto } from 'node:crypto';
 import assert from 'node:assert/strict';
 process.env.TZ = 'Asia/Shanghai';
 const notices = []; let saved = null; let latestModal;
+let mockResponse; const requests = []; const openedNotes = [];
 class Node {
   constructor(tag = '', options = {}) { this.tag = tag; this.options = options; this.children = []; this.events = {}; }
   createEl(tag, options) { const node = new Node(tag, options); this.children.push(node); return node; }
@@ -18,10 +19,10 @@ class Node {
 class TFile { constructor(path) { this.path = path; } }
 class TFolder { constructor(path) { this.path = path; } }
 class Plugin {
-  constructor(app) { this.app = app; this.commands = []; }
+  constructor(app) { this.app = app; this.commands = []; this.views = new Map(); }
   async loadData() { return saved; }
   async saveData(value) { saved = structuredClone(value); }
-  registerView() {}
+  registerView(type, factory) { this.views.set(type, factory); }
   addCommand(command) { this.commands.push(command); }
   addRibbonIcon() {}
   addSettingTab() {}
@@ -41,7 +42,8 @@ vm.runInNewContext(await readFile('main.js', 'utf8'), {
   module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
-    return { Plugin, Modal, ItemView: class {}, TFile, TFolder, PluginSettingTab: class {}, Setting: class {},
+    return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting: class {},
+      requestUrl: async request => { requests.push(request); return { status: 200, json: mockResponse }; },
       Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
   },
 });
@@ -50,7 +52,7 @@ assert.equal(typeof AutoScheduler, 'function');
 const original = '- [ ] 宿主演示 <!-- as id=host remaining=60 priority=3 -->';
 const files = new Map([['Tasks/Host.md', original]]);
 const folders = new Set(['Tasks']); let creates = 0, processes = 0;
-const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => {} }, vault: {
+const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => {}, getLeaf: () => ({ openFile: async file => { openedNotes.push(file.path); } }) }, vault: {
   getAbstractFileByPath: path => files.has(path) ? new TFile(path) : folders.has(path) ? new TFolder(path) : null,
   getMarkdownFiles: () => [...files.keys()].map(path => new TFile(path)),
   read: async file => files.get(file.path),
@@ -100,21 +102,19 @@ assert(!files.get('DailyNotes/2026-10-02.md').includes('as-block'));
 console.log('PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo');
 // Exercise the new AI entry through the real bundle without a network request.
 const aiDraft = { title: '课程复习', minutes: 120, priority: 4, split: true, minMinutes: 30, due: null, earliest: null };
-let aiApplied = false;
-await dailyRestart.previewAi([aiDraft], () => { aiApplied = true; });
-const aiApply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
-assert.equal(aiApply.disabled, false); assert.equal(saved.aiTasks.length, 0);
-aiApply.events.click(); await dailyRestart.operations.tail;
-assert(aiApplied); assert.equal(saved.aiTasks.length, 1); assert(!JSON.stringify(saved).includes('apiToken'));
+const previousModal = latestModal;
+const aiResult = await dailyRestart.scheduleAi([aiDraft]);
+assert.equal(latestModal, previousModal, 'AI scheduling must not open a modal');
+assert(aiResult.text.includes('课程复习')); assert(aiResult.notes.length > 0);
+assert.equal(saved.aiTasks.length, 1); assert(!JSON.stringify(saved).includes('apiToken'));
 assert([...files.values()].some(text => text.includes('课程复习')));
 const aiRestart = new AutoScheduler(app); await aiRestart.onload(); assert.equal(aiRestart.state.aiTasks.length, 1);
 aiRestart.commands.find(command => command.id === 'undo-last').callback(); await aiRestart.operations.tail;
 assert.equal(saved.aiTasks.length, 0); assert(![...files.values()].some(text => text.includes('课程复习')));
-console.log('PASS: real bundle AI preview/apply, persistent task restart/undo, no durable API token');
+console.log('PASS: real bundle AI direct apply without modal, persistent task restart/undo, no durable API token');
 
 // Migrate 0.2.0 data with AI sources before the first durable BYOK save.
-await aiRestart.previewAi([aiDraft], () => {});
-latestModal.contentEl.all().find(node => node.options.text === '应用排程').events.click(); await aiRestart.operations.tail;
+await aiRestart.scheduleAi([aiDraft]);
 delete saved.byok;
 const migrated = new AutoScheduler(app); await migrated.onload();
 assert.equal(migrated.state.aiTasks.length, 1); assert.equal(saved.aiTasks.length, 1); assert(saved.byok);
@@ -135,3 +135,67 @@ await assert.rejects(migrated.saveProvider({ id: 'rollback-test', name: 'Rollbac
 assert.equal(JSON.stringify(migrated.state), beforeFailedSave); assert.equal(await migrated.credentials.get('rollback-test'), '');
 migrated.saveData = originalSaveData;
 console.log('PASS: provider save failure restores prior credential and leaves model configuration unchanged');
+
+// Exercise the actual chat UI with a fake provider transport: no network or real vault.
+saved = null; files.clear(); folders.clear(); folders.add('Tasks');
+const chatPlugin = new AutoScheduler(app); await chatPlugin.onload();
+await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
+await chatPlugin.updateSettings({ weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 60, fixedBuffer: 0, blockBuffer: 0 });
+const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen();
+const draft = { ...aiDraft, minutes: 600 };
+mockResponse = { output: [
+  { type: 'message', content: [{ type: 'output_text', text: '模型猜测：明天20点完成。' }] },
+  { type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [draft] }) },
+] };
+const modalBeforeChat = latestModal;
+await chatView.send('帮我安排课程复习，预计10小时');
+assert.equal(latestModal, modalBeforeChat); assert.equal(chatView.busy, false);
+const answer = chatView.messages.at(-1);
+assert(answer.content.includes('2026-10-01 09:00–10:00：课程复习'));
+assert(answer.content.includes('剩余 180 分钟')); assert(!answer.content.includes('20点'));
+assert.equal(answer.notes.length, 7); assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
+assert([...files.values()].every(text => !text.includes('as-block') && !text.includes('scheduled::')));
+const dateLink = chatView.contentEl.all().find(node => node.tag === 'a' && node.options.text === '打开 2026-10-02');
+dateLink.events.click({ preventDefault() {} }); await Promise.resolve();
+assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-02.md');
+mockResponse = { output: [{ type: 'message', content: [{ type: 'output_text', text: '有什么需要调整的？' }] }] };
+const filesBeforeConversation = JSON.stringify([...files]);
+await chatView.send('先讨论一下');
+assert.equal(chatView.messages.at(-1).content, '有什么需要调整的？'); assert.equal(JSON.stringify([...files]), filesBeforeConversation);
+assert(JSON.parse(requests.at(-1).body).input.every(message => Object.keys(message).sort().join(',') === 'content,role'), 'Local note links leaked to provider');
+// A navigation failure must keep the committed success report and durable undo.
+const openLeaf = app.workspace.getLeaf;
+app.workspace.getLeaf = () => ({ openFile: async () => { throw new Error('navigation failed'); } });
+await chatPlugin.updateSettings({ dailyCapacity: 180 });
+mockResponse = { output: [{ type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [aiDraft] }) }] };
+await chatView.send('再安排一门课程，两小时');
+assert(chatView.messages.at(-1).content.includes('排程已写入，但打开日期笔记失败'));
+assert(chatView.messages.at(-2).content.includes('已写入每日笔记')); assert.equal(saved.aiTasks.length, 2);
+app.workspace.getLeaf = openLeaf;
+chatPlugin.commands.find(command => command.id === 'undo-last').callback(); await chatPlugin.operations.tail;
+assert.equal(saved.aiTasks.length, 1);
+// No-capacity and malformed source errors leave both files and settings unchanged.
+await chatPlugin.updateSettings({ dailyCapacity: 15 });
+const noCapacityState = JSON.stringify(saved), noCapacityFiles = JSON.stringify([...files]);
+await chatView.send('帮我安排另一个任务');
+assert(chatView.messages.at(-1).content.includes('未创建新任务'));
+assert.equal(JSON.stringify(saved), noCapacityState); assert.equal(JSON.stringify([...files]), noCapacityFiles);
+await chatPlugin.updateSettings({ dailyCapacity: 180 });
+files.set('Tasks/Invalid.md', '- [ ] 错误 <!-- as id=invalid remaining=5 -->');
+const invalidState = JSON.stringify(saved);
+await chatView.send('安排新任务');
+assert(chatView.messages.at(-1).content.includes('任务处理失败')); assert.equal(JSON.stringify(saved), invalidState);
+files.delete('Tasks/Invalid.md');
+// A batch failure after the first write must report partial state, retain backup, and undo.
+const createFile = app.vault.create, processFile = app.vault.process;
+let writesBeforeFailure = 1;
+app.vault.create = async (...args) => { if (writesBeforeFailure-- <= 0) throw new Error('write unavailable'); return createFile(...args); };
+app.vault.process = async (...args) => { if (writesBeforeFailure-- <= 0) throw new Error('write unavailable'); return processFile(...args); };
+const partialFilesBefore = new Map(files);
+await chatView.send('安排新任务');
+assert(chatView.messages.at(-1).content.includes('可能已有部分日期写入')); assert(saved.undo);
+app.vault.create = createFile; app.vault.process = processFile;
+chatPlugin.commands.find(command => command.id === 'undo-last').callback(); await chatPlugin.operations.tail;
+assert.equal(saved.aiTasks.length, 1);
+for (const [path, value] of partialFilesBefore) assert.equal(files.get(path), value);
+console.log('PASS: chat direct scheduling, exact cross-day times/links, partial capacity, no invented model times, no link metadata sent, navigation failure, invalid inputs, partial write recovery');

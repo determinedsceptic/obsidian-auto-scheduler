@@ -12,7 +12,7 @@ const properties = {
   due: { type: ['string', 'null'], description: '本地 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm，未指定为 null' },
   earliest: { type: ['string', 'null'], description: '本地 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm，未指定为 null' },
 };
-export const taskTool = { name: 'create_tasks', description: '生成新任务供本地排程预览；不修改文件，不保证全部能安排。', strict: true,
+export const taskTool = { name: 'create_tasks', description: '生成新任务供宿主校验并自动排程；实际时间由本地排程器决定，不保证全部能安排。', strict: true,
   parameters: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false } } }, required: ['tasks'], additionalProperties: false } };
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('模型返回格式无效');
@@ -74,7 +74,7 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
   const url = endpoint(config);
   if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('请在侧栏填写 API 令牌');
   if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('对话过长，请清空对话后重试');
-  const system = `你是 Obsidian 任务助手。当前本地日期时间 ${dateKey(now)} ${now.toTimeString().slice(0, 5)}。工作日 ${settings.weekdays.join(',')}（0周日）；时段 ${settings.periods.join(',')}；每日容量 ${settings.dailyCapacity} 分钟。只允许调用 create_tasks 创建用户明确请求的新任务。用中文回复；缺少用时、意图不明确或不满足15分钟网格时先问用户，不自行猜测。重要=优先级4，普通=3。未指定日期设null；可拆分默认true，最小块默认30分钟（任务不足30则15）。课程未命名可用课程1、课程2。用户没有请求创建时只对话。不要承诺已写入：工具只产生预览，用户应用后才写入。不能删除、修改现有任务或指定输出路径，时段由本地排程器决定。`;
+  const system = `你是 Obsidian 任务助手。当前本地日期时间 ${dateKey(now)} ${now.toTimeString().slice(0, 5)}。工作日 ${settings.weekdays.join(',')}（0周日）；时段 ${settings.periods.join(',')}；每日容量 ${settings.dailyCapacity} 分钟。只允许调用 create_tasks 创建用户明确请求的新任务。用中文回复；缺少用时、意图不明确或不满足15分钟网格时先问用户，不自行猜测。重要=优先级4，普通=3。未指定日期设null；可拆分默认true，最小块默认30分钟（任务不足30则15）。课程未命名可用课程1、课程2。用户没有请求创建时只对话。不要猜测或承诺具体安排和已写入：工具只生成任务参数，宿主校验、排程、写入后会给出实际结果。不能删除、修改现有任务或指定输出路径，时段由本地排程器决定。`;
   const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: [{ type: 'function', ...taskTool }], parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
     : config.protocol === 'anthropic' ? { model: config.model, system, messages, max_tokens: 4096,
       tools: [{ name: taskTool.name, description: taskTool.description, input_schema: taskTool.parameters }] }
@@ -125,5 +125,5 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
   const text = texts.join('\n').trim();
   if (text.length > 12000) throw new Error('模型回复过长，请减少任务数量后重试');
   if (!text && !tasks.length) throw new Error('模型未返回回复或任务');
-  return { text: text || '任务已生成，请检查本地排程预览并应用。', tasks };
+  return { text: text || '任务参数已生成，由本地排程器安排时间。', tasks };
 }

@@ -18,7 +18,7 @@
 | src/transaction.ts | 只读预览快照、备份、比较写入、多文件失败恢复与撤销 |
 | src/queue.ts | 顺序执行设置和写入操作 |
 
-数据流：Markdown → 格式解析/输入校验 → 排程 → 输出渲染/读回校验 → 预览 → 输入快照检查 → 持久化备份 → Vault 比较写入。用户确认应用发生在预览界面；多文件写入没有跨文件原子性。
+数据流：Markdown → 格式解析/输入校验 → 排程 → 输出渲染/读回校验 → 预览 → 输入快照检查 → 持久化备份 → Vault 比较写入。手动排程在预览界面确认应用；AI 对话在校验成功后直接应用，src/ai-result.ts 从已写入的结果生成时间清单和本地日期链接。多文件写入没有跨文件原子性。
 
 tests/ 测试纯逻辑与事务边界；scripts/smoke.mjs 验证构建产物在模拟宿主中的行为；scripts/gantt-interop.mjs 直接执行固定版本上游 parser/serializer；demo-vault/ 仅含合成示例；validation/ 保存验证记录。
 

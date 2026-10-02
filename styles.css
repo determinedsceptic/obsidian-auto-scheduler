@@ -13,3 +13,4 @@
 .auto-scheduler-muted { color: var(--text-muted); font-size: var(--font-smallest); }
 .auto-scheduler-chat select { width: 100%; margin: 8px 0; }
 .auto-scheduler-model-list { max-height: 250px; overflow-y: auto; }
+.auto-scheduler-note-links { display: flex; flex-wrap: wrap; gap: 0.5em 1em; }
