@@ -7,3 +7,5 @@ Install main.js, manifest.json, and styles.css under .obsidian/plugins/auto-sche
 This release has not been accepted into the Obsidian community directory. Screenshots use synthetic notes and a deterministic localhost API fixture. Native UI validation covers macOS with Obsidian 1.13.7; mobile is unsupported.
 
 Gantt Calendar output now uses Dataview priority fields consistently, preserving priority and exact dates through the pinned upstream parser/serializer.
+
+The DeepSeek preset now includes `deepseek-flash` and `deepseek-v4-pro`, the official API base URL, and the existing Chat Completions tool-calling path. Users bring their own DeepSeek API key.

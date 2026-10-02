@@ -4,6 +4,8 @@
 
 All paths are relative to the vault. Hidden folders and `..` are rejected.
 
+To use DeepSeek in AI chat, open **Configure provider / API key**, choose **DeepSeek**, enter your DeepSeek API key, and save. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Choose between them under **Chat model** in plugin settings. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
+
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | Tasks folder | `Tasks` | Scan estimated source tasks in this folder and subfolders. |

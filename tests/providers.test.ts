@@ -19,6 +19,28 @@ describe('BYOK providers and discovery', () => {
       expect(() => validateProvider({ ...t, id: name, models: ['manually-entered'] })).not.toThrow();
     }
   });
+  it('offers current DeepSeek models and routes a task tool call through Chat Completions', async () => {
+    const preset = PROVIDER_TEMPLATES.deepseek;
+    expect(preset.models).toEqual(['deepseek-flash', 'deepseek-v4-pro']);
+    const p = provider({ ...preset, id: 'deepseek' });
+    validateProvider(p);
+    const discovered = await discoverModels(p, 'test-only', async (url, headers) => {
+      expect(url).toBe('https://api.deepseek.com/models');
+      expect(headers.Authorization).toBe('Bearer test-only');
+      return { status: 200, json: { data: preset.models.map(id => ({ id })) } };
+    });
+    expect(discovered.models).toEqual(preset.models);
+    const reply = await chat(providerConfig(p, 'deepseek-flash'), 'test-only', messages, config(), now, async (url, headers, body) => {
+      expect(url).toBe('https://api.deepseek.com/chat/completions');
+      expect(headers.Authorization).toBe('Bearer test-only');
+      const request = JSON.parse(body);
+      expect(request.model).toBe('deepseek-flash');
+      expect(request.tools.map((tool: any) => tool.function.name)).toContain('create_tasks');
+      return { status: 200, json: { choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function', function: { name: 'create_tasks', arguments: JSON.stringify({ tasks }) } }] } }] } };
+    });
+    expect(reply.tasks).toEqual(tasks);
+    expect(providerConfig(p, 'deepseek-v4-pro').model).toBe('deepseek-v4-pro');
+  });
   it('keeps same-named models separate across providers and rejects stale active IDs', () => {
     const b = { namespace: 'vault-one', providers: [provider(), provider({ id: 'other', baseUrl: 'https://other.test/v1' })], activeProviderId: 'other', activeModel: 'manual-model' };
     validateByok(b); expect(activeConfig(b).baseUrl).toBe('https://other.test/v1');

@@ -4,6 +4,7 @@
 
 - English interface, commands, diagnostics, documentation, and tool instructions by default.
 - English recurring-habit syntax, with existing Chinese and legacy templates preserved.
+- DeepSeek provider preset with current model choices and the official Chat Completions endpoint.
 - MIT license, contributor/security guidance, release checks, workflow templates, and community-submission preparation.
 - Reproducible examples and screenshots captured in a separate Obsidian vault with a localhost fixture.
 - Gantt output uses Dataview priority fields to avoid mixed-format detection in the upstream parser.

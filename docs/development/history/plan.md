@@ -162,3 +162,5 @@ Alex 明确要求取消 AI 创建任务后的周预览弹窗，直接在回复�
 5. typecheck、全量测试、真实 CJS smoke、release 校验、依赖审计、截图视觉检查；安装 test、恢复助手侧栏，提交并同步已有公开仓库。GitHub workflow 权限不足时保存可用模板并明确剩余步骤，避免绕过账号授权。
 
 Public release compatibility adjustment (2026-10-02): the pinned Gantt parser detects priority emoji combined with Dataview date fields as mixed syntax and prefers the Tasks format. Use Dataview priority fields in Gantt output only, preserving clean daily priority symbols. Add a regression and rerun the real upstream round-trip before release.
+
+2026-10-02 DeepSeek preset completion: the existing provider entry had an empty model list. Fill it with current official model IDs and the canonical API root; preserve user-saved configurations. Validate model discovery and Chat Completions tool requests with a fake transport, then rebuild and install the three test-vault assets. No paid request or credential read is planned.

@@ -1,0 +1,3 @@
+npm run typecheck: passed
+npm test: 14 files, 220 tests passed
+DeepSeek route and tool call test uses an injected transport with no real API request or key.

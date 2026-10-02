@@ -13,7 +13,7 @@ Describe what you need to do, give an estimated duration, and let the local sche
 - **Keep readable notes.** Time-based checkboxes appear under `# Day planner` in `YYYY-MM-DD.md`, without hidden management comments in clean daily mode.
 - **Reserve habits first.** Daily, weekday, weekend, or selected-day habits can also occur outside working hours.
 - **Preview and undo.** Manual scheduling previews file changes. AI actions apply directly after validation. The last operation can be undone across a plugin restart.
-- **Bring your own model.** OpenAI Responses, OpenAI-compatible Chat Completions, Anthropic Messages, and Google Gemini; local Ollama and LM Studio endpoints are supported when the model implements tool calling.
+- **Bring your own model.** OpenAI Responses, OpenAI-compatible Chat Completions (including DeepSeek), Anthropic Messages, and Google Gemini; local Ollama and LM Studio endpoints are supported when the model implements tool calling.
 
 Desktop only; minimum Obsidian version **1.6.6**. The interface and documentation default to English. AI conversations can use your own language; existing Chinese habit templates remain supported.
 
@@ -34,9 +34,12 @@ Do not install GitHub's source-code ZIP as a plugin; it does not contain the bui
 
 1. Click the calendar-clock ribbon icon, or run **Auto Scheduler: Open AI assistant**.
 2. Select **Configure provider / API key**. Choose a provider, its endpoint, and a tool-capable model. Enter your own key if required. Model discovery is optional; exact model IDs can be entered manually.
+
 3. Try: **“Review two courses, two hours each, high priority. Please schedule them.”**
 4. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
 5. Replan with **Preview weekly schedule**. Use **Undo last schedule** to restore the last write.
+
+For DeepSeek, select the **DeepSeek** template. It fills the official API address and offers `deepseek-flash` and `deepseek-v4-pro`; enter a DeepSeek API key, save, and choose the model in plugin settings. You can also discover models or replace the model IDs manually. See [DeepSeek's API documentation](https://api-docs.deepseek.com/quick_start/pricing/).
 
 For offline scheduling, configure **Output location → Daily notes: Day planner**, **Output format → Day Planner**, and **Clean daily lists**, then add estimated tasks in `Tasks/`:
 

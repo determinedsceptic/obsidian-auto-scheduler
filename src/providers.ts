@@ -7,7 +7,7 @@ export const PROVIDER_TEMPLATES: Record<string, ProviderTemplate> = {
   anthropic: { name: 'Anthropic', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', requiresKey: true, models: [] },
   gemini: { name: 'Google Gemini', protocol: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', requiresKey: true, models: [] },
   openrouter: { name: 'OpenRouter', protocol: 'chat-completions', baseUrl: 'https://openrouter.ai/api/v1', requiresKey: true, models: [] },
-  deepseek: { name: 'DeepSeek', protocol: 'chat-completions', baseUrl: 'https://api.deepseek.com/v1', requiresKey: true, models: [] },
+  deepseek: { name: 'DeepSeek', protocol: 'chat-completions', baseUrl: 'https://api.deepseek.com', requiresKey: true, models: ['deepseek-flash', 'deepseek-v4-pro'] },
   ollama: { name: 'Ollama', protocol: 'chat-completions', baseUrl: 'http://localhost:11434/v1', requiresKey: false, models: [] },
   lmstudio: { name: 'LM Studio', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: [] },
   custom: { name: 'Custom provider', protocol: 'chat-completions', baseUrl: '', requiresKey: true, models: [] },
