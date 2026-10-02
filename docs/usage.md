@@ -95,10 +95,22 @@ The AI tool always appends to `Habits/AI-Habits.md` (or the configured folder). 
 
 ## Applying and recovering
 
-Manual commands show a read-only preview. AI creation validates then applies directly. Changes after preview invalidate it. Clean daily output preserves hand-authored content and supports ticking generated blocks; title/time edits invalidate the exact tracked region to prevent accidental overwrite.
+Manual commands show a read-only preview. AI creation and revision validate then apply directly. Changes after preview invalidate it. Clean daily output preserves hand-authored content and supports ticking generated blocks; title/time edits invalidate the exact tracked region to prevent accidental overwrite.
 
 In metadata mode, `locked=true` retains a manually positioned block. Clean lists do not display that metadata; undo before editing generated times or titles.
 
 Every write saves the last operation's file contents and tracking first. **Undo last schedule** preflights all files and refuses to overwrite later edits. AI-created habits undo the template and plans together; manual replan does not undo a template you edited yourself. New files are restored to an empty note or `# Day planner` heading rather than deleted.
 
 Obsidian does not provide an atomic transaction across multiple files. If a write fails, inspect the notes and run undo before editing them. If undo refuses because a file changed, back up current notes and plugin data, then compare the recorded before/after snapshots manually. Plugin `data.json` contains private task/backup information; do not post it publicly or delete it casually.
+
+## Read and revise existing daily tasks
+
+Ask “What is in today’s plan?” to use `read_daily_plan`. Ask “Move today’s unfinished ordinary tasks to tomorrow and continue long-term tasks over later days” to read first, then use `revise_daily_tasks`. You can also rename an unfinished task or change its priority. No copy/paste of existing tasks is required.
+
+The host derives paths from the configured daily-note folder and date. Reads expose at most 100 checkbox summaries from `Day planner`, ignoring fenced examples and other sections. Chat edits accept only references returned by that send’s reads and refuse stale notes/tracking/task state. Up to three sequential reads are allowed per send across Responses, Chat Completions, Anthropic and Gemini.
+
+For AI tasks, carry-over preserves the original ID, total effort and deadline. Completed blocks stay in their original notes and reduce remaining effort. Target date is an earliest start, allowing long work to continue over later days within the seven-day scheduling window. Habits are loaded from their templates. Handwritten ordinary checkboxes are imported as flexible tasks; timed rows preserve duration and missing durations use **Default duration**, reported in the answer. Selected unfinished source rows are removed; other sections and completed rows remain.
+
+Read dates are limited to the past 30 days and next seven dates; target dates are in the next seven dates. Existing AI total effort cannot yet be changed through chat. Protected source-managed, linked, nested, locked, completed and habitual items must be edited in their source/template where appropriate. Conflicting existing deadlines reject the revision rather than silently dropping the deadline. Unscheduled effort remains saved for a later replan and is reported explicitly. **Undo last schedule** restores the source, destination and AI task state together.
+
+Plain handwritten Tasks/Dataview date and priority fields are accepted on carry-over. Their deadlines and earliest-start constraints are retained; moving beyond the existing deadline is rejected. Management comments and source links remain protected.

@@ -36,7 +36,7 @@ function same(a: Record<string, string | null>, b: Record<string, string | null>
   const keys = Object.keys(a).sort();
   return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every(key => a[key] === b[key]);
 }
-export async function createPreview(vault: VaultPort, settings: Settings, now = new Date(), tracking: Tracking = {}, formatOnly = false, aiTasks: Task[] = [], addedTasks: Task[] = [], habitUpdates: Record<string, string> = {}, events: ResolvedEvent[] = []): Promise<Preview> {
+export async function createPreview(vault: VaultPort, settings: Settings, now = new Date(), tracking: Tracking = {}, formatOnly = false, aiTasks: Task[] = [], addedTasks: Task[] = [], habitUpdates: Record<string, string> = {}, events: ResolvedEvent[] = [], revision?: { dailyUpdates: Record<string, string>; aiTasksAfter: Task[] }): Promise<Preview> {
   const frozen: Settings = JSON.parse(JSON.stringify(settings)) as Settings;
   const invalid = validateSettings(frozen);
   if (invalid.length) throw new Error(invalid.join('\n'));
@@ -46,9 +46,12 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   const eventRows: Record<string, string[]> = {};
   for (const e of events) (eventRows[`${frozen.dailyFolder}/${e.date}.md`] ??= []).push(`- [ ] ${e.startTime} - ${e.endTime} ${e.title}`);
   const historyPaths = aiTasks.length && frozen.outputLocation === 'daily' ? Object.keys(tracking).filter(p => safeVaultPath(p) && p.startsWith(frozen.dailyFolder + '/') && /\/\d{4}-\d{2}-\d{2}\.md$/.test(p) && p.slice(-13, -3) < today) : [];
-  const sourcePaths = Object.keys(habitUpdates);
+  const dailyUpdates = revision?.dailyUpdates ?? {};
+  const sourcePaths = [...Object.keys(habitUpdates), ...Object.keys(dailyUpdates)];
   if (formatOnly && sourcePaths.length) throw new Error('Format cleanup cannot change habits');
-  if (sourcePaths.some(p => !safeVaultPath(p) || !p.startsWith(frozen.habitFolder + '/') || !p.endsWith('.md'))) throw new Error('The habits tool can only write inside the configured habits folder');
+  if (Object.keys(habitUpdates).some(p => !safeVaultPath(p) || !p.startsWith(frozen.habitFolder + '/') || !p.endsWith('.md'))) throw new Error('The habits tool can only write inside the configured habits folder');
+  if (Object.keys(dailyUpdates).some(p => !safeVaultPath(p) || !p.startsWith(frozen.dailyFolder + '/') || !/^\d{4}-\d{2}-\d{2}\.md$/.test(p.slice(frozen.dailyFolder.length + 1)))) throw new Error('Daily editing can only write configured dated notes');
+  if (revision && (formatOnly || frozen.outputLocation !== 'daily')) throw new Error('Daily editing requires daily-note output');
   const inputs = await snapshot(vault, frozen, today, historyPaths, sourcePaths);
   const targets = frozen.outputLocation === 'daily' ? dailyPaths(frozen, today) : [frozen.outputFile];
   const trackingSnapshot: Tracking = JSON.parse(JSON.stringify(tracking));
@@ -59,6 +62,8 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     try { virtual[path] = rehydrate(inputs[path], trackingSnapshot[path]); }
     catch (error) { trackingErrors.push({ path, line: 0, message: (error as Error).message }); virtual[path] = ''; }
   }
+  const originals = { ...virtual };
+  Object.assign(virtual, dailyUpdates);
   if (events.length) {
     const busy = parseFixed({ path: frozen.fixedFile, content: inputs[frozen.fixedFile] ?? '' }, frozen.defaultEventDuration).intervals;
     for (const path of targets) busy.push(...dailyInputs(path, virtual[path], frozen.defaultEventDuration).intervals);
@@ -82,7 +87,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     catch (error) { dailyErrors.push({ path, line: 0, message: (error as Error).message }); }
   }
   const parsed = parseTasks(Object.entries(inputs).filter(([path]) => !path.startsWith(frozen.habitFolder + '/') && path !== frozen.fixedFile && (frozen.outputLocation === 'daily' || path !== frozen.outputFile)).map(([path, content]) => ({ path, content: daily.get(path)?.content ?? content ?? '' })));
-  const allAiTasks: Task[] = JSON.parse(JSON.stringify([...aiTasks, ...addedTasks]));
+  const allAiTasks: Task[] = JSON.parse(JSON.stringify([...(revision?.aiTasksAfter ?? aiTasks), ...addedTasks]));
   if (new Set([...parsed.tasks, ...allAiTasks].map(t => t.id)).size !== parsed.tasks.length + allAiTasks.length) throw new Error('Duplicate task IDs');
   const historyCompleted = new Map<string, number>();
   for (const path of historyPaths) {
@@ -107,7 +112,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     output: null, diff: { added: [], removed: [], retained: [] },
   };
   try {
-    const documents = Object.fromEntries(targets.map(path => [path, frozen.outputLocation === 'daily' ? dailyDocument(virtual[path]) : parseOutput(inputs[path])]));
+    const documents = Object.fromEntries([...new Set([...targets, ...Object.keys(dailyUpdates)])].map(path => [path, frozen.outputLocation === 'daily' ? dailyDocument(virtual[path]) : parseOutput(inputs[path])]));
     const oldBlocks = Object.values(documents).flatMap(d => d.blocks);
     if (new Set(oldBlocks.map(b => b.id)).size !== oldBlocks.length) throw new Error('Duplicate block IDs in daily notes');
     if (frozen.outputLocation === 'daily') for (const [path, doc] of Object.entries(documents)) {
@@ -123,11 +128,12 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
       for (const [path, document] of Object.entries(documents)) {
         const blocks = frozen.outputLocation === 'daily' ? result.blocks.filter(b => path.endsWith(`/${b.date}.md`)) : result.blocks;
         // Avoid creating empty future notes. Existing notes with blocks still get cleaned.
-        if (frozen.outputLocation === 'daily' && !blocks.length && !document.blocks.length && !eventRows[path]) continue;
+        if (frozen.outputLocation === 'daily' && !blocks.length && !document.blocks.length && !eventRows[path] && !(path in dailyUpdates)) continue;
         const output = frozen.outputLocation === 'daily' ? renderDaily(document, blocks, frozen.outputMode, frozen.ganttFilter) : renderOutput(document, blocks, frozen.outputMode, frozen.ganttFilter);
         parseOutput(output);
         if (frozen.outputLocation === 'daily') {
-          const before = cleanDaily(renderDaily(document, document.blocks, frozen.outputMode, frozen.ganttFilter), plainSourceIds, new Map(), false).record;
+          const originalDoc = dailyDocument(originals[path]);
+          const before = cleanDaily(renderDaily(originalDoc, originalDoc.blocks, frozen.outputMode, frozen.ganttFilter), plainSourceIds, new Map(), false).record;
           const clean = cleanDaily(output, plainSourceIds, new Map(parsed.tasks.map(t => [t.id, t.priority])));
           preview.nextTracking[path] = { before, after: frozen.cleanDaily ? clean.record : null };
           preview.outputs[path] = frozen.cleanDaily ? clean.text : output;

@@ -7,9 +7,10 @@ A TypeScript Obsidian plugin with an esbuild CommonJS bundle. Runtime imports on
 | `main.ts` | Lifecycle, commands, settings, native vault adapter, and serialized operations. |
 | `chat-view.ts`, `provider-modal.ts` | Sidebar conversation, copying, and BYOK setup. |
 | `providers.ts`, `credentials.ts` | Provider/model routing, discovery, isolated host Keychain or session credentials. |
-| `llm.ts` | Four transport schemas and strict task/habit/event/mixed-plan tool dispatch. |
+| `llm.ts` | Four transport schemas, bounded read tool rounds, and strict action dispatch. |
 | `habit-tool.ts`, `skills/habits/SKILL.md` | Bundled model instructions, host-controlled paths, validated template creation. |
 | `parser.ts`, `calendar-format.ts` | Source estimates, event syntax, Tasks/Dataview compatibility. |
+| `daily-edit.ts` | Bounded daily-plan summaries, read references, staged task revisions and carry-over. |
 | `event-tool.ts` | Exact one-off events, nullable duration defaults, local date/time validation. |
 | `habits.ts` | Readable recurring templates, stable occurrence identity, fixed-time expansion. |
 | `time.ts`, `scheduler.ts` | Local-time/grid constraints and deterministic capacity-aware scheduling. |
@@ -34,3 +35,5 @@ Manual scheduling inserts a preview before snapshot verification; AI creation ap
 The host has no multi-file transaction API. A partial write is visible and recoverable, rather than described as fully atomic. Clean daily output stores annotated representations in plugin data; matching allows completion-checkbox changes but refuses ambiguous title/time edits.
 
 Tests cover pure logic and transaction boundaries; `scripts/smoke.mjs` loads the actual built bundle into an isolated host simulation. Screenshots exercise a real Obsidian vault and deterministic localhost provider. No upstream calendar source is bundled.
+
+AI revision adds a read-tool round trip before host validation. Only Day planner checkbox summaries leave the vault. A per-send snapshot retains source bytes, tracking and AI task state locally. Revision accepts only unfinished editable references from that read, stages row removal and persistent task changes, and checks the source again. Original AI IDs and completed history survive carry-over; original snapshots and tracking remain available for restart undo. The transaction renders past source notes as well as the active seven-day destinations.

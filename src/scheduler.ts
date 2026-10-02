@@ -18,7 +18,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
     if (block.start % GRID || block.end % GRID) fail('Locked blocks must use the 15-minute grid');
     if (bufferedFixed.some(i => overlap(block, i))) fail('Conflicts with a fixed event or its buffer');
     const task = taskMap.get(block.taskId);
-    if (task && !task.completed && ((task.earliest !== undefined && block.start < task.earliest) || (task.due !== undefined && block.end > task.due))) fail('Violates the task earliest/due constraints');
+    if (task && !task.completed && !block.completed && ((task.earliest !== undefined && block.start < task.earliest) || (task.due !== undefined && block.end > task.due))) fail('Violates the task earliest/due constraints');
     lockedMinutes.set(block.taskId, (lockedMinutes.get(block.taskId) ?? 0) + block.end - block.start);
   }
   for (let i = 0; i < protectedBlocks.length; i++) for (let j = i + 1; j < protectedBlocks.length; j++) {

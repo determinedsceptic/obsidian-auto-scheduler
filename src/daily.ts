@@ -7,7 +7,7 @@ export function dailyPaths(settings: Settings, today: string): string[] {
   return Array.from({ length: 7 }, (_, i) => `${settings.dailyFolder}/${addDays(today, i)}.md`);
 }
 interface Section { start: number; end: number }
-function section(content: string): Section | undefined {
+export function dayPlannerSection(content: string): Section | undefined {
   const lines = content.split(/\r?\n/), visible = visibleLines(content);
   const headings = visible.filter(l => /^#{1,6}\s+Day planner\s*#*\s*$/i.test(l.text));
   if (headings.length > 1) throw new Error('Duplicate Day planner headings; refusing to write');
@@ -21,11 +21,11 @@ function section(content: string): Section | undefined {
 /** Prepare a managed region only inside the intended heading; retain external bytes. */
 export function dailyDocument(content: string | null): OutputDocument {
   let text = content ?? ''; const newline = text.includes('\r\n') ? '\r\n' : '\n';
-  let part = section(text);
+  let part = dayPlannerSection(text);
   if (!part) {
     if (text.includes(START) || text.includes(END)) throw new Error('Managed region is outside the Day planner heading');
     text += (text ? (text.endsWith('\n') ? newline : newline + newline) : '') + `# Day planner${newline}`;
-    part = section(text)!;
+    part = dayPlannerSection(text)!;
   }
   const region = text.slice(part.start, part.end);
   if (text.includes(START) || text.includes(END)) {
@@ -42,7 +42,7 @@ export function renderDaily(document: OutputDocument, blocks: Block[], mode: Set
   return document.prefix + rendered + document.suffix;
 }
 export function dailyInputs(path: string, content: string | null, defaultDuration = 30): { content: string; intervals: Interval[]; errors: Diagnostic[] } {
-  const text = content ?? '', part = section(text); const intervals: Interval[] = [], errors: Diagnostic[] = [];
+  const text = content ?? '', part = dayPlannerSection(text); const intervals: Interval[] = [], errors: Diagnostic[] = [];
   if (!part) return { content: '', intervals, errors };
   const date = path.split('/').pop()!.slice(0, -3);
   const startLine = text.slice(0, part.start).split('\n').length;

@@ -1,3 +1,5 @@
+import { readDailyPlan, previewDailyEdits } from './daily-edit';
+import type { DailySnapshot, DailyEdit } from './daily-edit';
 import { appendHabits, habitPath } from './habit-tool';
 import { resolveEvents } from './event-tool';
 import type { EventDraft } from './event-tool';
@@ -188,6 +190,43 @@ export default class AutoScheduler extends Plugin {
       this.state = next; this.refreshChats();
     });
   }
+  async readPlan(date: string, expectedSettingsKey: string): Promise<DailySnapshot> {
+    return this.operations.run(async () => {
+      if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
+      return readDailyPlan(this.vaultPort, this.state.settings, this.state.tracking, this.state.aiTasks, date, new Date());
+    });
+  }
+  async revisePlan(read: DailySnapshot, edits: DailyEdit[], expectedSettingsKey: string): Promise<AiScheduleReply> {
+    return this.operations.run(async () => {
+      if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+        outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      const { preview, ids, defaults } = await previewDailyEdits(this.vaultPort, settings, this.state.tracking, this.state.aiTasks, read, edits, new Date(), crypto.randomUUID().replace(/-/g, ''));
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
+      let backupSaved = false;
+      const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+        saveUndo: async (undo,tracking,aiTasks) => {
+          const next = { ...this.state, settings, undo, tracking:tracking ?? this.state.tracking, aiTasks:aiTasks ?? this.state.aiTasks };
+          await this.saveData(next); this.state = next; backupSaved = true;
+        } };
+      try {
+        const applied = await applyPreview(this.vaultPort, storage, preview, settings, new Date());
+        const blocks = preview.result.blocks.filter(b => ids.has(b.taskId) && !b.completed);
+        const lines = [`Updated ${edits.length} unfinished tasks from ${read.read.date}. Completed records and recurring habits were preserved.`, 'Saved to daily notes:'];
+        for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)`);
+        for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
+        if (defaults.length) lines.push(`Default duration (${settings.defaultEventDuration} min) used for: ${defaults.join(', ')}.`);
+        if (applied.warning) lines.push(applied.warning);
+        lines.push('Run Undo last schedule to restore the source and destination plans.');
+        const notes = [...new Set(blocks.map(b => b.date))].sort().map(date => ({date,path:`${settings.dailyFolder}/${date}.md`}));
+        return { text:lines.join('\n'), notes };
+      } catch (error) {
+        if (backupSaved) throw new Error(`Plan revision did not finish; a recovery backup is saved. Inspect the notes and run Undo last schedule. ${(error as Error).message}`);
+        throw error;
+      }
+    });
+  }
+
   async scheduleAi(drafts: TaskDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');

@@ -61,7 +61,7 @@ vm.runInNewContext(await readFile('main.js', 'utf8'), {
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
     return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting,
-      requestUrl: async request => { requests.push(request); return { status: mockStatus, json: mockResponse }; },
+      requestUrl: async request => { requests.push(request); return { status: mockStatus, json: typeof mockResponse === 'function' ? mockResponse(request) : mockResponse }; },
       Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
   },
 });
@@ -369,3 +369,37 @@ await Promise.race([catalogPlugin.action(()=>queuedView.onOpen()),new Promise((_
 await queuedView.modelLoad;
 assert(queuedView.contentEl.all().some(n=>n.options.text==='127 provider models loaded. Tool support depends on the model.'));
 console.log('PASS: queued sidebar opening releases the operation before automatic catalog persistence');
+
+// Actual bundle: read tool -> validated move -> open destination -> restart undo.
+saved = null; files.clear(); folders.clear(); folders.add('DailyNotes');
+const editPlugin = new AutoScheduler(app); await editPlugin.onload();
+await editPlugin.saveProvider({id:'edit-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
+await editPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00'],dailyCapacity:180,fixedBuffer:0,blockBuffer:0});
+const editSource = '# Day planner\n- [ ] 10:00 Phone number\n- [x] Finished\n# Journal\nPRIVATE BODY MUST STAY LOCAL\n';
+files.set('DailyNotes/2026-10-01.md',editSource);
+mockResponse = {data:[{id:'fixture'}]};
+const editView = editPlugin.views.get('auto-scheduler-chat')({}); await editView.onOpen(); await editView.modelLoad;
+let editRounds = 0;
+mockResponse = request => {
+  const body = JSON.parse(request.body); assert(!request.body.includes('PRIVATE BODY MUST STAY LOCAL'));
+  editRounds++;
+  if (editRounds === 1) return {status:'completed',output:[{type:'function_call',name:'read_daily_plan',call_id:'read-plan',arguments:JSON.stringify({date:'2026-10-01'})}]};
+  const result = JSON.parse(body.input.at(-1).output); assert.equal(result.items[0].title,'Phone number'); assert.equal(result.items[1].completed,true);
+  return {status:'completed',output:[{type:'function_call',name:'revise_daily_tasks',call_id:'edit-plan',arguments:JSON.stringify({date:'2026-10-01',edits:[{ref:result.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:4}]})}]};
+};
+const modalBeforeEdit = latestModal;
+await editView.send('Move today’s unfinished tasks to tomorrow');
+assert.equal(editRounds,2); assert.equal(latestModal,modalBeforeEdit);
+assert(!editView.messages.at(-1).content.includes('Request failed'),editView.messages.at(-1).content);
+assert(editView.messages.at(-1).content.includes('2026-10-02 09:00–09:30'));
+assert(editView.messages.at(-1).content.includes('Default duration (30 min)'));
+assert.equal(openedNotes.at(-1),'DailyNotes/2026-10-02.md');
+assert(!files.get('DailyNotes/2026-10-01.md').includes('Phone number'));
+assert(files.get('DailyNotes/2026-10-01.md').includes('- [x] Finished'));
+assert(files.get('DailyNotes/2026-10-01.md').includes('PRIVATE BODY MUST STAY LOCAL'));
+assert.equal(saved.aiTasks.length,1);
+const editRestart = new AutoScheduler(app); await editRestart.onload();
+editRestart.commands.find(c=>c.id==='undo-last').callback(); await editRestart.operations.tail;
+assert.equal(files.get('DailyNotes/2026-10-01.md'),editSource); assert.equal(saved.aiTasks.length,0);
+assert.equal(saved.undo,null);
+console.log('PASS: actual chat read/edit loop, section privacy, carry-over, default duration, destination navigation and restart undo');

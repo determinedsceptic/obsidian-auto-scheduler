@@ -1,3 +1,4 @@
+import type { DailySnapshot } from './daily-edit';
 import { ItemView, Notice, requestUrl, WorkspaceLeaf } from 'obsidian';
 import type AutoScheduler from './main';
 import { chat, endpoint } from './llm';
@@ -73,7 +74,7 @@ export class ChatView extends ItemView {
         }
       }
     }
-    if (this.busy) log.createEl('p', { text: 'Creating tasks and scheduling…' });
+    if (this.busy) log.createEl('p', { text: 'Reading and scheduling…' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
     const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task, appointment or habit…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; });
@@ -98,15 +99,19 @@ export class ChatView extends ItemView {
     if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
     this.draftText = ''; this.messages.push({ role: 'user', content: message }); this.busy = true; this.render();
     try {
+      const reads = new Map<string, DailySnapshot>();
       const reply = await chat(config, token, this.messages.map(({ role, content }) => ({ role, content })), settings, new Date(), async (url, headers, body) => {
         const result = await requestUrl({ url, method: 'POST', headers, body, throw: false });
         return { status: result.status, json: result.status >= 200 && result.status < 300 ? result.json : {} };
+      }, 60000, async date => {
+        if (this.closed) throw new Error('Chat was closed');
+        const snapshot = await this.plugin.readPlan(date, settingsKey); reads.set(date, snapshot); return snapshot.read;
       });
       if (this.closed) return;
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
-      if (reply.tasks.length || reply.habits.length || reply.events.length) {
+      if (reply.revision || reply.tasks.length || reply.habits.length || reply.events.length) {
         const mixed = [reply.tasks, reply.habits, reply.events].filter(a => a.length).length > 1;
-        const result = mixed ? await this.plugin.schedulePlan(reply.tasks, reply.habits, reply.events, settingsKey) : reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
+        const result = reply.revision ? await this.plugin.revisePlan(reads.get(reply.revision.date)!, reply.revision.edits, settingsKey) : mixed ? await this.plugin.schedulePlan(reply.tasks, reply.habits, reply.events, settingsKey) : reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
         if (reply.defaultsUsed.length) result.text += `\nDefault duration (${settings.defaultEventDuration} min) used for: ${reply.defaultsUsed.join(', ')}.`;
         if (!this.closed) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
         if (!this.closed && result.notes.length) {

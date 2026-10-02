@@ -13,3 +13,5 @@ The DeepSeek preset now includes `deepseek-flash` and `deepseek-v4-pro`, the off
 The assistant sidebar now has a model selector for every saved provider/model pair. Provider configuration lets users choose the model to use immediately after saving.
 
 Start-only appointments and habits use a configurable 30-minute default. AI replies report the assumption and open the corresponding date; explicit durations take precedence. One-off events keep their exact time, replan flexible tasks, reject conflicts and cross-midnight ranges, and support restart-safe undo. Handwritten start-only rows reserve time without source edits.
+
+The assistant can now read bounded daily-plan task summaries and revise unfinished ordinary tasks. Carry-over preserves AI identities and completed effort, imports plain handwritten tasks, uses host defaults, reports actual slots, opens a destination note, and supports durable batch undo. All four provider protocols support the read tool round trip. Only requested Day planner checkbox summaries are sent; other note sections stay local.

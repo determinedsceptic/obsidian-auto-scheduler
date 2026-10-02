@@ -10,6 +10,7 @@ Describe what you need to do, give an estimated duration, and let the local sche
 
 - **Chat to schedule.** Create tasks, exact one-off events, or fixed-time recurring habits. The reply lists actual saved times and opens the corresponding daily note.
 - **Plan locally.** Priority, deadlines, working hours, fixed events, buffers, and daily capacity determine the schedule. A model cannot choose file paths or overwrite arbitrary notes.
+- **Read and revise plans.** Ask about a dated plan, move unfinished work to tomorrow, or change a task title/priority. Completed records and recurring habits remain intact; one undo restores the entire revision.
 - **Keep readable notes.** Time-based checkboxes appear under `# Day planner` in `YYYY-MM-DD.md`, without hidden management comments in clean daily mode.
 - **Reserve habits first.** Daily, weekday, weekend, or selected-day habits can also occur outside working hours.
 - **Preview and undo.** Manual scheduling previews file changes. AI actions apply directly after validation. The last operation can be undone across a plugin restart.
@@ -106,7 +107,7 @@ Use hosted APIs or a compatible local service. Changing the endpoint or protocol
 
 **Local scheduling needs no account, API key, or network connection.** Optional AI chat requires a provider that supports tool calling; hosted providers may require an account and charge API fees independently of this plugin. An existing ChatGPT or Codex subscription does not itself provide an API key.
 
-The plugin sends chat messages, local date/time, scheduling constraints, the bundled habits skill, and configured **vault-relative** habit/daily-note paths to your selected endpoint. It does not send vault note bodies, existing task lists, or absolute filesystem paths. Opening the assistant or editing a saved provider automatically queries that same provider's `/models` endpoint; entering a new key triggers discovery after leaving the field. Manual refresh is also available. These requests load model metadata and do not generate text. Your provider's own retention and billing policies apply.
+The plugin sends chat messages, local date/time, scheduling constraints, the bundled habits skill, and configured **vault-relative** habit/daily-note paths to your selected endpoint. When the assistant calls `read_daily_plan`, it sends checkbox task summaries from the requested date’s `Day planner` section to that provider (title, completion, duration, priority and edit reference). Other sections and absolute filesystem paths stay local. Existing plans are not included automatically in every chat request. Opening the assistant or editing a saved provider automatically queries that same provider's `/models` endpoint; entering a new key triggers discovery after leaving the field. Manual refresh is also available. These requests load model metadata and do not generate text. Your provider's own retention and billing policies apply.
 
 There is no plugin telemetry, advertising, remote code execution, automatic self-update, or access to files outside the vault. Keys are stored in the host's **Obsidian Keychain** when its public API is available; otherwise keys stay in memory until reload. Keys are not written to Markdown, plugin `data.json`, logs, or Git. Chat history is in memory and clears when the panel closes.
 
@@ -147,3 +148,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), an
 [MIT](LICENSE), copyright 2026 Alex Hu. This is an independent community project, not an official Obsidian product.
 
 [Day Planner](https://github.com/ivan-lednev/obsidian-day-planner) and [Gantt Calendar](https://github.com/sustcsugar/obsidian-gantt-calendar) informed the Markdown interoperability design. [Copilot](https://github.com/logancyang/obsidian-copilot) informed the provider-configuration workflow. Their implementations are not bundled or vendored. See [acknowledgements](docs/acknowledgements.md).
+
+## Read and carry over existing work
+
+Try: “Read today’s plan. Move unfinished ordinary tasks to tomorrow, keep completed records, and continue long-term work over the following days.” Or: “In tomorrow’s plan, raise Review to priority 4.”
+
+The assistant reads `YYYY-MM-DD.md` under the configured daily-note folder before requesting changes. It can read the past 30 days and the next seven local dates. The host moves selected unfinished tasks, preserves existing AI task IDs and completed effort, and schedules from the target date within its seven-day window. Plain handwritten checkbox tasks can be imported with the configured default duration; explicit time ranges preserve their duration. Reports list actual saved slots, defaults, and work that remains unscheduled. The first destination note opens automatically. Run **Undo last schedule** to restore both notes and task state.
+
+Completed tasks, recurring habits, locked blocks, source-managed task rows, nested items, and rows with links are protected from chat edits. Existing AI tasks preserve their total effort and deadlines; their duration cannot currently be edited through chat. Edit the original source/template for those protected cases.
+
+Plain handwritten Tasks/Dataview date and priority fields are accepted on carry-over. Their deadlines and earliest-start constraints are retained; moving beyond the existing deadline is rejected. Management comments and source links remain protected.

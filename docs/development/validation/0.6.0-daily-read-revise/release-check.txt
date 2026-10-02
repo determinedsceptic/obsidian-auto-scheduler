@@ -1,0 +1,18 @@
+
+> obsidian-auto-scheduler@0.6.0 release:check
+> npm run build && node scripts/release-check.mjs
+
+
+> obsidian-auto-scheduler@0.6.0 build
+> node esbuild.config.mjs
+
+{
+  "version": "0.6.0",
+  "id": "auto-scheduler",
+  "checksums": {
+    "main.js": "bafb70d77421edc033ec1ebf74f5538b3b58a1c6e8efa166e622365438ad586f",
+    "manifest.json": "9ebe8c2c60d43d6851b6849e62b17f9389275fe5c9fa582f50cb94d9b0177764",
+    "styles.css": "386d548b06585869ecc3bd0f141172b110e6e6d735d8d177a0d1a57e3c628e46"
+  },
+  "status": "release checks passed"
+}
