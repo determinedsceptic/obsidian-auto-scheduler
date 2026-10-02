@@ -94,3 +94,7 @@ Alex 明确要求新建 Obsidian 库测试，随后指定 `/Users/alexhu/Project
 Alex 授权将项目同步到 determinedsceptic/obsidian-auto-scheduler，并参考 Gantt Calendar 的项目架构。保留现有按职责拆分的 src 模块与测试，补齐 Obsidian versions.json、EditorConfig、架构说明及 GitHub CI；不复制上游 UI/飞书依赖。执行类型检查、118 项测试、宿主 smoke、打包与上游互操作，提交后推送完整本地历史至空远程 main。目标仓库已通过 GitHub API 确认为空；不使用 force push，不覆盖远程已有工作。
 
 GitHub 同步调整：Git 传输超时，改用 GitHub Git 对象 API，所有原始 blob/tree/commit SHA 逐一校验一致。API 更新含 .github/workflows 文件的 ref 返回 404；现有 OAuth scope 包含 repo，但没有 workflow。CI 改为 .github/ci.yml.example 模板，避免扩大账户授权。完整源码和既有历史继续同步；若历史中的工作流也触发限制，保留本地 ci-ready 分支，并从原功能提交建立不含工作流的架构提交。
+
+## 2026-10-02：纯每日列表
+
+按 Alex 请求移除最终日期文件中的管理和日期元数据。新增 cleanDaily 默认 true；旧格式作为可选兼容设置。实现插件数据中的跟踪区域与前后事务记录，支持重启、重复应用、完成勾选、外部备注、过期跟踪拒绝和部分写入撤销。先保存元数据及备份，后写 Markdown。测试后通过原生 Obsidian 迁移 test/DailyNotes，并检查实际文件无注释/日期字段，备份保留在 Git 忽略目录。

@@ -57,7 +57,7 @@ const app = { workspace: { openLinkText: async () => {} }, vault: {
   process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
 } };
 const plugin = new AutoScheduler(app); await plugin.onload();
-assert.equal(plugin.commands.length, 2);
+assert.equal(plugin.commands.length, 3);
 plugin.commands.find(command => command.id === 'preview-week').callback();
 await plugin.operations.tail;
 assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
@@ -90,7 +90,7 @@ await customRestart.updateSettings({ outputLocation: 'daily', outputMode: 'gantt
 customRestart.commands.find(command => command.id === 'preview-week').callback(); await customRestart.operations.tail;
 const dailyApply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
 assert.equal(dailyApply.disabled, false); dailyApply.events.click(); await customRestart.operations.tail;
-assert(saved.undo.entries.length >= 2); assert(files.get('DailyNotes/2026-10-01.md').includes('[start:: 2026-10-01 10:00]'));
+assert(saved.undo.entries.length >= 2); assert(files.get('DailyNotes/2026-10-01.md').includes('10:00 -')); assert(!files.get('DailyNotes/2026-10-01.md').includes('[start::')); assert(saved.tracking);
 const dailyRestart = new AutoScheduler(app); await dailyRestart.onload(); assert(dailyRestart.state.undo);
 dailyRestart.commands.find(command => command.id === 'undo-last').callback(); await dailyRestart.operations.tail;
 assert.equal(saved.undo, null); assert.equal(files.get('DailyNotes/2026-10-01.md'), dailyOriginal);

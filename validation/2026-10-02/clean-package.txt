@@ -1,0 +1,9 @@
+
+> obsidian-auto-scheduler@0.1.0 package
+> npm run build && node scripts/package.mjs
+
+
+> obsidian-auto-scheduler@0.1.0 build
+> node esbuild.config.mjs
+
+Local plugin files: dist/auto-scheduler

@@ -1,3 +1,4 @@
+import { validTracking } from './tracking';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath } from 'obsidian';
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
 import type { Preview, VaultPort, StatePort } from './transaction';
@@ -52,12 +53,13 @@ function validUndo(value: unknown): value is UndoRecord {
     && (record.entries === undefined || (Array.isArray(record.entries) && record.entries.length > 0 && record.entries.every(e => !!e && typeof e === 'object' && validEntry(e)) && new Set(record.entries.map(e => e.path)).size === record.entries.length));
 }
 export default class AutoScheduler extends Plugin {
-  state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null };
+  state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null, tracking: {} };
   private operations = new OperationQueue();
   private vaultPort!: VaultPort;
   private storage: StatePort = {
-    saveUndo: async record => {
-      const next = { settings: this.state.settings, undo: record };
+    getTracking: () => this.state.tracking,
+    saveUndo: async (record, tracking) => {
+      const next = { ...this.state, undo: record, tracking: tracking ?? this.state.tracking };
       await this.saveData(next); this.state = next;
     },
   };
@@ -66,17 +68,26 @@ export default class AutoScheduler extends Plugin {
     this.state.settings = { ...DEFAULT_SETTINGS, ...(saved?.settings ?? {}) };
     if (saved?.undo && validUndo(saved.undo)) this.state.undo = saved.undo;
     else if (saved?.undo) new Notice('Auto Scheduler：撤销记录格式异常，未启用自动恢复。请保留插件 data.json 备份。');
+    if (saved?.tracking) {
+      if (!validTracking(saved.tracking)) throw new Error('工作块跟踪数据异常，请保留 data.json 备份');
+      this.state.tracking = saved.tracking;
+    }
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));
     this.addCommand({ id: 'preview-week', name: '预览一周排程', callback: () => { void this.action(async () => {
-      const preview = await createPreview(this.vaultPort, this.state.settings);
+      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking);
+      new PreviewModal(this.app, preview, this).open();
+    }); } });
+    this.addCommand({ id: 'clean-daily-output', name: '清理每日排程格式', callback: () => { void this.action(async () => {
+      if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('请先启用每日笔记与每日纯列表');
+      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true);
       new PreviewModal(this.app, preview, this).open();
     }); } });
     this.addCommand({ id: 'undo-last', name: '撤销最近一次排程', callback: () => { void this.action(async () => {
       await undoLast(this.vaultPort, this.storage, this.state.undo); new Notice('已撤销最近一次排程');
     }); } });
     this.addRibbonIcon('calendar-clock', '预览一周排程', () => { void this.action(async () => {
-      new PreviewModal(this.app, await createPreview(this.vaultPort, this.state.settings), this).open();
+      new PreviewModal(this.app, await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking), this).open();
     }); });
   }
   async action(work: () => Promise<void>): Promise<void> {
@@ -87,7 +98,7 @@ export default class AutoScheduler extends Plugin {
   }
   async updateSettings(patch: Partial<Settings>): Promise<void> {
     await this.action(async () => {
-      const next = { settings: { ...this.state.settings, ...patch }, undo: this.state.undo };
+      const next = { ...this.state, settings: { ...this.state.settings, ...patch } };
       // Keep incomplete form values so users can edit several fields; preview validates them.
       await this.saveData(next); this.state = next;
     });
@@ -107,7 +118,7 @@ class PreviewModal extends Modal {
     const { contentEl } = this; const { result, settings, diff } = this.preview;
     contentEl.createEl('h2', { text: '一周排程预览' });
     contentEl.createEl('p', { text: `${this.preview.today} 起一周 · ${this.preview.timezone} · 输出：${settings.outputLocation === 'daily' ? settings.dailyFolder + '/YYYY-MM-DD.md' : settings.outputFile}` });
-    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，请先在工作块元数据中设 locked=true。勾选工作块不更新源任务。' });
+    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，带元数据格式可用 locked=true 保留手动位置。纯列表模式支持勾选完成，编辑时间或标题前请先撤销。勾选工作块不更新源任务。' });
     if (this.preview.snapshot[settings.fixedFile] === null) contentEl.createEl('p', { text: `固定日程文件不存在：${settings.fixedFile}。本次按无固定日程处理，请确认空闲时段。`, cls: 'auto-scheduler-warning' });
     if (result.errors.length) {
       contentEl.createEl('h3', { text: '需要修正的输入' }); const list = contentEl.createEl('ul');
@@ -163,6 +174,7 @@ class SchedulerSettings extends PluginSettingTab {
     text('固定日程文件', '格式：- YYYY-MM-DD HH:mm-HH:mm 标题；不存在时按空日程处理', settings.fixedFile, fixedFile => ({ fixedFile }));
     text('输出文件', '专用 Markdown；已有普通笔记不会被接管', settings.outputFile, outputFile => ({ outputFile }));
     new Setting(containerEl).setName('输出位置').addDropdown(input => input.addOption('single', '专用文件').addOption('daily', '每日笔记：Day planner').setValue(settings.outputLocation).onChange(value => { void this.plugin.updateSettings({ outputLocation: value as Settings['outputLocation'] }); }));
+    new Setting(containerEl).setName('每日纯列表').setDesc('日期文件只输出普通任务列表，管理数据保存到插件数据中；关闭以输出 Gantt 日期字段。').addToggle(input => input.setValue(settings.cleanDaily).onChange(cleanDaily => { void this.plugin.updateSettings({ cleanDaily }); }));
     text('每日笔记目录', 'YYYY-MM-DD.md；保留 Day planner 下的手写内容和其他章节', settings.dailyFolder, dailyFolder => ({ dailyFolder }));
     text('Gantt 任务前缀', '与 Gantt Calendar 的全局任务过滤器一致，默认 🎯；可清空', settings.ganttFilter, ganttFilter => ({ ganttFilter }));
     text('工作日', '逗号分隔：0 为周日，1 为周一，…，6 为周六', Array.isArray(settings.weekdays) ? settings.weekdays.join(',') : String(settings.weekdays), value => ({ weekdays: value.split(',').map(v => v.trim() ? Number(v.trim()) : NaN) }));

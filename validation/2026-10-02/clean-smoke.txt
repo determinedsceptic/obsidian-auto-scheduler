@@ -1,0 +1,9 @@
+
+> obsidian-auto-scheduler@0.1.0 smoke
+> npm run build && node scripts/smoke.mjs
+
+
+> obsidian-auto-scheduler@0.1.0 build
+> node esbuild.config.mjs
+
+PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo

@@ -14,6 +14,7 @@
 | src/time.ts | 本地时间、15 分钟网格、路径/设置验证、时间区间操作 |
 | src/scheduler.ts | 确定性容量约束排程；不依赖 Obsidian |
 | src/output.ts | 工作块读取、渲染、差异比较；保留管理区外内容 |
+| src/tracking.ts | 每日纯列表区域和内部带元数据表示的转换、插件跟踪记录校验 |
 | src/transaction.ts | 只读预览快照、备份、比较写入、多文件失败恢复与撤销 |
 | src/queue.ts | 顺序执行设置和写入操作 |
 

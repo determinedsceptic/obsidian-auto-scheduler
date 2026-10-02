@@ -40,3 +40,9 @@ macOS Obsidian 1.13.7（安装程序 1.7.7）已在独立 test 库通过加载�
 - `scripts/gantt-interop.mjs` 直接捆绑执行上游真实 parser/serializer，模拟最小 Obsidian host；验证默认过滤器、分钟精度、时间、ID、锁定和源元数据往返。结果见 `validation/2026-10-01/gantt-interop.json`。未运行完整 Gantt UI，不声称界面实测。
 - 当前严格校验时钟与日期字段一致；Gantt 拖动后需同步 clock/start/scheduled/due，跨日还需移动至相应每日文件。循环任务不展开，自定义状态仅支持空白、x/X、-、/、!、?、n。输出工作块只支持空白、x/X。
 - 运行时不依赖 Gantt Calendar，不调用其私有 API；仍支持单独运行和旧单文件输出。
+
+## 2026-10-02：每日纯列表
+
+每日输出默认不写 HTML 管理标记、scheduled/start/due 字段和 as-block 元数据，日期由 YYYY-MM-DD.md 表达。内部跟踪保存在本插件 data.json，其他插件看不到这些字段。可关闭 cleanDaily 以使用旧 Gantt/Dataview 完整日期字段；纯列表适合基于每日笔记读取时间段的插件，但不是 Gantt 原生日期字段格式。
+
+跟踪以完整生成区域匹配，允许勾选完成以及修改区域外内容；重写时间/标题或重复复制区域会拒绝应用。元数据丢失后不接管普通手写列表，作为占用读取。格式清理命令保留原有时间，不重新安排任务。现有带标记文件在应用清理预览后迁移，撤销可恢复原字节内容及跟踪记录。

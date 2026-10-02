@@ -1,0 +1,42 @@
+{
+  "author": "Codex",
+  "date": "2026-10-02",
+  "files": [
+    {
+      "path": "DailyNotes/2026-10-02.md",
+      "blocks": 2,
+      "sha256": "6c1296b4f74c6be42da590eddf50d2f1f79e1a159993c36153547e69faf93900"
+    },
+    {
+      "path": "DailyNotes/2026-10-05.md",
+      "blocks": 3,
+      "sha256": "783b53168d7caef5d7fe500df5c4aa6ba1f3e453abbad784471581150fdd0c6a"
+    },
+    {
+      "path": "DailyNotes/2026-10-06.md",
+      "blocks": 2,
+      "sha256": "09832c2b6aa54c2736a4d61759c61f61b216b490862a22fb1f46b74d856bf2d3"
+    },
+    {
+      "path": "DailyNotes/2026-10-07.md",
+      "blocks": 2,
+      "sha256": "09832c2b6aa54c2736a4d61759c61f61b216b490862a22fb1f46b74d856bf2d3"
+    },
+    {
+      "path": "DailyNotes/2026-10-08.md",
+      "blocks": 2,
+      "sha256": "09832c2b6aa54c2736a4d61759c61f61b216b490862a22fb1f46b74d856bf2d3"
+    }
+  ],
+  "metadataLocation": "auto-scheduler/data.json tracking",
+  "tests": 127,
+  "checks": [
+    "format-only native preview: 0 added / 0 removed / 11 retained",
+    "no management/date/id fields in actual Markdown bytes",
+    "times and source unchanged",
+    "native reload and reapply: unchanged, no write",
+    "reading view shows only heading and task list"
+  ],
+  "undoAvailable": true,
+  "upstreamFieldFormatInterop": "passed separately; requires cleanDaily=false"
+}
