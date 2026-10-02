@@ -12,6 +12,14 @@ describe('周期习惯模板', () => {
     const expanded = expandHabits([], [old], '2026-10-01');
     expect(expanded.blocks).toEqual([old]); expect(expanded.tasks[0].completed).toBe(true);
   });
+  it('无注释模板支持默认每天、星期说明和重要性', () => {
+    const p = parse('- 19:00-19:30 ⏫ 锻炼（周一、周三、周五）\n- 22:00-22:15 阅读');
+    expect(p.errors).toEqual([]); expect(p.habits[0]).toMatchObject({ title: '锻炼', days: [1, 3, 5], priority: 4 });
+    expect(p.habits[1].days).toHaveLength(7);
+    expect(parse('- 19:00-19:30 锻炼（周八）').errors).toHaveLength(1);
+    expect(parse('- 19:00-19:30 锻炼（周末）').habits[0].days).toEqual([0, 6]);
+    expect(p.habits[0].id).toBe(parse('- 20:00-20:30 锻炼（每天）').habits[0].id);
+  });
   it('默认模板停用，代码块示例忽略', () => {
     const p = parse(HABIT_TEMPLATE + '\n```\n' + row() + '\n```');
     expect(p.errors).toEqual([]); expect(expandHabits(p.habits, [], '2026-10-01').blocks).toEqual([]);

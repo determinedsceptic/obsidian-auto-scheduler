@@ -206,9 +206,10 @@ console.log('PASS: chat direct scheduling, exact cross-day times/links, partial 
 saved = null; files.clear();
 const habitPlugin = new AutoScheduler(app); await habitPlugin.onload();
 habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
-assert(files.get('Habits/Template.md').includes('enabled=false'));
+assert(!files.get('Habits/Template.md').includes('<!--'));
+assert(files.get('Habits/Template.md').includes('```markdown'));
 assert.equal(openedNotes.at(-1), 'Habits/Template.md');
-files.set('Habits/Template.md', '- 19:00-19:30 晚间习惯 <!-- habit id=evening days=0,1,2,3,4,5,6 priority=4 -->');
+files.set('Habits/Template.md', '- 19:00-19:30 ⏫ 晚间习惯（每天）');
 habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
 assert(files.get('Habits/Template.md').includes('晚间习惯'));
 habitPlugin.state.settings = { ...habitPlugin.state.settings, outputLocation: 'daily', outputMode: 'day-planner', cleanDaily: true };

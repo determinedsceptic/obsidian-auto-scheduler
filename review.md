@@ -118,3 +118,7 @@ AI 流程先在队列内生成只读预览并验证，然后复用 applyPreview 
 - `npm run typecheck`、`npm test`（12 文件 / 194 测试）、`npm run smoke`、`npm run package` 均通过；实际 CJS 宿主验证创建模板不覆盖、无任务七日习惯生成、干净输出、重启去重及撤销。
 - test 原生 Obsidian 1.13.7 已加载 0.4.0，命令创建并打开 Habits/Template.md。默认示例停用，真实现有日程未改写；完整应用路径在隔离宿主中验证。测试库旧插件备份见 local-test-vaults/habits-upgrade-20261002-174123。
 - 限制：首版仅每日/每周同日固定时间，沿用 DST 周限制和缓冲；只集成 Auto Scheduler 生成路径，模板定义习惯，AI 工具当前仍仅创建单次任务。
+
+## 2026-10-02：0.4.1 习惯模板简化
+
+依据用户删除 habit 注释的要求，新模板以普通列表和中文星期说明表达周期；无星期默认每天，ID 由来源路径/标题生成，旧格式兼容。默认示例仍放在代码块内停用，未改日计划。typecheck、195 测试、实际 bundle smoke、package 通过；test 模板已改为无注释示例并安装新构建。

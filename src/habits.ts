@@ -1,3 +1,4 @@
+import { calendarPriority } from './calendar-format';
 import { fields, idField, visibleLines } from './parser';
 import type { Source } from './parser';
 import { addDays, clockMinutes, dayDate, GRID, localMinute } from './time';
@@ -11,22 +12,59 @@ export interface Habit {
 }
 export const HABIT_TEMPLATE = `# 习惯模板
 
-每行一个习惯。days：0=周日，1=周一，…，6=周六；每天填写 0,1,2,3,4,5,6。
-将 enabled=false 改为 enabled=true 后生效。priority 为 1–5，5 最重要。
-可选 from=YYYY-MM-DD until=YYYY-MM-DD（含当天）。时间须在同一天、为 15 分钟倍数。
-习惯先占用固定时间，再安排其他任务；沿用固定日程和工作块缓冲设置。
+在代码块外直接写时间任务列表即可启用。无星期说明则每天重复。
+星期说明可写（每天）、（工作日）、（周末）或（周一、周三、周五）。
+重要性可使用 🔺、⏫、🔼、🔽、⏬；不填则为普通。
+时间须同日且为 15 分钟倍数；习惯先占位，再安排其他任务。
 
-- 19:00-19:30 晚上锻炼 <!-- habit id=exercise days=1,3,5 priority=3 enabled=false -->
-- 22:00-22:15 睡前阅读 <!-- habit id=reading days=0,1,2,3,4,5,6 priority=2 enabled=false -->
+下面只是示例，复制到代码块外后生效：
+
+\`\`\`markdown
+- 19:00-19:30 晚上锻炼（周一、周三、周五）
+- 22:00-22:15 🔽 睡前阅读（每天）
+\`\`\`
 `;
+const weekdays: Record<string, number[]> = {
+  '每天': [0, 1, 2, 3, 4, 5, 6], '工作日': [1, 2, 3, 4, 5], '周末': [0, 6],
+  '周日': [0], '周天': [0], '周一': [1], '周二': [2], '周三': [3], '周四': [4], '周五': [5], '周六': [6],
+};
+/** Stable without showing technical IDs in a user's template. */
+function plainId(path: string, title: string): string {
+  const value = path + '\n' + title;
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
+  return `template_${(hash >>> 0).toString(16)}`;
+}
 export function parseHabits(sources: Source[]): { habits: Habit[]; errors: Diagnostic[] } {
   const habits: Habit[] = [], errors: Diagnostic[] = [], ids = new Set<string>();
   for (const source of sources) for (const { text, line } of visibleLines(source.content)) {
-    if (!/<!--\s*habit(?:\s|-->)/.test(text)) continue;
+    const legacy = /<!--\s*habit(?:\s|-->)/.test(text);
+    if (!legacy && !/^- (?:\[[ xX]\] )?\d{2}:/.test(text)) continue;
     try {
-      const match = /^- (\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*<!-- habit (.+?) -->\s*$/.exec(text);
-      if (!match) throw new Error('习惯格式应为 - HH:mm-HH:mm 标题 <!-- habit id=... days=... -->');
-      const f = fields(match[4], ['id', 'days', 'priority', 'enabled', 'from', 'until']);
+      let match: string[] | null = /^- (\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*<!-- habit (.+?) -->\s*$/.exec(text);
+      let f: Record<string, string>;
+      if (legacy) {
+        if (!match) throw new Error('旧习惯模板格式无效');
+        f = fields(match[4], ['id', 'days', 'priority', 'enabled', 'from', 'until']);
+      } else {
+        const plain = /^- (?:\[([ xX])\] )?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*$/.exec(text);
+        if (!plain) throw new Error('习惯格式应为 - HH:mm-HH:mm 标题（星期说明）');
+        let title = plain[4].trim();
+        const repeat = /[（(]([^（）()]+)[）)]$/.exec(title);
+        let days = weekdays['每天'];
+        if (repeat) {
+          days = repeat[1].split(/[、,，]/).flatMap(day => {
+            if (!weekdays[day.trim()]) throw new Error(`未知星期说明：${day}`);
+            return weekdays[day.trim()];
+          });
+          title = title.slice(0, repeat.index).trim();
+        }
+        const priority = calendarPriority(title);
+        title = title.replace(/[🔺⏫🔼🔽⏬]/gu, '').trim();
+        if (!title) throw new Error('习惯标题不能为空');
+        f = { id: plainId(source.path, title), days: [...new Set(days)].join(','), priority: String(priority), enabled: plain[1] && plain[1] !== ' ' ? 'false' : 'true' };
+        match = [plain[0], plain[2], plain[3], title];
+      }
       const id = idField(f.id);
       if (ids.has(id)) throw new Error(`重复习惯 ID：${id}`);
       const start = clockMinutes(match[1]), end = clockMinutes(match[2], true);
