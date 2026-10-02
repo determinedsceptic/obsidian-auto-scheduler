@@ -25,7 +25,7 @@ export function providerConfig(provider: ProviderConfig, model: string): LlmSett
 export function validateProvider(p: ProviderConfig): void {
   if (!p || Object.keys(p).some(k => !['id', 'name', 'protocol', 'baseUrl', 'requiresKey', 'models'].includes(k))) throw new Error('Provider settings contain unknown fields');
   if (!safeId(p.id) || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 100 || /[\r\n\x00-\x1f]/.test(p.name) || typeof p.requiresKey !== 'boolean') throw new Error('Invalid provider settings');
-  if (!Array.isArray(p.models) || !p.models.length || p.models.length > 100 || new Set(p.models).size !== p.models.length) throw new Error('Choose or enter 1–100 distinct model IDs');
+  if (!Array.isArray(p.models) || !p.models.length || p.models.length > 1000 || new Set(p.models).size !== p.models.length) throw new Error('Choose or enter 1–1000 distinct model IDs');
   for (const model of p.models) endpoint(providerConfig(p, model));
 }
 export function migrateByok(legacy: LlmSettings, namespace: string): ByokSettings {
@@ -54,7 +54,7 @@ export async function discoverModels(p: ProviderConfig, token: string, transport
   try { response = await Promise.race([transport(url, authHeaders(config, token)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timeout')), timeoutMs); })]); }
   catch { throw new Error('Connection failed or timed out. Enter model IDs manually to save without discovery.'); }
   finally { if (timer) clearTimeout(timer); }
-  if (response.status === 401 || response.status === 403) throw new Error('Authentication rejected by the provider. Check your key and permissions.');
+  if (response.status === 401) throw new Error('Authentication rejected by the provider. Check your key and permissions.');
   if (response.status < 200 || response.status >= 300) throw new Error(`Model discovery returned HTTP ${response.status}. Enter model IDs manually; authentication was not verified.`);
   const data = response.json as { data?: { id?: unknown }[]; models?: { name?: unknown; supportedGenerationMethods?: string[] }[] };
   if (!data || JSON.stringify(data).length > 4000000) throw new Error('Invalid model list format');

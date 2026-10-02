@@ -33,7 +33,7 @@ Do not install GitHub's source-code ZIP as a plugin; it does not contain the bui
 ## Quick start
 
 1. Click the calendar-clock ribbon icon, or run **Auto Scheduler: Open AI assistant**.
-2. In **Settings → Community plugins → Auto Scheduler**, choose **Add provider**. Select its endpoint and a tool-capable model, then enter your own key if required. Choose a model from the list; **Refresh model list** loads provider choices. Manual IDs are an optional advanced fallback. The sidebar's **Configure provider / API key** button edits the active provider.
+2. In **Settings → Community plugins → Auto Scheduler**, choose **Add provider**. Select its endpoint and a tool-capable model, then enter your own key if required. Provider models load automatically when you open the assistant or edit a saved provider; a newly entered key loads its list when you leave the key field. Choose from the list, or use **Refresh models** in the sidebar / **Refresh model list** in configuration to refresh it. Manual IDs are an optional advanced fallback. The sidebar's **Configure provider / API key** button edits the active provider.
 
 3. Try: **“Review two courses, two hours each, high priority. Please schedule them.”**
 4. Use the **Model** selector above the conversation to switch between saved providers and models. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
@@ -106,7 +106,7 @@ Use hosted APIs or a compatible local service. Changing the endpoint or protocol
 
 **Local scheduling needs no account, API key, or network connection.** Optional AI chat requires a provider that supports tool calling; hosted providers may require an account and charge API fees independently of this plugin. An existing ChatGPT or Codex subscription does not itself provide an API key.
 
-The plugin sends chat messages, local date/time, scheduling constraints, the bundled habits skill, and configured **vault-relative** habit/daily-note paths to your selected endpoint. It does not send vault note bodies, existing task lists, or absolute filesystem paths. Model discovery contacts that same provider's `/models` endpoint. Your provider's own retention and billing policies apply.
+The plugin sends chat messages, local date/time, scheduling constraints, the bundled habits skill, and configured **vault-relative** habit/daily-note paths to your selected endpoint. It does not send vault note bodies, existing task lists, or absolute filesystem paths. Opening the assistant or editing a saved provider automatically queries that same provider's `/models` endpoint; entering a new key triggers discovery after leaving the field. Manual refresh is also available. These requests load model metadata and do not generate text. Your provider's own retention and billing policies apply.
 
 There is no plugin telemetry, advertising, remote code execution, automatic self-update, or access to files outside the vault. Keys are stored in the host's **Obsidian Keychain** when its public API is available; otherwise keys stay in memory until reload. Keys are not written to Markdown, plugin `data.json`, logs, or Git. Chat history is in memory and clears when the panel closes.
 

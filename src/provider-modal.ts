@@ -19,7 +19,7 @@ export class ProviderModal extends Modal {
     this.selectedModel = existing && plugin.byok.activeProviderId === existing.id && existing.models.includes(plugin.byok.activeModel)
       ? plugin.byok.activeModel : this.draft.models[0] ?? '';
   }
-  onOpen(): void { this.render(); }
+  onOpen(): void { this.render(); if (this.existing) void this.test(); }
   onClose(): void { this.closed = true; this.token = ''; this.contentEl.empty(); }
   private routeSame(): boolean { return !!this.existing && this.existing.protocol === this.draft.protocol && this.existing.baseUrl === this.draft.baseUrl; }
   private async candidateKey(): Promise<string> { return this.clearKey ? '' : this.token.trim() || (this.routeSame() ? await this.plugin.credentials.get(this.draft.id) : ''); }
@@ -41,6 +41,7 @@ export class ProviderModal extends Modal {
     new Setting(root).setName('API key').setDesc(`${this.plugin.credentials.mode}. Leave empty to keep the key if address and protocol are unchanged; enter a new key to replace it.`).addText(t => {
       tokenInput = t.inputEl; t.inputEl.type = 'password'; t.inputEl.autocomplete = 'off';
       t.setValue(this.token).onChange(v => { this.token = v; if (v) this.clearKey = false; });
+      t.inputEl.addEventListener('blur', () => { if (this.token.trim() && !this.busy) void this.test(); });
     });
     new Setting(root).setName('Clear API key').setDesc('Only clears this provider key when you save.').addToggle(t => t.setValue(this.clearKey).onChange(v => { this.clearKey = v; if (v) { this.token = ''; tokenInput.value = ''; } }));
     const test = root.createEl('button', { text: 'Refresh model list' }); test.disabled = this.busy;
@@ -89,7 +90,7 @@ export class ProviderModal extends Modal {
     this.busy = true; this.render();
     try {
       if (!this.selectedModel || !modelChoices(this.draft, this.discovered).includes(this.selectedModel)) throw new Error('Refresh the model list and select a model first');
-      this.draft.models = [...new Set([this.selectedModel, ...this.draft.models, ...this.discovered])].slice(0, 100);
+      this.draft.models = [...new Set([this.selectedModel, ...this.draft.models, ...this.discovered])].slice(0, 1000);
       validateProvider(this.draft); endpoint({ ...this.draft, model: this.draft.models[0] });
       const key = await this.candidateKey();
       if (this.draft.requiresKey && !key) throw new Error('This provider requires an API key');

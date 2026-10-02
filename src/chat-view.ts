@@ -10,13 +10,25 @@ export class ChatView extends ItemView {
   private draftText = '';
   private busy = false;
   private closed = false;
+  private modelBusy = false;
+  private modelStatus = '';
+  private modelLoad: Promise<void> | null = null;
   constructor(leaf: WorkspaceLeaf, private plugin: AutoScheduler) { super(leaf); }
   getViewType(): string { return CHAT_VIEW; }
   getDisplayText(): string { return 'AI scheduling assistant'; }
   getIcon(): string { return 'calendar-clock'; }
-  async onOpen(): Promise<void> { this.closed = false; this.render(); }
+  async onOpen(): Promise<void> { this.closed = false; this.render(); this.modelLoad = this.loadModels(); }
   async onClose(): Promise<void> { this.closed = true; this.messages = []; this.draftText = ''; this.contentEl.empty(); }
   refresh(): void { this.render(); }
+  private async loadModels(): Promise<void> {
+    if (this.closed || this.modelBusy || !this.plugin.byok.providers.length) return;
+    this.modelBusy = true; this.modelStatus = 'Loading provider models…'; this.render();
+    try {
+      const count = await this.plugin.refreshModels(this.plugin.byok.activeProviderId);
+      this.modelStatus = `${count} provider models loaded. Tool support depends on the model.`;
+    } catch (error) { this.modelStatus = `Model list not refreshed: ${(error as Error).message}`; }
+    finally { this.modelBusy = false; this.render(); }
+  }
   private render(): void {
     if (this.closed) return;
     const root = this.contentEl; root.empty(); root.addClass('auto-scheduler-chat');
@@ -32,11 +44,17 @@ export class ChatView extends ItemView {
         select.createEl('option', { text: `${provider.name} / ${model}`, value });
       }
       select.value = JSON.stringify([this.plugin.byok.activeProviderId, this.plugin.byok.activeModel]);
-      select.disabled = this.busy;
+      select.disabled = this.busy || this.modelBusy;
       select.addEventListener('change', () => {
         const [providerId, model] = JSON.parse(select.value) as [string, string];
-        void this.plugin.selectModel(providerId, model).catch(error => { new Notice((error as Error).message); this.render(); });
+        const previous = this.plugin.byok.activeProviderId;
+        void this.plugin.selectModel(providerId, model).then(() => { if (previous !== providerId) return this.loadModels(); }).catch(error => { new Notice((error as Error).message); this.render(); });
       });
+    }
+    if (this.plugin.byok.providers.length) {
+      const refresh = header.createEl('button', { text: 'Refresh models', cls: 'auto-scheduler-refresh-models' }); refresh.disabled = this.busy || this.modelBusy;
+      refresh.addEventListener('click', () => { void this.loadModels(); });
+      if (this.modelStatus) header.createEl('small', { text:this.modelStatus, cls:'auto-scheduler-model-status', attr:{'aria-live':'polite'} });
     }
     const log = root.createDiv({ cls: 'auto-scheduler-chat-log', attr: { 'aria-live': 'polite' } });
     for (const message of this.messages) {

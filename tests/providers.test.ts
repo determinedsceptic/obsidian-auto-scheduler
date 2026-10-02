@@ -130,3 +130,13 @@ it('offers preset and discovered models in lists for an existing single-model pr
   expect(p.models).toEqual(['gpt-6-luna']);
   expect(modelChoices(provider(),['new-model'])).toEqual(['manual-model','new-model']);
 });
+
+it('retains all 127 discovered models instead of truncating saved choices to 100',async()=>{
+  const names=Array.from({length:127},(_,i)=>`gpt-fixture-${i}`);
+  const result=await discoverModels(provider(),'test-only',async()=>({status:200,json:{data:names.map(id=>({id}))}}));
+  expect(result.models).toHaveLength(127);expect(()=>validateProvider(provider({models:result.models}))).not.toThrow();
+  expect(()=>validateProvider(provider({models:Array.from({length:1001},(_,i)=>`fixture-${i}`)}))).toThrow('1000');
+});
+it('distinguishes list permission failures from invalid keys without exposing server bodies',async()=>{
+  await expect(discoverModels(provider(),'test-only',async()=>({status:403,json:{error:'private-server-detail'}}))).rejects.toThrow('HTTP 403');
+});

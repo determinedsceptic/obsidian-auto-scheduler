@@ -9,6 +9,7 @@
 - OpenAI preset offers both `gpt-6-luna` and `gpt-6-sol` under one provider key.
 - Missing flexible-task estimates use the configurable duration default; undated appointments use their next occurrence, with assumptions reported.
 - Mixed task/event/habit requests apply and undo together; invalid provider-response glyphs are filtered from prose.
+- Provider model catalogs load automatically on assistant/configuration open and new-key entry; sidebar refresh preserves up to 1,000 choices and keeps cached models on discovery failure.
 - Model selection prioritizes dropdowns populated by discovery, includes preset choices for existing providers, and collapses manual IDs into an advanced fallback.
 - Exact one-off event tool and configurable default duration for start-only events and habits, with reported assumptions, conflict protection and persistent undo.
 - Start-only handwritten daily, fixed-event and habit rows reserve time without source edits.

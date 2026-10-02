@@ -5,7 +5,7 @@ import { webcrypto } from 'node:crypto';
 import assert from 'node:assert/strict';
 process.env.TZ = 'Asia/Shanghai';
 const notices = []; let saved = null; let latestModal;
-let mockResponse; const requests = []; const openedNotes = [];
+let mockResponse; let mockStatus = 200; const requests = []; const openedNotes = [];
 class Node {
   constructor(tag = '', options = {}) { this.tag = tag; this.options = options; this.children = []; this.events = {}; this.value = options.value ?? ''; }
   createEl(tag, options) { const node = new Node(tag, options); this.children.push(node); return node; }
@@ -61,7 +61,7 @@ vm.runInNewContext(await readFile('main.js', 'utf8'), {
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
     return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting,
-      requestUrl: async request => { requests.push(request); return { status: 200, json: mockResponse }; },
+      requestUrl: async request => { requests.push(request); return { status: mockStatus, json: mockResponse }; },
       Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
   },
 });
@@ -161,7 +161,7 @@ saved = null; files.clear(); folders.clear(); folders.add('Tasks');
 const chatPlugin = new AutoScheduler(app); await chatPlugin.onload();
 await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture', 'fixture-pro'] }, '');
 await chatPlugin.updateSettings({ weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 60, fixedBuffer: 0, blockBuffer: 0 });
-const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen();
+const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen(); await chatView.modelLoad;
 const header = chatView.contentEl.children.find(node => node.options.cls === 'auto-scheduler-chat-header');
 assert.equal(header.children[0].options.text, 'Configure provider / API key');
 const modelSelect = header.all().find(node => node.tag === 'select' && node.options.attr?.['aria-label'] === 'Chat model');
@@ -258,7 +258,7 @@ saved = null; files.clear(); folders.clear();
 const habitChat = new AutoScheduler(app); await habitChat.onload();
 await habitChat.saveProvider({ id: 'habit-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
 await habitChat.updateSettings({ habitFolder: 'Templates/Habits', fixedBuffer: 0, blockBuffer: 0 });
-const habitView = habitChat.views.get('auto-scheduler-chat')({}); await habitView.onOpen();
+const habitView = habitChat.views.get('auto-scheduler-chat')({}); await habitView.onOpen(); await habitView.modelLoad;
 const habitDraft = { title: '饭后慢走', start: '19:00', end: '19:30', days: [0,1,2,3,4,5,6], priority: 3 };
 mockResponse = { output: [{ type: 'function_call', name: 'create_habits', arguments: JSON.stringify({ habits: [habitDraft] }) }] };
 const oldModal = latestModal;
@@ -281,7 +281,7 @@ saved = null; files.clear(); folders.clear();
 const eventChat = new AutoScheduler(app); await eventChat.onload();
 await eventChat.saveProvider({ id: 'event-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
 await eventChat.updateSettings({ defaultEventDuration: 45 });
-const eventView = eventChat.views.get('auto-scheduler-chat')({}); await eventView.onOpen();
+const eventView = eventChat.views.get('auto-scheduler-chat')({}); await eventView.onOpen(); await eventView.modelLoad;
 mockResponse = { output: [{ type: 'function_call', name: 'create_events', arguments: JSON.stringify({ events: [{ title: 'Evening exercise', date: '2026-10-01', start: '19:00', minutes: null }] }) }] };
 const eventModalBefore = latestModal;
 await eventView.send('Exercise today at 19:00');
@@ -325,7 +325,7 @@ console.log('PASS: flexible-task default reported, discovered-model dropdown sav
 saved = null; files.clear(); folders.clear();
 const mixedChat = new AutoScheduler(app); await mixedChat.onload();
 await mixedChat.saveProvider({id:'mixed-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-const mixedView = mixedChat.views.get('auto-scheduler-chat')({}); await mixedView.onOpen();
+const mixedView = mixedChat.views.get('auto-scheduler-chat')({}); await mixedView.onOpen(); await mixedView.modelLoad;
 mockResponse = {output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify({
   tasks:[{title:'Phone number',minutes:null,minMinutes:null,priority:3,split:true,due:null,earliest:null}],
   events:[{title:'Gym',date:null,start:'11:30',minutes:60}],
@@ -343,3 +343,29 @@ mixedRestart.commands.find(c => c.id === 'undo-last').callback(); await mixedRes
 assert.equal(saved.aiTasks.length,0);assert.equal(files.get('Habits/AI-Habits.md'),'');
 assert.equal(files.get('DailyNotes/2026-10-01.md'),'# Day planner\n');
 console.log('PASS: mixed plan preserves exact gym time, defaults phone task/habit durations and event date, writes all kinds together and undoes after restart');
+
+// Opening chat loads the actual provider catalog, including choices beyond the old 100 limit.
+const catalog = Array.from({length:127},(_,i)=> i === 0 ? 'fixture' : `gpt-fixture-${String(i).padStart(3, '0')}`);
+mockResponse = {data:catalog.map(id=>({id}))};
+const catalogPlugin = new AutoScheduler(app); await catalogPlugin.onload();
+const catalogView = catalogPlugin.views.get('auto-scheduler-chat')({}); await catalogView.onOpen(); await catalogView.modelLoad;
+assert.equal(requests.at(-1).method,'GET');assert(requests.at(-1).url.endsWith('/models'));
+assert.equal(catalogPlugin.byok.providers.find(p=>p.id==='mixed-fixture').models.filter(id=>catalog.includes(id)).length,127);
+let catalogSelect = catalogView.contentEl.all().find(n=>n.tag==='select' && n.options.attr?.['aria-label']==='Chat model');
+assert(catalogSelect.children.some(n=>n.options.text==='Fixture / gpt-fixture-126'));
+catalogSelect.value = JSON.stringify(['mixed-fixture','gpt-fixture-126']);catalogSelect.events.change(); await catalogPlugin.operations.tail;
+assert.equal(saved.byok.activeModel,'gpt-fixture-126');
+const modelStateBeforeFailure = JSON.stringify(catalogPlugin.byok);
+mockStatus = 403;await catalogView.loadModels();mockStatus = 200;
+assert.equal(JSON.stringify(catalogPlugin.byok),modelStateBeforeFailure);
+assert(catalogView.contentEl.all().some(n=>n.options.text?.includes('HTTP 403')));
+assert(catalogView.contentEl.all().some(n=>n.options.text==='Refresh models'));
+console.log('PASS: automatic GET catalog discovery, persistence of 127 choices, selecting beyond 100, sidebar refresh and failure preserves cached list/model');
+
+// Opening the chat itself runs in the operations queue. Discovery must not wait inside it.
+const queuedView = catalogPlugin.views.get('auto-scheduler-chat')({});
+mockResponse = {data:catalog.map(id=>({id}))};
+await Promise.race([catalogPlugin.action(()=>queuedView.onOpen()),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Chat opening deadlocked with model refresh')),1000))]);
+await queuedView.modelLoad;
+assert(queuedView.contentEl.all().some(n=>n.options.text==='127 provider models loaded. Tool support depends on the model.'));
+console.log('PASS: queued sidebar opening releases the operation before automatic catalog persistence');

@@ -8,6 +8,8 @@
 .auto-scheduler-chat-header { flex: none; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
 .auto-scheduler-chat-header button { width: 100%; font-size: var(--font-small); box-shadow: none; }
 .auto-scheduler-chat-model { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; color: var(--text-muted); font-size: var(--font-smallest); }
+.auto-scheduler-model-status { display: block; margin-top: 6px; color: var(--text-muted); font-size: var(--font-smallest); overflow-wrap: anywhere; }
+.auto-scheduler-chat-header .auto-scheduler-refresh-models { margin-top: 6px; }
 .auto-scheduler-chat-model select { width: 100%; min-width: 0; color: var(--text-normal); }
 .auto-scheduler-chat-log { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
 .auto-scheduler-message { padding: 12px; margin-bottom: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }

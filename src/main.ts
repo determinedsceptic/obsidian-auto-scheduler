@@ -6,14 +6,14 @@ import { parseHabits, HABIT_TEMPLATE } from './habits';
 import { Credentials } from './credentials';
 import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
-import { activeConfig, migrateByok, validateByok, validateProvider, modelChoices } from './providers';
+import { activeConfig, migrateByok, validateByok, validateProvider, modelChoices, discoverModels } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
 import { materializeTasks, validAiTasks } from './llm';
 import { describeAiSchedule } from './ai-result';
 import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
 import { validTracking } from './tracking';
-import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
 import type { Preview, VaultPort, StatePort } from './transaction';
 import { DEFAULT_SETTINGS, DEFAULT_LLM } from './types';
@@ -133,6 +133,24 @@ export default class AutoScheduler extends Plugin {
   }
   refreshChats(): void { for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.refresh(); }
   openProvider(existing?: ProviderConfig, done?: () => void): void { new ProviderModal(this, existing, done).open(); }
+  async refreshModels(providerId: string): Promise<number> {
+    return this.operations.run(async () => {
+      const provider = this.byok.providers.find(p => p.id === providerId);
+      if (!provider) throw new Error('Choose a provider first');
+      const token = await this.credentials.get(providerId);
+      const result = await discoverModels(provider, token, async (url, headers) => {
+        const r = await requestUrl({url, method:'GET', headers, throw:false});
+        return {status:r.status,json:r.status >= 200 && r.status < 300 ? r.json : {}};
+      });
+      const selected = this.byok.activeProviderId === providerId ? this.byok.activeModel : provider.models[0];
+      const models = [...new Set([selected, ...result.models, ...provider.models])].slice(0, 1000);
+      const byok = { ...this.byok, providers:this.byok.providers.map(p => p.id === providerId ? {...p,models} : p) };
+      validateByok(byok);
+      const next = { ...this.state, byok, llm:activeConfig(byok) };
+      await this.saveData(next); this.state = next; this.refreshChats();
+      return result.models.length;
+    });
+  }
   async selectModel(providerId: string, model: string): Promise<void> {
     await this.operations.run(async () => {
       const provider = this.byok.providers.find(p => p.id === providerId);

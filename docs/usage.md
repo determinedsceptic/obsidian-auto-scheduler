@@ -4,7 +4,7 @@
 
 All paths are relative to the vault. Hidden folders and `..` are rejected.
 
-To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Scheduler → Add provider**, choose **DeepSeek**, enter your DeepSeek API key, and select **Model for chat** from the list before saving. **Refresh model list** loads provider models directly into that dropdown; the manual-ID fallback is collapsed under **Advanced: custom model IDs**. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Switch between saved models or providers with the **Model** selector above the sidebar conversation; **Chat model** in plugin settings remains available. The sidebar's **Configure provider / API key** button edits the active provider. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
+To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Scheduler → Add provider**, choose **DeepSeek**, enter your DeepSeek API key, and select **Model for chat** from the list before saving. Editing a saved provider automatically loads its model list; a newly entered key loads models after leaving the key field. **Refresh model list** reloads provider models directly into that dropdown; the manual-ID fallback is collapsed under **Advanced: custom model IDs**. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Switch between saved models or providers with the **Model** selector above the sidebar conversation; **Chat model** in plugin settings remains available. The sidebar's **Configure provider / API key** button edits the active provider. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -23,6 +23,14 @@ To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Sched
 | Block buffer | 15 minutes | After each task or habitual block. |
 
 Habits are fixed blocks; events and their buffers cannot overlap them. Habits outside work windows remain visible without consuming work-window capacity.
+
+## Automatic model discovery
+
+API keys authenticate requests; the plugin obtains model IDs from the configured provider's `/models` endpoint. Opening the assistant loads the active provider's list automatically and saves it for later selection. Switching providers loads that provider's list. **Refresh models** in the sidebar refreshes the catalog without running inference. Provider configuration also loads the list when opened for a saved provider, or when you leave a newly entered key field.
+
+Up to 1,000 returned/saved model IDs are supported; the old 100-choice truncation is removed. Your selected model is preserved. Discovery failure leaves cached choices and the active model intact. An endpoint with no model-list support can still use presets or the collapsed manual-ID fallback. If a provider reports more pages, discovery currently loads its first page and reports that limitation.
+
+A model-list entry is API availability metadata, not proof of text output or tool calling. Image/audio/embedding entries may appear; choose a model that supports the configured API protocol and function tools. OpenAI documents the endpoint in its [API reference](https://developers.openai.com/api/reference/resources/models/methods/list).
 
 ## Source tasks
 
