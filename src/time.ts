@@ -74,12 +74,13 @@ export function safeVaultPath(value: unknown): value is string {
 }
 export function validateSettings(settings: Settings): string[] {
   const errors: string[] = [];
-  for (const field of ['taskFolder', 'fixedFile', 'outputFile'] as const) {
+  for (const field of ['taskFolder', 'habitFolder', 'fixedFile', 'outputFile'] as const) {
     const value = settings[field];
     if (!safeVaultPath(value)) {
       errors.push(`${field} 必须是库内相对路径，不能包含隐藏目录或 ..`);
     }
   }
+  if ([settings.taskFolder, settings.dailyFolder].some(folder => folder === settings.habitFolder || folder?.startsWith(settings.habitFolder + '/')) || [settings.fixedFile, settings.outputFile].some(path => path === settings.habitFolder || path?.startsWith(settings.habitFolder + '/'))) errors.push('习惯目录不能包含任务目录、每日目录或固定/输出文件');
   if (!settings.fixedFile?.endsWith('.md') || !settings.outputFile?.endsWith('.md')) errors.push('固定日程和输出路径必须以 .md 结尾');
   if (settings.fixedFile === settings.outputFile) errors.push('固定日程和输出文件不能相同');
   if (settings.taskFolder === settings.outputFile || settings.taskFolder === settings.fixedFile) errors.push('任务目录不能是输入/输出文件');

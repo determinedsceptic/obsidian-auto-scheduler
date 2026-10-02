@@ -61,7 +61,7 @@ const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => 
   process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
 } };
 const plugin = new AutoScheduler(app); await plugin.onload();
-assert.equal(plugin.commands.length, 4);
+assert.equal(plugin.commands.length, 5);
 plugin.commands.find(command => command.id === 'preview-week').callback();
 await plugin.operations.tail;
 assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
@@ -202,3 +202,29 @@ chatPlugin.commands.find(command => command.id === 'undo-last').callback(); awai
 assert.equal(saved.aiTasks.length, 1);
 for (const [path, value] of partialFilesBefore) assert.equal(files.get(path), value);
 console.log('PASS: chat direct scheduling, exact cross-day times/links, partial capacity, no invented model times, no link metadata sent, navigation failure, invalid inputs, partial write recovery');
+// The actual bundle must load templates even without normal tasks or a provider.
+saved = null; files.clear();
+const habitPlugin = new AutoScheduler(app); await habitPlugin.onload();
+habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
+assert(files.get('Habits/Template.md').includes('enabled=false'));
+assert.equal(openedNotes.at(-1), 'Habits/Template.md');
+files.set('Habits/Template.md', '- 19:00-19:30 晚间习惯 <!-- habit id=evening days=0,1,2,3,4,5,6 priority=4 -->');
+habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
+assert(files.get('Habits/Template.md').includes('晚间习惯'));
+habitPlugin.state.settings = { ...habitPlugin.state.settings, outputLocation: 'daily', outputMode: 'day-planner', cleanDaily: true };
+habitPlugin.commands.find(c => c.id === 'preview-week').callback(); await habitPlugin.operations.tail;
+assert.equal(latestModal.preview.result.errors.length, 0);
+assert.equal(latestModal.preview.result.blocks.length, 7);
+console.log('PASS: habit template command opens note, never overwrites, and generates seven fixed occurrences without tasks or LLM');
+const applyHabits = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+applyHabits.events.click(); await habitPlugin.operations.tail;
+assert(files.get('DailyNotes/2026-10-01.md').includes('19:00 - 19:30 ⏫ 晚间习惯'));
+assert(!files.get('DailyNotes/2026-10-01.md').includes('as-block'));
+const habitRestart = new AutoScheduler(app); await habitRestart.onload();
+habitRestart.commands.find(c => c.id === 'preview-week').callback(); await habitRestart.operations.tail;
+assert.equal(latestModal.preview.diff.added.length, 0);
+assert.equal(latestModal.preview.diff.removed.length, 0);
+habitRestart.commands.find(c => c.id === 'undo-last').callback(); await habitRestart.operations.tail;
+assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
+assert(files.get('Habits/Template.md').includes('晚间习惯'));
+console.log('PASS: actual bundle clean habit output, restart deduplication, and undo without changing template');

@@ -3,6 +3,7 @@ import { dailyDocument, dailyInputs, dailyPaths, renderDaily } from './daily';
 import { parseFixed, parseTasks } from './parser';
 import { diffBlocks, emptyManagedFile, parseOutput, renderOutput } from './output';
 import { dateKey, epochMinute, safeVaultPath, validateSettings } from './time';
+import { expandHabits, isHabit, parseHabits } from './habits';
 import { schedule } from './scheduler';
 import type { Task, Tracking, FileChange, ScheduleResult, Settings, UndoRecord } from './types';
 export interface VaultPort {
@@ -23,7 +24,8 @@ async function snapshot(vault: VaultPort, settings: Settings, today: string, his
   const targets = settings.outputLocation === 'daily' ? dailyPaths(settings, today) : [settings.outputFile];
   if (targets.includes(settings.fixedFile)) throw new Error('每日输出不能与固定日程文件相同');
   const paths = await vault.listTasks(settings.taskFolder, [settings.fixedFile, ...(settings.outputLocation === 'single' ? targets : [])]);
-  const all = [...new Set([...paths, settings.fixedFile, ...targets, ...historyPaths])].sort();
+  const habitPaths = await vault.listTasks(settings.habitFolder, []);
+  const all = [...new Set([...paths, ...habitPaths, settings.fixedFile, ...targets, ...historyPaths])].sort();
   const contents = await Promise.all(all.map(async path => [path, await vault.read(path)] as const));
   return Object.fromEntries(contents);
 }
@@ -54,7 +56,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     try { daily.set(path, dailyInputs(path, content)); }
     catch (error) { dailyErrors.push({ path, line: 0, message: (error as Error).message }); }
   }
-  const parsed = parseTasks(Object.entries(inputs).filter(([path]) => path !== frozen.fixedFile && (frozen.outputLocation === 'daily' || path !== frozen.outputFile)).map(([path, content]) => ({ path, content: daily.get(path)?.content ?? content ?? '' })));
+  const parsed = parseTasks(Object.entries(inputs).filter(([path]) => !path.startsWith(frozen.habitFolder + '/') && path !== frozen.fixedFile && (frozen.outputLocation === 'daily' || path !== frozen.outputFile)).map(([path, content]) => ({ path, content: daily.get(path)?.content ?? content ?? '' })));
   const allAiTasks: Task[] = JSON.parse(JSON.stringify([...aiTasks, ...addedTasks]));
   if (new Set([...parsed.tasks, ...allAiTasks].map(t => t.id)).size !== parsed.tasks.length + allAiTasks.length) throw new Error('任务 ID 重复');
   const historyCompleted = new Map<string, number>();
@@ -68,7 +70,9 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     const remaining = Math.max(0, t.remaining - done);
     return { ...t, remaining, min: Math.min(t.min, remaining), completed: t.completed || remaining === 0 };
   }));
-  parsed.errors.push(...dailyErrors, ...[...daily.values()].flatMap(d => d.errors));
+  if (parsed.tasks.some(t => isHabit(t.id))) parsed.errors.push({ path: frozen.taskFolder, line: 0, message: 'habit_ 是习惯实例的保留 ID 前缀' });
+  const habits = parseHabits(Object.entries(inputs).filter(([path]) => path.startsWith(frozen.habitFolder + '/')).map(([path, content]) => ({ path, content: content ?? '' })));
+  parsed.errors.push(...habits.errors, ...dailyErrors, ...[...daily.values()].flatMap(d => d.errors));
   const fixed = parseFixed({ path: frozen.fixedFile, content: inputs[frozen.fixedFile] ?? '' });
   fixed.intervals.push(...[...daily.values()].flatMap(d => d.intervals));
   const preview: Preview = {
@@ -83,9 +87,12 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     if (frozen.outputLocation === 'daily') for (const [path, doc] of Object.entries(documents)) {
       if (doc.blocks.some(b => !path.endsWith(`/${b.date}.md`))) throw new Error(`工作块日期与每日笔记不符：${path}`);
     }
-    const result: ScheduleResult = formatOnly ? { blocks: oldBlocks, unscheduled: [], days: [], errors: [] } : schedule(parsed.tasks, fixed.intervals, oldBlocks, frozen, now);
+    const expanded = expandHabits(habits.habits, oldBlocks, today);
+    if (!formatOnly) parsed.tasks.push(...expanded.tasks);
+    const result: ScheduleResult = formatOnly ? { blocks: oldBlocks, unscheduled: [], days: [], errors: [] } : schedule(parsed.tasks, fixed.intervals, [...oldBlocks.filter(b => !isHabit(b.taskId)), ...expanded.blocks], frozen, now);
     result.errors.unshift(...parsed.errors, ...fixed.errors); preview.result = result;
     if (!result.errors.length) {
+      const plainSourceIds = new Set([...allAiTasks.map(t => t.id), ...oldBlocks.filter(b => isHabit(b.taskId)).map(b => b.taskId), ...expanded.tasks.map(t => t.id)]);
       preview.outputs = {};
       for (const [path, document] of Object.entries(documents)) {
         const blocks = frozen.outputLocation === 'daily' ? result.blocks.filter(b => path.endsWith(`/${b.date}.md`)) : result.blocks;
@@ -94,8 +101,8 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
         const output = frozen.outputLocation === 'daily' ? renderDaily(document, blocks, frozen.outputMode, frozen.ganttFilter) : renderOutput(document, blocks, frozen.outputMode, frozen.ganttFilter);
         parseOutput(output);
         if (frozen.outputLocation === 'daily') {
-          const before = cleanDaily(renderDaily(document, document.blocks, frozen.outputMode, frozen.ganttFilter), new Set(allAiTasks.map(t => t.id)), new Map(), false).record;
-          const clean = cleanDaily(output, new Set(allAiTasks.map(t => t.id)), new Map(parsed.tasks.map(t => [t.id, t.priority])));
+          const before = cleanDaily(renderDaily(document, document.blocks, frozen.outputMode, frozen.ganttFilter), plainSourceIds, new Map(), false).record;
+          const clean = cleanDaily(output, plainSourceIds, new Map(parsed.tasks.map(t => [t.id, t.priority])));
           preview.nextTracking[path] = { before, after: frozen.cleanDaily ? clean.record : null };
           preview.outputs[path] = frozen.cleanDaily ? clean.text : output;
         } else preview.outputs[path] = output;
@@ -109,7 +116,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
 export async function applyPreview(vault: VaultPort, state: StatePort, preview: Preview, settings: Settings, now = new Date()): Promise<{ changed: boolean; warning?: string }> {
   if (preview.result.errors.length || preview.output === null) throw new Error('预览含错误，不能应用');
   if (preview.settingsKey !== settingKey(settings) || preview.timezone !== timezone() || preview.today !== dateKey(now)) throw new Error('设置、时区或日期已变化，请重新预览');
-  if (!same(preview.snapshot, await snapshot(vault, preview.settings, preview.today, preview.historyPaths))) throw new Error('任务、固定日程或输出已变化，请重新预览');
+  if (!same(preview.snapshot, await snapshot(vault, preview.settings, preview.today, preview.historyPaths))) throw new Error('任务、习惯模板、固定日程或输出已变化，请重新预览');
   if (state.getTracking && JSON.stringify(state.getTracking()) !== JSON.stringify(preview.tracking)) throw new Error('工作块跟踪数据已变化，请重新预览');
   if (state.getAiTasks && JSON.stringify(state.getAiTasks()) !== JSON.stringify(preview.aiTasksBefore)) throw new Error('AI 任务已变化，请重新预览');
   const outputs = preview.outputs ?? { [settings.outputFile]: preview.output };

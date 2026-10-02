@@ -11,13 +11,13 @@ export interface Block extends Interval {
   locked: boolean; completed: boolean; raw?: string;
 }
 export interface Settings {
-  taskFolder: string; fixedFile: string; outputFile: string; weekdays: number[];
+  taskFolder: string; habitFolder: string; fixedFile: string; outputFile: string; weekdays: number[];
   periods: string[]; dailyCapacity: number; fixedBuffer: number; blockBuffer: number;
   outputMode: 'plain' | 'day-planner' | 'gantt';
   outputLocation: 'single' | 'daily'; dailyFolder: string; ganttFilter: string; cleanDaily: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
-  taskFolder: 'Tasks', fixedFile: 'Scheduler/Fixed.md', outputFile: 'Scheduler/Schedule.md',
+  taskFolder: 'Tasks', habitFolder: 'Habits', fixedFile: 'Scheduler/Fixed.md', outputFile: 'Scheduler/Schedule.md',
   weekdays: [1, 2, 3, 4, 5], periods: ['09:00-12:00', '14:00-18:00'],
   dailyCapacity: 360, fixedBuffer: 15, blockBuffer: 15, outputMode: 'plain', outputLocation: 'single', dailyFolder: 'DailyNotes', ganttFilter: '🎯', cleanDaily: true,
 };

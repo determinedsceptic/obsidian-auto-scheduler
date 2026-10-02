@@ -1,3 +1,4 @@
+import { HABIT_TEMPLATE } from './habits';
 import { Credentials } from './credentials';
 import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
@@ -99,6 +100,13 @@ export default class AutoScheduler extends Plugin {
     this.addCommand({ id: 'open-chat', name: '打开 AI 任务助手', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));
+    this.addCommand({ id: 'create-habit-template', name: '创建习惯模板', callback: () => { void this.action(async () => {
+      if (!safeVaultPath(this.state.settings.habitFolder)) throw new Error('请设置安全的习惯目录');
+      const path = `${this.state.settings.habitFolder}/Template.md`;
+      if (await this.vaultPort.read(path) === null) await this.vaultPort.writeChecked(path, null, HABIT_TEMPLATE);
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(file);
+    }); } });
     this.addCommand({ id: 'preview-week', name: '预览一周排程', callback: () => { void this.action(async () => {
       const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, false, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
@@ -300,6 +308,7 @@ class SchedulerSettings extends PluginSettingTab {
         }));
     }
     text('任务目录', '库内目录，仅扫描该目录下 Markdown', settings.taskFolder, taskFolder => ({ taskFolder }));
+    text('习惯模板目录', '每次排程先读取此目录的 Markdown；使用“创建习惯模板”命令建立示例', settings.habitFolder, habitFolder => ({ habitFolder }));
     text('固定日程文件', '格式：- YYYY-MM-DD HH:mm-HH:mm 标题；不存在时按空日程处理', settings.fixedFile, fixedFile => ({ fixedFile }));
     text('输出文件', '专用 Markdown；已有普通笔记不会被接管', settings.outputFile, outputFile => ({ outputFile }));
     new Setting(containerEl).setName('输出位置').addDropdown(input => input.addOption('single', '专用文件').addOption('daily', '每日笔记：Day planner').setValue(settings.outputLocation).onChange(value => { void this.plugin.updateSettings({ outputLocation: value as Settings['outputLocation'] }); }));
