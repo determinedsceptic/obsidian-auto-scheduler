@@ -11,4 +11,4 @@ The isolated **Auto Scheduler Demo** vault uses only synthetic notes from `examp
 | weekly-preview.png | Manual preview showing occupied working minutes and fixed evening habits outside working hours. |
 | provider-settings.png | English provider editor with a synthetic localhost endpoint and empty API-key field. |
 
-All captures use the 0.6.0 development candidate. The first two precede the final punctuation-only adjustment adding a space before `(priority ...)`; scheduling behavior is unchanged. The final two show the final bundle. Core Obsidian menus may follow the host's language preference; plugin UI defaults to English. See `examples/README.md` for reproduction steps.
+All captures use an earlier 0.6.0 development candidate, before the sidebar model selector was added. The first two also precede a punctuation-only adjustment adding a space before `(priority ...)`; scheduling behavior is unchanged. Core Obsidian menus may follow the host's language preference; plugin UI defaults to English. See `examples/README.md` for reproduction steps.

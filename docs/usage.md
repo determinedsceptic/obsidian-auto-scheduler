@@ -4,7 +4,7 @@
 
 All paths are relative to the vault. Hidden folders and `..` are rejected.
 
-To use DeepSeek in AI chat, open **Configure provider / API key**, choose **DeepSeek**, enter your DeepSeek API key, and save. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Choose between them under **Chat model** in plugin settings. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
+To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Scheduler → Add provider**, choose **DeepSeek**, enter your DeepSeek API key, and select **Model for chat** before saving. The template offers `deepseek-flash` and `deepseek-v4-pro` through the Chat Completions API. Switch between saved models or providers with the **Model** selector above the sidebar conversation; **Chat model** in plugin settings remains available. The sidebar's **Configure provider / API key** button edits the active provider. Model discovery can refresh the list; model IDs can also be edited manually. API use may be billed by DeepSeek.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

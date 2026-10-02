@@ -9,3 +9,5 @@ This release has not been accepted into the Obsidian community directory. Screen
 Gantt Calendar output now uses Dataview priority fields consistently, preserving priority and exact dates through the pinned upstream parser/serializer.
 
 The DeepSeek preset now includes `deepseek-flash` and `deepseek-v4-pro`, the official API base URL, and the existing Chat Completions tool-calling path. Users bring their own DeepSeek API key.
+
+The assistant sidebar now has a model selector for every saved provider/model pair. Provider configuration lets users choose the model to use immediately after saving.

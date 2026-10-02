@@ -22,6 +22,21 @@ export class ChatView extends ItemView {
     const header = root.createDiv({ cls: 'auto-scheduler-chat-header' });
     const configure = header.createEl('button', { text: 'Configure provider / API key' }); configure.disabled = this.busy;
     configure.addEventListener('click', () => this.plugin.openProvider(this.plugin.byok.providers.find(p => p.id === this.plugin.byok.activeProviderId)));
+    if (this.plugin.byok.providers.length) {
+      const picker = header.createEl('label', { cls: 'auto-scheduler-chat-model' });
+      picker.createSpan({ text: 'Model' });
+      const select = picker.createEl('select', { attr: { 'aria-label': 'Chat model' } });
+      for (const provider of this.plugin.byok.providers) for (const model of provider.models) {
+        const value = JSON.stringify([provider.id, model]);
+        select.createEl('option', { text: `${provider.name} / ${model}`, value });
+      }
+      select.value = JSON.stringify([this.plugin.byok.activeProviderId, this.plugin.byok.activeModel]);
+      select.disabled = this.busy;
+      select.addEventListener('change', () => {
+        const [providerId, model] = JSON.parse(select.value) as [string, string];
+        void this.plugin.selectModel(providerId, model).catch(error => { new Notice((error as Error).message); this.render(); });
+      });
+    }
     const log = root.createDiv({ cls: 'auto-scheduler-chat-log', attr: { 'aria-live': 'polite' } });
     for (const message of this.messages) {
       const row = log.createDiv({ cls: `auto-scheduler-message auto-scheduler-${message.role}` });

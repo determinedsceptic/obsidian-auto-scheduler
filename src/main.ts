@@ -137,12 +137,13 @@ export default class AutoScheduler extends Plugin {
       const next = { ...this.state, byok, llm: activeConfig(byok) }; await this.saveData(next); this.state = next; this.refreshChats();
     });
   }
-  async saveProvider(provider: ProviderConfig, token: string): Promise<void> {
+  async saveProvider(provider: ProviderConfig, token: string, selectedModel?: string): Promise<void> {
     await this.operations.run(async () => {
       validateProvider(provider);
+      if (selectedModel !== undefined && !provider.models.includes(selectedModel)) throw new Error('Select a model saved under this provider');
       if (provider.requiresKey && !token.trim()) throw new Error('Enter an API key for this provider');
       const providers = this.byok.providers.filter(p => p.id !== provider.id); providers.push(provider);
-      const byok = { ...this.byok, providers, activeProviderId: provider.id, activeModel: provider.models.includes(this.byok.activeModel) ? this.byok.activeModel : provider.models[0] }; validateByok(byok);
+      const byok = { ...this.byok, providers, activeProviderId: provider.id, activeModel: selectedModel ?? (this.byok.activeProviderId === provider.id && provider.models.includes(this.byok.activeModel) ? this.byok.activeModel : provider.models[0]) }; validateByok(byok);
       const previousKey = await this.credentials.get(provider.id);
       await this.credentials.set(provider.id, token.trim());
       const next = { ...this.state, byok, llm: activeConfig(byok) };

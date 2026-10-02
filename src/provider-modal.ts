@@ -5,6 +5,7 @@ import { PROVIDER_TEMPLATES, discoverModels, validateProvider } from './provider
 import { endpoint } from './llm';
 export class ProviderModal extends Modal {
   private draft: ProviderConfig;
+  private selectedModel: string;
   private token = '';
   private clearKey = false;
   private discovered: string[] = [];
@@ -16,6 +17,8 @@ export class ProviderModal extends Modal {
   constructor(private plugin: AutoScheduler, private existing?: ProviderConfig, private done?: () => void) {
     super(plugin.app);
     this.draft = existing ? structuredClone(existing) : { id: crypto.randomUUID().replace(/-/g, ''), ...PROVIDER_TEMPLATES.openai };
+    this.selectedModel = existing && plugin.byok.activeProviderId === existing.id && existing.models.includes(plugin.byok.activeModel)
+      ? plugin.byok.activeModel : this.draft.models[0] ?? '';
   }
   onOpen(): void { this.render(); }
   onClose(): void { this.closed = true; this.token = ''; this.contentEl.empty(); }
@@ -29,7 +32,7 @@ export class ProviderModal extends Modal {
     if (!this.existing) new Setting(root).setName('Provider template').addDropdown(d => {
       for (const [id, t] of Object.entries(PROVIDER_TEMPLATES)) d.addOption(id, t.name);
       d.setValue(Object.keys(PROVIDER_TEMPLATES).find(k => PROVIDER_TEMPLATES[k].name === this.draft.name) || 'custom');
-      d.onChange(value => { this.draft = { id: this.draft.id, ...PROVIDER_TEMPLATES[value], models: [...PROVIDER_TEMPLATES[value].models] }; this.token = ''; this.clearKey = false; this.discovered = []; this.status = ''; this.render(); });
+      d.onChange(value => { this.draft = { id: this.draft.id, ...PROVIDER_TEMPLATES[value], models: [...PROVIDER_TEMPLATES[value].models] }; this.selectedModel = this.draft.models[0] ?? ''; this.token = ''; this.clearKey = false; this.discovered = []; this.status = ''; this.render(); });
     });
     new Setting(root).setName('Display name').addText(t => t.setValue(this.draft.name).onChange(v => { this.draft.name = v.trim(); }));
     new Setting(root).setName('Protocol').addDropdown(d => d.addOption('responses', 'OpenAI Responses').addOption('chat-completions', 'OpenAI-compatible Chat Completions').addOption('anthropic', 'Anthropic Messages').addOption('gemini', 'Google Gemini').setValue(this.draft.protocol).onChange(v => { this.draft.protocol = v as ProviderConfig['protocol']; this.token = ''; this.discovered = []; this.status = 'Protocol changed. Re-enter your key; the saved key will not be sent to the new endpoint.'; this.render(); }));
@@ -46,12 +49,26 @@ export class ProviderModal extends Modal {
     root.createEl('p', { text: this.status || 'Testing requests the model list, not an inference. A successful list does not guarantee tool calling.', attr: { 'aria-live': 'polite' } });
     let modelInput: HTMLTextAreaElement;
     new Setting(root).setName('Model IDs').setDesc('One per line. Enter IDs manually if model discovery is unavailable.').addTextArea(t => {
-      modelInput = t.inputEl; t.inputEl.rows = 4; t.setValue(this.draft.models.join('\n')).onChange(v => { this.draft.models = [...new Set(v.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]; });
+      modelInput = t.inputEl; t.inputEl.rows = 4; t.setValue(this.draft.models.join('\n')).onChange(v => { this.draft.models = [...new Set(v.split(/\r?\n/).map(s => s.trim()).filter(Boolean))]; refreshModels(); });
+    });
+    let modelSelect: HTMLSelectElement;
+    const refreshModels = (): void => {
+      if (!this.draft.models.includes(this.selectedModel)) this.selectedModel = this.draft.models[0] ?? '';
+      modelSelect.replaceChildren();
+      for (const model of this.draft.models) modelSelect.createEl('option', { text: model, value: model });
+      modelSelect.value = this.selectedModel;
+      modelSelect.disabled = this.busy || !this.draft.models.length;
+    };
+    new Setting(root).setName('Model for chat').setDesc('Choose which saved model to use now; change it later in the assistant sidebar.').addDropdown(d => {
+      modelSelect = d.selectEl;
+      for (const model of this.draft.models) d.addOption(model, model);
+      d.setValue(this.selectedModel).onChange(value => { this.selectedModel = value; });
+      d.setDisabled(this.busy || !this.draft.models.length);
     });
     if (this.discovered.length) {
       const list = root.createDiv({ cls: 'auto-scheduler-model-list' });
       const display = (): void => { list.empty(); const choices = this.discovered.filter(m => m.toLowerCase().includes(this.search.toLowerCase())).slice(0, 100);
-        for (const model of choices) new Setting(list).setName(model).addToggle(t => t.setValue(this.draft.models.includes(model)).onChange(v => { this.draft.models = v ? [...new Set([...this.draft.models, model])] : this.draft.models.filter(m => m !== model); modelInput.value = this.draft.models.join('\n'); }));
+        for (const model of choices) new Setting(list).setName(model).addToggle(t => t.setValue(this.draft.models.includes(model)).onChange(v => { this.draft.models = v ? [...new Set([...this.draft.models, model])] : this.draft.models.filter(m => m !== model); modelInput.value = this.draft.models.join('\n'); refreshModels(); }));
       };
       new Setting(root).setName('Search discovered models').setDesc('Shows up to 100 matches; filter and choose your models.').addText(t => t.setValue(this.search).onChange(v => { this.search = v; display(); })); display();
     }
@@ -81,7 +98,7 @@ export class ProviderModal extends Modal {
       const key = await this.candidateKey();
       if (this.draft.requiresKey && !key) throw new Error('This provider requires an API key');
       if (this.binding(key) === this.rejectedBinding) throw new Error('Authentication rejected for this key. Correct it before saving.');
-      await this.plugin.saveProvider(structuredClone(this.draft), key);
+      await this.plugin.saveProvider(structuredClone(this.draft), key, this.selectedModel);
       this.done?.(); this.close();
     } catch (error) { new Notice((error as Error).message); }
     finally { this.busy = false; this.render(); }

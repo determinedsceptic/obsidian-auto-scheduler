@@ -121,8 +121,10 @@ delete saved.byok;
 const migrated = new AutoScheduler(app); await migrated.onload();
 assert.equal(migrated.state.aiTasks.length, 1); assert.equal(saved.aiTasks.length, 1); assert(saved.byok);
 // Configure local providers with session credentials and retain model identity by provider.
-await migrated.saveProvider({ id: 'local-test', name: 'Local', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: ['local-test-model'] }, 'fixture-token');
-assert.equal(migrated.state.llm.model, 'local-test-model'); assert(!JSON.stringify(saved).includes('fixture-token'));
+await migrated.saveProvider({ id: 'local-test', name: 'Local', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: ['local-test-model', 'local-fast'] }, 'fixture-token', 'local-fast');
+assert.equal(migrated.state.llm.model, 'local-fast'); assert(!JSON.stringify(saved).includes('fixture-token'));
+await assert.rejects(migrated.saveProvider({ id: 'local-test', name: 'Local', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: ['local-test-model', 'local-fast'] }, 'fixture-token', 'unknown-model'), /Select a model/);
+assert.equal(migrated.state.llm.model, 'local-fast');
 assert.equal(await migrated.getApiToken(), 'fixture-token');
 await migrated.selectModel('legacy', saved.byok.providers.find(p => p.id === 'legacy').models[0]);
 assert.equal(await migrated.getApiToken(), '');
@@ -141,12 +143,15 @@ console.log('PASS: provider save failure restores prior credential and leaves mo
 // Exercise the actual chat UI with a fake provider transport: no network or real vault.
 saved = null; files.clear(); folders.clear(); folders.add('Tasks');
 const chatPlugin = new AutoScheduler(app); await chatPlugin.onload();
-await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
+await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture', 'fixture-pro'] }, '');
 await chatPlugin.updateSettings({ weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 60, fixedBuffer: 0, blockBuffer: 0 });
 const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen();
 const header = chatView.contentEl.children.find(node => node.options.cls === 'auto-scheduler-chat-header');
-assert.equal(header.children.length, 1); assert.equal(header.children[0].options.text, 'Configure provider / API key');
-assert(!chatView.contentEl.all().some(node => node.tag === 'select' || node.tag === 'h3'));
+assert.equal(header.children[0].options.text, 'Configure provider / API key');
+const modelSelect = header.all().find(node => node.tag === 'select' && node.options.attr?.['aria-label'] === 'Chat model');
+assert(modelSelect); assert(modelSelect.children.some(node => node.options.text === 'Fixture / fixture-pro'));
+modelSelect.value = JSON.stringify(['chat-fixture', 'fixture-pro']); modelSelect.events.change(); await chatPlugin.operations.tail;
+assert.equal(chatPlugin.state.llm.model, 'fixture-pro');
 const draft = { ...aiDraft, minutes: 600 };
 mockResponse = { output: [
   { type: 'message', content: [{ type: 'output_text', text: '模型猜测：明天20点完成。' }] },
@@ -154,6 +159,7 @@ mockResponse = { output: [
 ] };
 const modalBeforeChat = latestModal;
 await chatView.send('帮我安排课程复习，预计10小时');
+assert.equal(JSON.parse(requests.at(-1).body).model, 'fixture-pro');
 assert.equal(latestModal, modalBeforeChat); assert.equal(chatView.busy, false);
 const answer = chatView.messages.at(-1);
 assert(answer.content.includes('2026-10-01 09:00–10:00: 课程复习'));

@@ -3,7 +3,7 @@ import { DEFAULT_LLM } from './types';
 import { endpoint, authHeaders } from './llm';
 export interface ProviderTemplate { name: string; protocol: LlmSettings['protocol']; baseUrl: string; requiresKey: boolean; models: string[] }
 export const PROVIDER_TEMPLATES: Record<string, ProviderTemplate> = {
-  openai: { name: 'OpenAI', protocol: DEFAULT_LLM.protocol, baseUrl: DEFAULT_LLM.baseUrl, requiresKey: true, models: ['gpt-6-luna'] },
+  openai: { name: 'OpenAI', protocol: DEFAULT_LLM.protocol, baseUrl: DEFAULT_LLM.baseUrl, requiresKey: true, models: ['gpt-6-luna', 'gpt-6-sol'] },
   anthropic: { name: 'Anthropic', protocol: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', requiresKey: true, models: [] },
   gemini: { name: 'Google Gemini', protocol: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', requiresKey: true, models: [] },
   openrouter: { name: 'OpenRouter', protocol: 'chat-completions', baseUrl: 'https://openrouter.ai/api/v1', requiresKey: true, models: [] },

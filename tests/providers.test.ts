@@ -19,6 +19,12 @@ describe('BYOK providers and discovery', () => {
       expect(() => validateProvider({ ...t, id: name, models: ['manually-entered'] })).not.toThrow();
     }
   });
+  it('offers both requested GPT-6 model choices under one OpenAI provider', () => {
+    expect(PROVIDER_TEMPLATES.openai.models).toEqual(['gpt-6-luna', 'gpt-6-sol']);
+    const p = provider({ ...PROVIDER_TEMPLATES.openai, id: 'openai' });
+    validateProvider(p);
+    expect(providerConfig(p, 'gpt-6-sol')).toMatchObject({ protocol: 'responses', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6-sol' });
+  });
   it('offers current DeepSeek models and routes a task tool call through Chat Completions', async () => {
     const preset = PROVIDER_TEMPLATES.deepseek;
     expect(preset.models).toEqual(['deepseek-flash', 'deepseek-v4-pro']);

@@ -33,13 +33,15 @@ Do not install GitHub's source-code ZIP as a plugin; it does not contain the bui
 ## Quick start
 
 1. Click the calendar-clock ribbon icon, or run **Auto Scheduler: Open AI assistant**.
-2. Select **Configure provider / API key**. Choose a provider, its endpoint, and a tool-capable model. Enter your own key if required. Model discovery is optional; exact model IDs can be entered manually.
+2. In **Settings → Community plugins → Auto Scheduler**, choose **Add provider**. Select its endpoint and a tool-capable model, then enter your own key if required. Model discovery is optional; exact model IDs can be entered manually. The sidebar's **Configure provider / API key** button edits the active provider.
 
 3. Try: **“Review two courses, two hours each, high priority. Please schedule them.”**
-4. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
+4. Use the **Model** selector above the conversation to switch between saved providers and models. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
 5. Replan with **Preview weekly schedule**. Use **Undo last schedule** to restore the last write.
 
-For DeepSeek, select the **DeepSeek** template. It fills the official API address and offers `deepseek-flash` and `deepseek-v4-pro`; enter a DeepSeek API key, save, and choose the model in plugin settings. You can also discover models or replace the model IDs manually. See [DeepSeek's API documentation](https://api-docs.deepseek.com/quick_start/pricing/).
+For DeepSeek, choose **Add provider → DeepSeek** in plugin settings. It fills the official API address and offers `deepseek-flash` and `deepseek-v4-pro`; enter a DeepSeek API key and choose **Model for chat** before saving. You can switch models later in the sidebar, discover more models, or enter model IDs manually. See [DeepSeek's API documentation](https://api-docs.deepseek.com/quick_start/pricing/).
+
+The OpenAI template offers `gpt-6-luna` and `gpt-6-sol` for the same API key. Available models depend on the provider account; use model discovery or edit the IDs if your account offers a different set.
 
 For offline scheduling, configure **Output location → Daily notes: Day planner**, **Output format → Day Planner**, and **Clean daily lists**, then add estimated tasks in `Tasks/`:
 
