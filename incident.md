@@ -42,3 +42,11 @@
 ## 2026-10-01：GitHub 同步通道及 CI 权限
 
 Git push 到 github.com:443 持续连接超时，GitHub API 可达。使用 Git 对象 API 验证并上传原始 blob/tree/commit，保留完整本地提交。空仓库经 README 初始化，初始化提交作为同步合并的第二父提交保留，ref 只做 fast-forward 更新。更新含工作流的目标 ref 返回 404；API 响应显示 OAuth scope 为 repo 等，不含 workflow。CI 改为 .github/ci.yml.example 模板，未读取或修改凭据、未扩大授权。启用 CI 需另行取得 workflow 权限。
+
+## 2026-10-02：测试库未实际切换每日输出
+
+用户指出 test/Scheduler/Schedule.md 仍使用单文件和日期子标题，不符合 YYYY-MM-DD.md 下 # Day planner 的要求。原因：之前仅更新插件 bundle，保留的旧 data.json 仍为专用文件输出，未执行每日模式的实机验收；告知用户自行切换设置不足以完成测试库适配。
+
+修复：在 test 的原生 Obsidian 中重新加载插件，实际切换 outputLocation=daily / outputMode=day-planner / dailyFolder=DailyNotes，并通过预览与应用生成 5 个每日文件、11 个工作块。将 Obsidian 核心日记目录也设为 DailyNotes。旧 Schedule 连同备注归档到被 Git 忽略的本地备份，避免重复事件；源任务 SHA256 不变；多文件撤销备份由插件保存。阅读视图已核验日期文件和一级 Day planner 标题。
+
+证据：validation/2026-10-02/daily-output-validation.json 及对应每日合成示例。预防：安装 bundle 不作为完成标准；必须核对已保存配置、命令实际应用后的文件名/标题/列表、源文件哈希和当前 UI。此修复针对测试库配置，没有改变其他用户的既有输出设置。

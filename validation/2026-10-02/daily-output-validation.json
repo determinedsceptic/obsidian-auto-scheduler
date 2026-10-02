@@ -1,0 +1,53 @@
+{
+  "author": "Codex",
+  "date": "2026-10-02",
+  "codeCommit": "a7c36408d55124cd5a8eccc67516f548258f3cbd",
+  "testVault": "/Users/alexhu/Projects/research/test",
+  "settings": {
+    "outputLocation": "daily",
+    "outputMode": "day-planner",
+    "dailyFolder": "DailyNotes"
+  },
+  "dailyNotesFolder": "DailyNotes",
+  "sourceSha256": "505b385aebf507072cbdef0598cf0e15669e00e04377d8026517e329ff6702fc",
+  "files": [
+    {
+      "path": "DailyNotes/2026-10-02.md",
+      "blocks": 2,
+      "sha256": "a6611bc95cec777a1035bb5246a9486a6c8bbd28ccbe0aa710b85f851f47444d"
+    },
+    {
+      "path": "DailyNotes/2026-10-05.md",
+      "blocks": 3,
+      "sha256": "5df513b140325b43ea2579d1a15bd3b279c662c947be4791b7b011c62310b674"
+    },
+    {
+      "path": "DailyNotes/2026-10-06.md",
+      "blocks": 2,
+      "sha256": "ea75eb2996cdfb9b51a26e0e1e0e373b943f491d9380918912a25406bd47e71b"
+    },
+    {
+      "path": "DailyNotes/2026-10-07.md",
+      "blocks": 2,
+      "sha256": "80c6ebd45278076463e8f55d44f7b1d55b5a067faf858fbccd403908e450b8fa"
+    },
+    {
+      "path": "DailyNotes/2026-10-08.md",
+      "blocks": 2,
+      "sha256": "1023dfc9156414c86dfa631bcb1cc741d8c70d62a8dea00c4cfc592bb07b6674"
+    }
+  ],
+  "undoEntries": 5,
+  "checks": [
+    "native Obsidian reload",
+    "native settings switched to daily output",
+    "preview and apply in native Obsidian",
+    "YYYY-MM-DD.md names and # Day planner header",
+    "daily dates consistent",
+    "source unchanged",
+    "old Schedule archived outside vault",
+    "Obsidian Daily Notes folder matches scheduler",
+    "native reading view confirmed 2026-10-02 with heading level 1"
+  ],
+  "oldScheduleBackup": "local-test-vaults/daily-output-correction-2026-10-02/original-Schedule.md (ignored by Git)"
+}
