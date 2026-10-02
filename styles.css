@@ -4,3 +4,10 @@
 .auto-scheduler-modal li { margin-block: 0.3em; }
 .auto-scheduler-warning { color: var(--text-warning); }
 .auto-scheduler-actions { display: flex; gap: 0.75em; justify-content: flex-end; margin-top: 1.5em; }
+.auto-scheduler-chat { padding: 16px; }
+.auto-scheduler-chat input, .auto-scheduler-chat textarea { width: 100%; margin: 8px 0; }
+.auto-scheduler-chat-log { max-height: 55vh; overflow-y: auto; margin: 12px 0; }
+.auto-scheduler-message { padding: 10px; margin: 8px 0; border-radius: 6px; background: var(--background-secondary); }
+.auto-scheduler-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+.auto-scheduler-user { border-left: 3px solid var(--interactive-accent); }
+.auto-scheduler-muted { color: var(--text-muted); font-size: var(--font-smallest); }

@@ -1,9 +1,12 @@
+import { ChatView, CHAT_VIEW } from './chat-view';
+import { endpoint, materializeTasks, validAiTasks } from './llm';
+import type { TaskDraft } from './llm';
 import { validTracking } from './tracking';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath } from 'obsidian';
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
 import type { Preview, VaultPort, StatePort } from './transaction';
-import { DEFAULT_SETTINGS } from './types';
-import type { PluginState, Settings, UndoRecord } from './types';
+import { DEFAULT_SETTINGS, DEFAULT_LLM } from './types';
+import type { LlmSettings, PluginState, Settings, UndoRecord } from './types';
 import { clock, safeVaultPath } from './time';
 import { OperationQueue } from './queue';
 import { endClock } from './output';
@@ -12,6 +15,7 @@ class ObsidianVault implements VaultPort {
   constructor(private app: App) {}
   async listTasks(folder: string, excluded: string[]): Promise<string[]> {
     const path = normalizePath(folder);
+    if (!this.app.vault.getAbstractFileByPath(path)) return [];
     if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFolder)) throw new Error(`任务目录不存在：${path}。请先设置任务目录`);
     return this.app.vault.getMarkdownFiles().filter(f => f.path.startsWith(`${path}/`) && !excluded.includes(f.path)).map(f => f.path).sort();
   }
@@ -50,16 +54,19 @@ function validUndo(value: unknown): value is UndoRecord {
     && (entry.before === null || typeof entry.before === 'string') && typeof entry.after === 'string'
     && (entry.restored === undefined || typeof entry.restored === 'string');
   return validEntry(record) && typeof record.createdAt === 'string'
+    && (record.aiTasksBefore === undefined || validAiTasks(record.aiTasksBefore)) && (record.aiTasksAfter === undefined || validAiTasks(record.aiTasksAfter))
     && (record.entries === undefined || (Array.isArray(record.entries) && record.entries.length > 0 && record.entries.every(e => !!e && typeof e === 'object' && validEntry(e)) && new Set(record.entries.map(e => e.path)).size === record.entries.length));
 }
 export default class AutoScheduler extends Plugin {
-  state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null, tracking: {} };
+  state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null, tracking: {}, aiTasks: [], llm: { ...DEFAULT_LLM } };
+  apiToken = '';
   private operations = new OperationQueue();
   private vaultPort!: VaultPort;
   private storage: StatePort = {
     getTracking: () => this.state.tracking,
-    saveUndo: async (record, tracking) => {
-      const next = { ...this.state, undo: record, tracking: tracking ?? this.state.tracking };
+    getAiTasks: () => this.state.aiTasks,
+    saveUndo: async (record, tracking, aiTasks) => {
+      const next = { ...this.state, undo: record, aiTasks: aiTasks ?? this.state.aiTasks, tracking: tracking ?? this.state.tracking };
       await this.saveData(next); this.state = next;
     },
   };
@@ -72,24 +79,53 @@ export default class AutoScheduler extends Plugin {
       if (!validTracking(saved.tracking)) throw new Error('工作块跟踪数据异常，请保留 data.json 备份');
       this.state.tracking = saved.tracking;
     }
+    this.state.llm = { ...DEFAULT_LLM, ...(saved?.llm ?? {}) };
+    if (saved?.aiTasks) { if (!validAiTasks(saved.aiTasks)) throw new Error('AI 任务数据无效，请保留 data.json 备份'); this.state.aiTasks = saved.aiTasks; }
+    this.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
+    this.addCommand({ id: 'open-chat', name: '打开 AI 任务助手', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));
     this.addCommand({ id: 'preview-week', name: '预览一周排程', callback: () => { void this.action(async () => {
-      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking);
+      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, false, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
     }); } });
     this.addCommand({ id: 'clean-daily-output', name: '清理每日排程格式', callback: () => { void this.action(async () => {
       if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('请先启用每日笔记与每日纯列表');
-      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true);
+      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
     }); } });
     this.addCommand({ id: 'undo-last', name: '撤销最近一次排程', callback: () => { void this.action(async () => {
       await undoLast(this.vaultPort, this.storage, this.state.undo); new Notice('已撤销最近一次排程');
     }); } });
-    this.addRibbonIcon('calendar-clock', '预览一周排程', () => { void this.action(async () => {
-      new PreviewModal(this.app, await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking), this).open();
-    }); });
+    this.addRibbonIcon('calendar-clock', '打开 AI 任务助手', () => { void this.action(() => this.openChat()); });
   }
+  onunload(): void { this.apiToken = ''; }
+  async openChat(): Promise<void> {
+    let leaf = this.app.workspace.getLeavesOfType(CHAT_VIEW)[0];
+    if (!leaf) { const right = this.app.workspace.getRightLeaf(false); if (!right) throw new Error('无法打开侧栏'); leaf = right; await leaf.setViewState({ type: CHAT_VIEW, active: true }); }
+    await this.app.workspace.revealLeaf(leaf);
+  }
+  async updateLlm(patch: Partial<LlmSettings>): Promise<void> {
+    await this.action(async () => {
+      const next = { ...this.state, llm: { ...this.state.llm, ...patch } };
+      if (next.llm.baseUrl !== this.state.llm.baseUrl || next.llm.protocol !== this.state.llm.protocol) this.apiToken = '';
+      await this.saveData(next); this.state = next;
+      for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.refresh();
+    });
+  }
+  async previewAi(drafts: TaskDraft[], done: () => void): Promise<void> {
+    await this.operations.run(async () => {
+      endpoint(this.state.llm);
+      if (this.state.aiTasks.length + drafts.length > 10000) throw new Error('AI 任务数量超过上限');
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+        outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      const added = materializeTasks(drafts, settings, new Date(), crypto.randomUUID().replace(/-/g, ''));
+      // Keep original settings until applying: cancellation leaves them unchanged.
+      const preview = await createPreview(this.vaultPort, settings, new Date(), this.state.tracking, false, this.state.aiTasks, added);
+      new PreviewModal(this.app, preview, this, done, JSON.stringify(this.state.settings)).open();
+    });
+  }
+
   async action(work: () => Promise<void>): Promise<void> {
     // Serialize all writes, including rapid settings edits. Never discard keystrokes.
     await this.operations.run(work).catch(error => {
@@ -103,8 +139,12 @@ export default class AutoScheduler extends Plugin {
       await this.saveData(next); this.state = next;
     });
   }
-  async apply(preview: Preview, done: () => void): Promise<void> {
+  async apply(preview: Preview, done: () => void, originalSettingsKey?: string): Promise<void> {
     await this.action(async () => {
+      if (originalSettingsKey !== undefined) {
+        if (JSON.stringify(this.state.settings) !== originalSettingsKey) throw new Error('设置已变化，请重新生成预览');
+        const next = { ...this.state, settings: preview.settings }; await this.saveData(next); this.state = next;
+      }
       const result = await applyPreview(this.vaultPort, this.storage, preview, this.state.settings);
       new Notice(result.warning ?? (result.changed ? '排程已写入；可通过命令撤销' : '排程无变化，无需写入'), result.warning ? 12000 : 5000);
       done();
@@ -112,13 +152,18 @@ export default class AutoScheduler extends Plugin {
   }
 }
 class PreviewModal extends Modal {
-  constructor(app: App, private preview: Preview, private plugin: AutoScheduler) { super(app); }
+  constructor(app: App, private preview: Preview, private plugin: AutoScheduler, private applied?: () => void, private originalSettingsKey?: string) { super(app); }
   onOpen(): void {
     this.modalEl.addClass('auto-scheduler-modal');
     const { contentEl } = this; const { result, settings, diff } = this.preview;
     contentEl.createEl('h2', { text: '一周排程预览' });
     contentEl.createEl('p', { text: `${this.preview.today} 起一周 · ${this.preview.timezone} · 输出：${settings.outputLocation === 'daily' ? settings.dailyFolder + '/YYYY-MM-DD.md' : settings.outputFile}` });
-    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，带元数据格式可用 locked=true 保留手动位置。纯列表模式支持勾选完成，编辑时间或标题前请先撤销。勾选工作块不更新源任务。' });
+    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，带元数据格式可用 locked=true 保留手动位置。纯列表模式支持勾选完成，编辑时间或标题前请先撤销。手写源任务的 remaining 需手动维护；AI 任务按勾选工作块计算未完成量。' });
+    const creating = this.preview.aiTasksAfter.filter(t => !this.preview.aiTasksBefore.some(old => old.id === t.id));
+    if (creating.length) {
+      contentEl.createEl('h3', { text: '将创建的 AI 任务' });
+      for (const t of creating) contentEl.createEl('p', { text: `${t.title} · ${t.remaining} 分钟 · 优先级 ${t.priority} · ${t.split ? '可拆分' : '连续完成'} · 最小块 ${t.min} 分钟` });
+    }
     if (this.preview.snapshot[settings.fixedFile] === null) contentEl.createEl('p', { text: `固定日程文件不存在：${settings.fixedFile}。本次按无固定日程处理，请确认空闲时段。`, cls: 'auto-scheduler-warning' });
     if (result.errors.length) {
       contentEl.createEl('h3', { text: '需要修正的输入' }); const list = contentEl.createEl('ul');
@@ -137,6 +182,7 @@ class PreviewModal extends Modal {
       for (const block of blocks) {
         const item = list.createEl('li');
         item.createSpan({ text: `${clock(block.start)}–${endClock(block)} ${block.taskId}${block.completed ? '（已勾选，保留）' : block.locked ? '（锁定）' : ''} ` });
+        if (this.preview.aiTasksAfter.some(t => t.id === block.taskId)) { item.createSpan({ text: block.title }); continue; }
         const source = item.createEl('a', { text: block.title, href: '#' });
         source.addEventListener('click', event => { event.preventDefault(); void this.app.workspace.openLinkText(block.path, '', true); });
       }
@@ -154,7 +200,7 @@ class PreviewModal extends Modal {
     apply.disabled = result.errors.length > 0 || this.preview.output === null;
     apply.addEventListener('click', () => {
       apply.disabled = true;
-      void this.plugin.apply(this.preview, () => this.close()).finally(() => { apply.disabled = result.errors.length > 0 || this.preview.output === null; });
+      void this.plugin.apply(this.preview, () => { this.close(); this.applied?.(); }, this.originalSettingsKey).finally(() => { apply.disabled = result.errors.length > 0 || this.preview.output === null; });
     });
     const cancel = actions.createEl('button', { text: '取消' }); cancel.addEventListener('click', () => this.close());
   }
@@ -170,6 +216,11 @@ class SchedulerSettings extends PluginSettingTab {
     const text = (name: string, description: string, value: string, update: (value: string) => Partial<Settings>): void => {
       new Setting(containerEl).setName(name).setDesc(description).addText(input => input.setValue(value).onChange(value => { void this.plugin.updateSettings(update(value.trim())); }));
     };
+    containerEl.createEl('h3', { text: 'LLM 接口' });
+    new Setting(containerEl).setName('接口协议').setDesc('Responses 适用于 OpenAI；其他服务需支持 Chat Completions 函数调用。').addDropdown(input => input.addOption('responses', 'OpenAI Responses').addOption('chat-completions', 'OpenAI 兼容 Chat Completions').setValue(this.plugin.state.llm.protocol).onChange(value => { void this.plugin.updateLlm({ protocol: value as LlmSettings['protocol'] }); }));
+    new Setting(containerEl).setName('Base URL').setDesc('填写 API 根地址，如 https://api.openai.com/v1；不包含 /responses。更换地址会清空会话令牌。').addText(input => input.setValue(this.plugin.state.llm.baseUrl).onChange(baseUrl => { void this.plugin.updateLlm({ baseUrl: baseUrl.trim() }); }));
+    new Setting(containerEl).setName('模型 ID').addText(input => input.setValue(this.plugin.state.llm.model).onChange(model => { void this.plugin.updateLlm({ model: model.trim() }); }));
+    containerEl.createEl('p', { text: '令牌在 AI 侧栏输入，仅保留到插件重载；不会保存到笔记、插件数据或 Git。Codex 订阅登录不能替代 API 令牌。' });
     text('任务目录', '库内目录，仅扫描该目录下 Markdown', settings.taskFolder, taskFolder => ({ taskFolder }));
     text('固定日程文件', '格式：- YYYY-MM-DD HH:mm-HH:mm 标题；不存在时按空日程处理', settings.fixedFile, fixedFile => ({ fixedFile }));
     text('输出文件', '专用 Markdown；已有普通笔记不会被接管', settings.outputFile, outputFile => ({ outputFile }));

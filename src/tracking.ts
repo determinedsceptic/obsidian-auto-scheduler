@@ -2,11 +2,11 @@ import { START, END, parseOutput } from './output';
 import type { DailyTracking, Tracking, TrackingPair } from './types';
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Record only the generated span, so outside edits and original bytes survive. */
-export function cleanDaily(text: string): { text: string; record: DailyTracking | null } {
+export function cleanDaily(text: string, aiIds: Set<string> = new Set()): { text: string; record: DailyTracking | null } {
   const parsed = parseOutput(text), newline = parsed.newline;
   const annotated = text.slice(text.indexOf(START), text.indexOf(END) + END.length);
   const lines = parsed.blocks.map(b => (b.raw ?? '').replace(/<!-- as-block .+? -->/g, '')
-    .replace(/%%\[as-block::[^\]]+\]%%/g, '').replace(/\[(?:start|scheduled|due)::[^\]]+\]/gi, '').trimEnd());
+    .replace(/%%\[as-block::[^\]]+\]%%/g, '').replace(/\[(?:start|scheduled|due)::[^\]]+\]/gi, '').replace(aiIds.has(b.taskId) ? / \[\[[^\]]+\]\]/g : /$^/, '').trimEnd());
   const visible = lines.join(newline);
   return { text: parsed.prefix + visible + parsed.suffix,
     record: visible ? { visible, annotated } : null };

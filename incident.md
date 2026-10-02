@@ -50,3 +50,7 @@ Git push 到 github.com:443 持续连接超时，GitHub API 可达。使用 Git 
 修复：在 test 的原生 Obsidian 中重新加载插件，实际切换 outputLocation=daily / outputMode=day-planner / dailyFolder=DailyNotes，并通过预览与应用生成 5 个每日文件、11 个工作块。将 Obsidian 核心日记目录也设为 DailyNotes。旧 Schedule 连同备注归档到被 Git 忽略的本地备份，避免重复事件；源任务 SHA256 不变；多文件撤销备份由插件保存。阅读视图已核验日期文件和一级 Day planner 标题。
 
 证据：validation/2026-10-02/daily-output-validation.json 及对应每日合成示例。预防：安装 bundle 不作为完成标准；必须核对已保存配置、命令实际应用后的文件名/标题/列表、源文件哈希和当前 UI。此修复针对测试库配置，没有改变其他用户的既有输出设置。
+
+## 2026-10-02：AI 纯列表链接清理回归
+
+现象：新增 AI 任务端到端测试发现日期输出仍带内部来源链接。原因：用于移除链接的正则被生成脚本重复转义。修复：改为匹配真实 wiki 链接的正则，仅移除 AI 来源链接，人工源任务链接保留。回归：LLM 事务测试断言 AI 日期文件不含 wiki 链接/HTML/管理标记/日期字段，随后重启、重复预览和撤销全部通过。失败测试保留，未削弱断言。

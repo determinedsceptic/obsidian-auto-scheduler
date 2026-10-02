@@ -1,6 +1,7 @@
 // Host API simulation only. Never reads or writes a real Obsidian vault.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import assert from 'node:assert/strict';
 process.env.TZ = 'Asia/Shanghai';
 const notices = []; let saved = null; let latestModal;
@@ -20,6 +21,7 @@ class Plugin {
   constructor(app) { this.app = app; this.commands = []; }
   async loadData() { return saved; }
   async saveData(value) { saved = structuredClone(value); }
+  registerView() {}
   addCommand(command) { this.commands.push(command); }
   addRibbonIcon() {}
   addSettingTab() {}
@@ -36,10 +38,10 @@ class Clock extends Date {
 }
 const module = { exports: {} };
 vm.runInNewContext(await readFile('main.js', 'utf8'), {
-  module, exports: module.exports, Date: Clock, Intl, console,
+  module, exports: module.exports, Date: Clock, Intl, console, crypto: webcrypto, URL, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
-    return { Plugin, Modal, TFile, TFolder, PluginSettingTab: class {}, Setting: class {},
+    return { Plugin, Modal, ItemView: class {}, TFile, TFolder, PluginSettingTab: class {}, Setting: class {},
       Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
   },
 });
@@ -57,7 +59,7 @@ const app = { workspace: { openLinkText: async () => {} }, vault: {
   process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
 } };
 const plugin = new AutoScheduler(app); await plugin.onload();
-assert.equal(plugin.commands.length, 3);
+assert.equal(plugin.commands.length, 4);
 plugin.commands.find(command => command.id === 'preview-week').callback();
 await plugin.operations.tail;
 assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
@@ -96,3 +98,16 @@ dailyRestart.commands.find(command => command.id === 'undo-last').callback(); aw
 assert.equal(saved.undo, null); assert.equal(files.get('DailyNotes/2026-10-01.md'), dailyOriginal);
 assert(!files.get('DailyNotes/2026-10-02.md').includes('as-block'));
 console.log('PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo');
+// Exercise the new AI entry through the real bundle without a network request.
+const aiDraft = { title: '课程复习', minutes: 120, priority: 4, split: true, minMinutes: 30, due: null, earliest: null };
+let aiApplied = false;
+await dailyRestart.previewAi([aiDraft], () => { aiApplied = true; });
+const aiApply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+assert.equal(aiApply.disabled, false); assert.equal(saved.aiTasks.length, 0);
+aiApply.events.click(); await dailyRestart.operations.tail;
+assert(aiApplied); assert.equal(saved.aiTasks.length, 1); assert(!JSON.stringify(saved).includes('apiToken'));
+assert([...files.values()].some(text => text.includes('课程复习')));
+const aiRestart = new AutoScheduler(app); await aiRestart.onload(); assert.equal(aiRestart.state.aiTasks.length, 1);
+aiRestart.commands.find(command => command.id === 'undo-last').callback(); await aiRestart.operations.tail;
+assert.equal(saved.aiTasks.length, 0); assert(![...files.values()].some(text => text.includes('课程复习')));
+console.log('PASS: real bundle AI preview/apply, persistent task restart/undo, no durable API token');
