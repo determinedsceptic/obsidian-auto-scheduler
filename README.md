@@ -3,7 +3,7 @@
 在 Obsidian 中为带预计用时的 Markdown 任务生成一周工作块。先预览，再应用；支持每日容量、固定日程、缓冲、锁定和最近一次撤销。
 
 - 作者：Alex Hu（需求）、Codex（实现）
-- 日期：2026-10-02；版本：0.2.0
+- 日期：2026-10-02；版本：0.3.0
 - 支持范围：Obsidian 桌面端 1.6.6+；本地单用户
 - 设计来源：`intend.md` → `spec.md` → `plan.md`
 - 验证与审查：`validation/2026-10-01/`、`review.md`、`compatibility.md`
@@ -13,7 +13,7 @@
 ## AI 对话创建任务
 
 1. 在左侧点击日历图标，或运行 **Auto Scheduler: 打开 AI 任务助手**，打开右侧对话面板。
-2. 默认设置为 **Responses**、`https://api.openai.com/v1`、`gpt-6-luna`。在侧栏密码框输入你自己的 API 令牌；无需把令牌放进笔记或聊天。
+2. 默认设置为 **Responses**、`https://api.openai.com/v1`、`gpt-6-luna`。点击侧栏 **配置服务商 / API 令牌**，在服务商对话框输入令牌并保存。也可在设置 → Auto Scheduler → BYOK 添加多个服务商。
 3. 输入“我有两门课要复习，每门预计2小时，很重要，帮我安排一下”，点击发送（或 Cmd/Ctrl+Enter）。缺少用时等必要信息时模型会追问。
 4. 模型调用 `create_tasks`，插件校验后打开本地排程预览。查看任务用时、优先级、每日容量及未安排量，点击 **应用排程**。
 5. 任务记录到 `每日笔记目录/YYYY-MM-DD.md` 的 `# Day planner` 下。AI 流程应用时启用每日纯列表；取消预览不创建任务、不更改设置。重新安排用“预览一周排程”；恢复用“撤销最近一次排程”。
@@ -25,11 +25,17 @@
 
 AI 任务及未安排量的来源保存在插件 `data.json` 的 `aiTasks` 中，和跟踪/撤销数据一起备份。用时为 15 分钟倍数；重要默认优先级4；具体时间由原排程器安排，模型不能指定文件路径或覆盖笔记。本次排程包含已有手写源任务及 AI 任务。已完成工作块从 AI 总用时中扣除，包括过去日期的勾选；未勾选的过期工作会重新安排。每次只保留最近一次撤销记录。
 
-**其他服务**：设置 → Auto Scheduler → LLM 接口，选择 **OpenAI 兼容 Chat Completions**，填服务的 API 根地址和模型 ID。服务和模型须支持函数工具调用；兼容网关可接其他模型。原生 Anthropic/Gemini 协议、仅文本模型、Codex 内部代理登录不在此版本的直接支持范围内。API 模型 ID 可以任意配置，不能保证任意模型或服务协议可用。
+**BYOK 配置**：参考 [Copilot 的服务商配置流程](https://github.com/logancyang/obsidian-copilot/blob/master/docs/settings.md)，通过 **添加服务商** 选择 OpenAI、Anthropic、Gemini、OpenRouter、DeepSeek、Ollama、LM Studio 或自定义模板。配置显示名称、协议、API 根地址、令牌及多个模型；聊天侧栏选择“服务商 / 模型”。编辑模型列表也在服务商对话框中完成；移除服务商会先显示确认，不影响笔记或 AI 任务。
 
-令牌仅在当前插件实例内存中保存，重载或退出后需重新输入；更换地址/协议会清空令牌。对话也不保存到磁盘。请求发送对话与日期、工作日/时段/容量设置，不发送笔记正文、文件路径或已有任务。使用 Obsidian `requestUrl`，不依赖浏览器 CORS；HTTPS（本机 localhost 可用 HTTP）；超时不自动重试。接口供应商可能保留自己的请求记录，请按其政策使用。
+**测试与模型发现**：点击“测试连接并发现模型”执行 GET /models，勾选需要的模型；列表过长可搜索。也可每行手动填写一个准确模型 ID。部分服务不提供模型列表，网络暂时失败仍可保存离线配置；明确返回鉴权拒绝时需更正令牌。发现列表成功不表示该模型支持函数工具调用，需要实际对话验收。模型目录可能包含不适用于聊天的模型，插件不会自动选择发现结果。
 
-Codex 账户登录与 API 计费/令牌独立，请使用所选供应商的 API 凭据。默认模型和函数调用限制参考 [GPT-6 Luna 官方文档](https://developers.openai.com/api/docs/models/gpt-6-luna) 与 [函数调用文档](https://developers.openai.com/api/docs/guides/function-calling)。OpenAI Responses 支持工具调用；GPT-6 Chat Completions 工具调用使用 `reasoning_effort: none`。
+**协议**：OpenAI 默认使用 Responses（默认 gpt-6-luna）；兼容网关、OpenRouter、DeepSeek 及本地服务使用 Chat Completions；Anthropic 使用 Messages，Gemini 使用 generateContent。只支持可调用 create_tasks 工具的聊天模型，不包含 Copilot 的 Agent、索引、订阅代理或 Codex CLI 登录。默认模型及 GPT-6 Chat Completions 的 reasoning_effort=none 限制参考 [GPT-6 Luna 官方文档](https://developers.openai.com/api/docs/models/gpt-6-luna)。
+
+**令牌保存**：Obsidian 1.11.4+ 且提供 SecretStorage 时，令牌保存到本机 Obsidian Keychain；旧宿主降级为会话内存，重载后需重新输入。设置页会显示当前方式。令牌不写入 data.json、Markdown、日志或 Git。每个服务商独立保存；更换地址或协议不会复用原令牌，需重新输入。密码框不展示已保存的令牌；留空在地址/协议未变时保留。取消不保存；清除令牌只在点击保存时执行，需要令牌的服务商仍需有效令牌或移除该服务商。本机 Keychain 不随笔记同步到其他设备，迁移后需在新设备配置令牌。
+
+对话仅存内存。请求发送对话及日期、工作日/时段/容量，不发送笔记正文、文件路径或已有任务。使用 Obsidian requestUrl，不依赖浏览器 CORS，当前版本等待完整回复，未实现流式输出。HTTPS（本机 localhost/127.0.0.1 可用 HTTP）；超时不自动重试。供应商可能保留自己的请求记录，请按其政策使用。Codex 账户登录与 API 令牌/计费独立。
+
+升级 0.2.0 时旧地址/模型迁移为“已有 LLM 配置”，AI 任务、跟踪与撤销保留。旧版会话令牌需重新配置。不完整的旧表单回退默认服务商，可重新编辑。
 
 当前命令：**打开 AI 任务助手**、**预览一周排程**、**清理每日排程格式**、**撤销最近一次排程**。任务目录不存在时可只使用 AI 任务；已有目录仍会扫描手写任务。
 

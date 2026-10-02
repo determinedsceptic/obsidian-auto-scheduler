@@ -31,7 +31,10 @@ export interface TrackingPair { before: DailyTracking | null; after: DailyTracki
 export type Tracking = Record<string, TrackingPair>;
 export interface FileChange { trackingBefore?: DailyTracking | null; trackingAfter?: DailyTracking | null; path: string; before: string | null; after: string; restored?: string }
 export interface UndoRecord extends FileChange { entries?: FileChange[]; createdAt: string; aiTasksBefore?: Task[]; aiTasksAfter?: Task[] }
-export interface PluginState { settings: Settings; undo: UndoRecord | null; tracking: Tracking; aiTasks: Task[]; llm: LlmSettings }
+export interface PluginState { settings: Settings; undo: UndoRecord | null; tracking: Tracking; aiTasks: Task[]; llm: LlmSettings; byok?: ByokSettings }
 
-export interface LlmSettings { protocol: 'responses' | 'chat-completions'; baseUrl: string; model: string }
+export interface LlmSettings { protocol: 'responses' | 'chat-completions' | 'anthropic' | 'gemini'; baseUrl: string; model: string; requiresKey?: boolean }
 export const DEFAULT_LLM: LlmSettings = { protocol: 'responses', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6-luna' };
+
+export interface ProviderConfig { id: string; name: string; protocol: LlmSettings['protocol']; baseUrl: string; requiresKey: boolean; models: string[] }
+export interface ByokSettings { namespace: string; providers: ProviderConfig[]; activeProviderId: string; activeModel: string }

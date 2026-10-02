@@ -1,3 +1,7 @@
+import { Credentials } from './credentials';
+import type { SecretPort } from './credentials';
+import { ProviderModal } from './provider-modal';
+import { activeConfig, migrateByok, validateByok, validateProvider } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
 import { endpoint, materializeTasks, validAiTasks } from './llm';
 import type { TaskDraft } from './llm';
@@ -6,7 +10,7 @@ import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, 
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
 import type { Preview, VaultPort, StatePort } from './transaction';
 import { DEFAULT_SETTINGS, DEFAULT_LLM } from './types';
-import type { LlmSettings, PluginState, Settings, UndoRecord } from './types';
+import type { ByokSettings, ProviderConfig, PluginState, Settings, UndoRecord } from './types';
 import { clock, safeVaultPath } from './time';
 import { OperationQueue } from './queue';
 import { endClock } from './output';
@@ -59,7 +63,10 @@ function validUndo(value: unknown): value is UndoRecord {
 }
 export default class AutoScheduler extends Plugin {
   state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null, tracking: {}, aiTasks: [], llm: { ...DEFAULT_LLM } };
-  apiToken = '';
+  credentials!: Credentials;
+  get byok(): ByokSettings { return this.state.byok!; }
+  get credentialMode(): string { return this.credentials.mode; }
+  async getApiToken(): Promise<string> { activeConfig(this.byok); return this.credentials.get(this.byok.activeProviderId); }
   private operations = new OperationQueue();
   private vaultPort!: VaultPort;
   private storage: StatePort = {
@@ -79,8 +86,13 @@ export default class AutoScheduler extends Plugin {
       if (!validTracking(saved.tracking)) throw new Error('工作块跟踪数据异常，请保留 data.json 备份');
       this.state.tracking = saved.tracking;
     }
-    this.state.llm = { ...DEFAULT_LLM, ...(saved?.llm ?? {}) };
+    this.state.llm = { protocol: saved?.llm?.protocol ?? DEFAULT_LLM.protocol, baseUrl: saved?.llm?.baseUrl ?? DEFAULT_LLM.baseUrl, model: saved?.llm?.model ?? DEFAULT_LLM.model };
+    if (saved?.byok) { validateByok(saved.byok); this.state.byok = saved.byok; if (saved.byok.providers.length) this.state.llm = activeConfig(saved.byok); }
+    else { this.state.byok = migrateByok(this.state.llm, crypto.randomUUID().replace(/-/g, '')); this.state.llm = activeConfig(this.state.byok); }
+    const secretStorage = (this.app as App & { secretStorage?: SecretPort }).secretStorage;
+    this.credentials = new Credentials(this.byok.namespace, secretStorage && typeof secretStorage.getSecret === 'function' && typeof secretStorage.setSecret === 'function' ? secretStorage : undefined);
     if (saved?.aiTasks) { if (!validAiTasks(saved.aiTasks)) throw new Error('AI 任务数据无效，请保留 data.json 备份'); this.state.aiTasks = saved.aiTasks; }
+    if (!saved?.byok) await this.saveData(this.state);
     this.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
     this.addCommand({ id: 'open-chat', name: '打开 AI 任务助手', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
@@ -99,18 +111,45 @@ export default class AutoScheduler extends Plugin {
     }); } });
     this.addRibbonIcon('calendar-clock', '打开 AI 任务助手', () => { void this.action(() => this.openChat()); });
   }
-  onunload(): void { this.apiToken = ''; }
+  onunload(): void { this.credentials?.clearSession(); }
   async openChat(): Promise<void> {
     let leaf = this.app.workspace.getLeavesOfType(CHAT_VIEW)[0];
     if (!leaf) { const right = this.app.workspace.getRightLeaf(false); if (!right) throw new Error('无法打开侧栏'); leaf = right; await leaf.setViewState({ type: CHAT_VIEW, active: true }); }
     await this.app.workspace.revealLeaf(leaf);
   }
-  async updateLlm(patch: Partial<LlmSettings>): Promise<void> {
-    await this.action(async () => {
-      const next = { ...this.state, llm: { ...this.state.llm, ...patch } };
-      if (next.llm.baseUrl !== this.state.llm.baseUrl || next.llm.protocol !== this.state.llm.protocol) this.apiToken = '';
-      await this.saveData(next); this.state = next;
-      for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.refresh();
+  refreshChats(): void { for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.refresh(); }
+  openProvider(existing?: ProviderConfig, done?: () => void): void { new ProviderModal(this, existing, done).open(); }
+  async selectModel(providerId: string, model: string): Promise<void> {
+    await this.operations.run(async () => {
+      const byok = { ...this.byok, activeProviderId: providerId, activeModel: model }; validateByok(byok);
+      const next = { ...this.state, byok, llm: activeConfig(byok) }; await this.saveData(next); this.state = next; this.refreshChats();
+    });
+  }
+  async saveProvider(provider: ProviderConfig, token: string): Promise<void> {
+    await this.operations.run(async () => {
+      validateProvider(provider);
+      if (provider.requiresKey && !token.trim()) throw new Error('请填写本服务商的 API 令牌');
+      const providers = this.byok.providers.filter(p => p.id !== provider.id); providers.push(provider);
+      const byok = { ...this.byok, providers, activeProviderId: provider.id, activeModel: provider.models.includes(this.byok.activeModel) ? this.byok.activeModel : provider.models[0] }; validateByok(byok);
+      const previousKey = await this.credentials.get(provider.id);
+      await this.credentials.set(provider.id, token.trim());
+      const next = { ...this.state, byok, llm: activeConfig(byok) };
+      try { await this.saveData(next); } catch {
+        try { await this.credentials.set(provider.id, previousKey); } catch { throw new Error('配置保存失败且令牌回滚失败，请在本机 Keychain 检查本服务商凭据'); }
+        throw new Error('配置保存失败，已恢复原令牌');
+      }
+      this.state = next; this.refreshChats();
+    });
+  }
+  async removeProvider(id: string): Promise<void> {
+    await this.operations.run(async () => {
+      const providers = this.byok.providers.filter(p => p.id !== id);
+      const selected = providers.find(p => p.id === this.byok.activeProviderId) ?? providers[0];
+      const byok = { ...this.byok, providers, activeProviderId: selected?.id ?? '', activeModel: selected?.models.includes(this.byok.activeModel) ? this.byok.activeModel : selected?.models[0] ?? '' }; validateByok(byok);
+      const previousKey = await this.credentials.get(id); await this.credentials.set(id, '');
+      const next = { ...this.state, byok, llm: selected ? activeConfig(byok) : { ...DEFAULT_LLM } };
+      try { await this.saveData(next); } catch { await this.credentials.set(id, previousKey); throw new Error('移除失败，已恢复原令牌'); }
+      this.state = next; this.refreshChats();
     });
   }
   async previewAi(drafts: TaskDraft[], done: () => void): Promise<void> {
@@ -216,11 +255,19 @@ class SchedulerSettings extends PluginSettingTab {
     const text = (name: string, description: string, value: string, update: (value: string) => Partial<Settings>): void => {
       new Setting(containerEl).setName(name).setDesc(description).addText(input => input.setValue(value).onChange(value => { void this.plugin.updateSettings(update(value.trim())); }));
     };
-    containerEl.createEl('h3', { text: 'LLM 接口' });
-    new Setting(containerEl).setName('接口协议').setDesc('Responses 适用于 OpenAI；其他服务需支持 Chat Completions 函数调用。').addDropdown(input => input.addOption('responses', 'OpenAI Responses').addOption('chat-completions', 'OpenAI 兼容 Chat Completions').setValue(this.plugin.state.llm.protocol).onChange(value => { void this.plugin.updateLlm({ protocol: value as LlmSettings['protocol'] }); }));
-    new Setting(containerEl).setName('Base URL').setDesc('填写 API 根地址，如 https://api.openai.com/v1；不包含 /responses。更换地址会清空会话令牌。').addText(input => input.setValue(this.plugin.state.llm.baseUrl).onChange(baseUrl => { void this.plugin.updateLlm({ baseUrl: baseUrl.trim() }); }));
-    new Setting(containerEl).setName('模型 ID').addText(input => input.setValue(this.plugin.state.llm.model).onChange(model => { void this.plugin.updateLlm({ model: model.trim() }); }));
-    containerEl.createEl('p', { text: '令牌在 AI 侧栏输入，仅保留到插件重载；不会保存到笔记、插件数据或 Git。Codex 订阅登录不能替代 API 令牌。' });
+    containerEl.createEl('h3', { text: 'BYOK 服务商与模型' });
+    containerEl.createEl('p', { text: `令牌保存方式：${this.plugin.credentialMode}。取消配置不保存；本机令牌不写入 data.json 或笔记。` });
+    new Setting(containerEl).setName('添加服务商').setDesc('选择模板、填写令牌、测试并选择模型；支持手动模型 ID。').addButton(b => b.setButtonText('添加服务商').onClick(() => this.plugin.openProvider(undefined, () => this.display())));
+    for (const provider of this.plugin.byok.providers) {
+      new Setting(containerEl).setName(provider.name).setDesc(`${provider.protocol} · ${provider.baseUrl} · ${provider.requiresKey ? '需要令牌' : '令牌可选'} · ${provider.models.join(', ')}`)
+        .addButton(b => b.setButtonText('编辑').onClick(() => this.plugin.openProvider(provider, () => this.display())))
+        .addButton(b => b.setButtonText('移除').onClick(() => {
+          const modal = new Modal(this.app); modal.contentEl.createEl('h3', { text: `移除 ${provider.name}？` });
+          modal.contentEl.createEl('p', { text: '将移除此服务商、模型及本插件保存的令牌，不影响已有任务和笔记。' });
+          modal.contentEl.createEl('button', { text: '确认移除' }).addEventListener('click', () => { void this.plugin.removeProvider(provider.id).then(() => { modal.close(); this.display(); }).catch(error => new Notice((error as Error).message)); });
+          modal.contentEl.createEl('button', { text: '取消' }).addEventListener('click', () => modal.close()); modal.open();
+        }));
+    }
     text('任务目录', '库内目录，仅扫描该目录下 Markdown', settings.taskFolder, taskFolder => ({ taskFolder }));
     text('固定日程文件', '格式：- YYYY-MM-DD HH:mm-HH:mm 标题；不存在时按空日程处理', settings.fixedFile, fixedFile => ({ fixedFile }));
     text('输出文件', '专用 Markdown；已有普通笔记不会被接管', settings.outputFile, outputFile => ({ outputFile }));

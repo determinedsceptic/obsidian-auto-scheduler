@@ -110,3 +110,13 @@ GitHub 同步调整：Git 传输超时，改用 GitHub Git 对象 API，所有�
 5. 模拟网络协议/恶意参数/部分写入/重启撤销回归，typecheck、全套测试、真实 bundle smoke、打包；更新 test 插件，保留现有笔记和配置。未提供 API 令牌，不执行付费请求，不读取 Codex 凭据。
 
 兼容边界：支持 Responses 及实现 Chat Completions function calling 的服务；其他原生协议需通过兼容网关。不能保证任意不支持工具调用的模型可用。默认模型 API ID 为 gpt-6-luna。
+
+## 2026-10-02：参考 Copilot 完善 BYOK
+
+Alex 明确选择先完善 BYOK，不接 Codex CLI 登录。参考 obsidian-copilot c3b66b6d1ad462bf1f88e624ad8c479a015d66e5 的 settings 文档、KeychainService 和 ByokSetupApi；独立实现，不复制其大型聊天/Agent/索引依赖。
+
+1. 服务商配置（名称、协议、根地址、密钥需求）、多个模型与默认选择；模板 OpenAI、Anthropic、Gemini、OpenRouter、DeepSeek、Ollama、LM Studio、自定义兼容端点。
+2. API 令牌配置移入服务商对话框，保存到本机 Obsidian SecretStorage（仅访问本插件命名空间）；不支持该公开 API 时降级为会话内存。更换地址/协议清除原令牌绑定。取消不保存配置或令牌。
+3. 模型发现使用供应商 /models；支持手动模型 ID。连接测试只执行模型列表请求，区分模型发现/鉴权结果和工具调用能力，发现失败允许离线配置。
+4. 增加 Anthropic Messages、Gemini generateContent 协议，统一宿主任务校验；OpenAI 兼容和 Responses 保留。旧 0.2.0 配置迁移为一个服务商，AI 来源、跟踪、撤销不变。
+5. 测试迁移、多服务商路由、凭据隔离与降级、模型发现、原生协议和旧流程；typecheck、完整测试、宿主 smoke、打包，更新 test 插件文件并验证 UI，提交并同步 GitHub。无真实用户令牌，不调用收费推理。

@@ -38,7 +38,7 @@ class Clock extends Date {
 }
 const module = { exports: {} };
 vm.runInNewContext(await readFile('main.js', 'utf8'), {
-  module, exports: module.exports, Date: Clock, Intl, console, crypto: webcrypto, URL, setTimeout, clearTimeout,
+  module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
     return { Plugin, Modal, ItemView: class {}, TFile, TFolder, PluginSettingTab: class {}, Setting: class {},
@@ -50,7 +50,7 @@ assert.equal(typeof AutoScheduler, 'function');
 const original = '- [ ] 宿主演示 <!-- as id=host remaining=60 priority=3 -->';
 const files = new Map([['Tasks/Host.md', original]]);
 const folders = new Set(['Tasks']); let creates = 0, processes = 0;
-const app = { workspace: { openLinkText: async () => {} }, vault: {
+const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => {} }, vault: {
   getAbstractFileByPath: path => files.has(path) ? new TFile(path) : folders.has(path) ? new TFolder(path) : null,
   getMarkdownFiles: () => [...files.keys()].map(path => new TFile(path)),
   read: async file => files.get(file.path),
@@ -111,3 +111,27 @@ const aiRestart = new AutoScheduler(app); await aiRestart.onload(); assert.equal
 aiRestart.commands.find(command => command.id === 'undo-last').callback(); await aiRestart.operations.tail;
 assert.equal(saved.aiTasks.length, 0); assert(![...files.values()].some(text => text.includes('课程复习')));
 console.log('PASS: real bundle AI preview/apply, persistent task restart/undo, no durable API token');
+
+// Migrate 0.2.0 data with AI sources before the first durable BYOK save.
+await aiRestart.previewAi([aiDraft], () => {});
+latestModal.contentEl.all().find(node => node.options.text === '应用排程').events.click(); await aiRestart.operations.tail;
+delete saved.byok;
+const migrated = new AutoScheduler(app); await migrated.onload();
+assert.equal(migrated.state.aiTasks.length, 1); assert.equal(saved.aiTasks.length, 1); assert(saved.byok);
+// Configure local providers with session credentials and retain model identity by provider.
+await migrated.saveProvider({ id: 'local-test', name: 'Local', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: ['local-test-model'] }, 'fixture-token');
+assert.equal(migrated.state.llm.model, 'local-test-model'); assert(!JSON.stringify(saved).includes('fixture-token'));
+assert.equal(await migrated.getApiToken(), 'fixture-token');
+await migrated.selectModel('legacy', saved.byok.providers.find(p => p.id === 'legacy').models[0]);
+assert.equal(await migrated.getApiToken(), '');
+await migrated.removeProvider('local-test'); assert(!saved.byok.providers.some(p => p.id === 'local-test'));
+await migrated.selectModel('legacy', migrated.byok.providers[0].models[0]);
+migrated.commands.find(command => command.id === 'undo-last').callback(); await migrated.operations.tail; assert.equal(saved.aiTasks.length, 0);
+console.log('PASS: BYOK legacy migration preserves AI tasks/undo, provider/model routing, session credential isolation, removal, no serialized tokens');
+
+const beforeFailedSave = JSON.stringify(migrated.state); const originalSaveData = migrated.saveData.bind(migrated);
+migrated.saveData = async () => { throw new Error('disk unavailable'); };
+await assert.rejects(migrated.saveProvider({ id: 'rollback-test', name: 'Rollback', protocol: 'chat-completions', baseUrl: 'https://example.test/v1', requiresKey: true, models: ['model'] }, 'fixture-new-token'), /已恢复原令牌/);
+assert.equal(JSON.stringify(migrated.state), beforeFailedSave); assert.equal(await migrated.credentials.get('rollback-test'), '');
+migrated.saveData = originalSaveData;
+console.log('PASS: provider save failure restores prior credential and leaves model configuration unchanged');

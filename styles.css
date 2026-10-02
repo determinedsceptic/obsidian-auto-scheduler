@@ -11,3 +11,5 @@
 .auto-scheduler-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
 .auto-scheduler-user { border-left: 3px solid var(--interactive-accent); }
 .auto-scheduler-muted { color: var(--text-muted); font-size: var(--font-smallest); }
+.auto-scheduler-chat select { width: 100%; margin: 8px 0; }
+.auto-scheduler-model-list { max-height: 250px; overflow-y: auto; }

@@ -1,0 +1,39 @@
+{
+  "author": "Codex",
+  "date": "2026-10-02",
+  "version": "0.3.0",
+  "baseCommit": "ccc169b9f1a1c65014654091de7503f70abda469",
+  "codeDirty": true,
+  "referenceCommit": "c3b66b6d1ad462bf1f88e624ad8c479a015d66e5",
+  "referenceFiles": [
+    "docs/settings.md",
+    "src/services/keychainService.ts",
+    "src/modelManagement/setup/ByokSetupApi.ts"
+  ],
+  "commands": {
+    "npm run typecheck": "passed",
+    "npm test": "169 tests passed in 11 files",
+    "npm run smoke": "4 PASS messages including BYOK migration and save rollback",
+    "npm run package": "passed"
+  },
+  "nativeUI": {
+    "app": "Obsidian 1.13.7",
+    "vault": "/Users/alexhu/Projects/research/test",
+    "credentialModeDetected": "Obsidian Keychain",
+    "providerCreationDiscoverySelection": "passed; keyless local mock",
+    "chatToolPreviewApply": "passed; 2 tasks, total 240 minutes",
+    "undo": "passed; all 5 note hashes restored",
+    "temporaryProviderRemoved": true,
+    "defaultModelRestored": "gpt-6-luna"
+  },
+  "noRealProviderInference": true,
+  "noUserKeysUsed": true,
+  "noteHashes": {
+    "DailyNotes/2026-10-02.md": "6c1296b4f74c6be42da590eddf50d2f1f79e1a159993c36153547e69faf93900",
+    "DailyNotes/2026-10-05.md": "783b53168d7caef5d7fe500df5c4aa6ba1f3e453abbad784471581150fdd0c6a",
+    "DailyNotes/2026-10-06.md": "09832c2b6aa54c2736a4d61759c61f61b216b490862a22fb1f46b74d856bf2d3",
+    "DailyNotes/2026-10-07.md": "09832c2b6aa54c2736a4d61759c61f61b216b490862a22fb1f46b74d856bf2d3",
+    "DailyNotes/2026-10-08.md": "09832c2b6aa54c2736a4d61759c61f61b216b490862a22fb1f46b74d856bf2d3"
+  },
+  "bundleSha256": "078ac50aa827c365c73630495fd41209b573ff6d4cba271407cf1373b12520d3"
+}

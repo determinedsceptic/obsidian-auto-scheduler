@@ -56,22 +56,36 @@ export function validAiTasks(value: unknown): value is Task[] {
     })());
 }
 export function endpoint(config: LlmSettings): string {
-  if (!['responses', 'chat-completions'].includes(config.protocol) || !config.model.trim() || config.model.length > 200 || /[\r\n]/.test(config.model)) throw new Error('请配置有效的接口和模型 ID');
+  if (!['responses', 'chat-completions', 'anthropic', 'gemini'].includes(config.protocol) || !config.model.trim() || config.model.length > 200 || /[\r\n]/.test(config.model)) throw new Error('请配置有效的接口和模型 ID');
   let url: URL; try { url = new URL(config.baseUrl); } catch { throw new Error('Base URL 无效'); }
   if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('Base URL 必须使用 HTTPS（本机可用 HTTP），且不能包含令牌、查询参数或片段');
-  return url.toString().replace(/\/$/, '') + (config.protocol === 'responses' ? '/responses' : '/chat/completions');
+  const base = url.toString().replace(/\/$/, '');
+  return base + (config.protocol === 'responses' ? '/responses' : config.protocol === 'anthropic' ? '/messages' : config.protocol === 'gemini' ? `/models/${encodeURIComponent(config.model.replace(/^models\//, ''))}:generateContent` : '/chat/completions');
+}
+export function authHeaders(config: LlmSettings, token: string): Record<string, string> {
+  if (/[\r\n\x00-\x1f]/.test(token)) throw new Error('API 令牌格式无效');
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (config.protocol === 'anthropic') { headers['anthropic-version'] = '2023-06-01'; if (token.trim()) headers['x-api-key'] = token.trim(); }
+  else if (config.protocol === 'gemini') { if (token.trim()) headers['x-goog-api-key'] = token.trim(); }
+  else if (token.trim()) headers.Authorization = `Bearer ${token.trim()}`;
+  return headers;
 }
 export async function chat(config: LlmSettings, token: string, messages: ChatMessage[], settings: Settings, now: Date, transport: Transport, timeoutMs = 60000): Promise<LlmReply> {
   const url = endpoint(config);
-  if (!token.trim() || /[\r\n]/.test(token)) throw new Error('请在侧栏填写 API 令牌');
+  if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('请在侧栏填写 API 令牌');
   if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('对话过长，请清空对话后重试');
   const system = `你是 Obsidian 任务助手。当前本地日期时间 ${dateKey(now)} ${now.toTimeString().slice(0, 5)}。工作日 ${settings.weekdays.join(',')}（0周日）；时段 ${settings.periods.join(',')}；每日容量 ${settings.dailyCapacity} 分钟。只允许调用 create_tasks 创建用户明确请求的新任务。用中文回复；缺少用时、意图不明确或不满足15分钟网格时先问用户，不自行猜测。重要=优先级4，普通=3。未指定日期设null；可拆分默认true，最小块默认30分钟（任务不足30则15）。课程未命名可用课程1、课程2。用户没有请求创建时只对话。不要承诺已写入：工具只产生预览，用户应用后才写入。不能删除、修改现有任务或指定输出路径，时段由本地排程器决定。`;
   const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: [{ type: 'function', ...taskTool }], parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
+    : config.protocol === 'anthropic' ? { model: config.model, system, messages, max_tokens: 4096,
+      tools: [{ name: taskTool.name, description: taskTool.description, input_schema: taskTool.parameters }] }
+    : config.protocol === 'gemini' ? { systemInstruction: { parts: [{ text: system }] },
+      contents: messages.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+      tools: [{ functionDeclarations: [{ name: taskTool.name, description: taskTool.description, parametersJsonSchema: taskTool.parameters }] }], generationConfig: { maxOutputTokens: 4096 } }
     : { model: config.model, messages: [{ role: 'system', content: system }, ...messages], tools: [{ type: 'function', function: taskTool }], parallel_tool_calls: false,
       ...(config.model.startsWith('gpt-6') ? { reasoning_effort: 'none', max_completion_tokens: 4096 } : { max_tokens: 4096 }) };
   let timer: ReturnType<typeof setTimeout> | undefined;
   let response: Awaited<ReturnType<Transport>>;
-  try { response = await Promise.race([transport(url, { Authorization: `Bearer ${token.trim()}`, 'Content-Type': 'application/json' }, JSON.stringify(body)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('请求超时')), timeoutMs); })]); }
+  try { response = await Promise.race([transport(url, authHeaders(config, token), JSON.stringify(body)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('请求超时')), timeoutMs); })]); }
   catch { throw new Error('LLM 请求失败或超时，请检查网络、接口配置后重试；未写入任务'); }
   finally { if (timer) clearTimeout(timer); }
   if (response.status < 200 || response.status >= 300) throw new Error(`LLM 接口返回 HTTP ${response.status}，请检查令牌、模型权限和额度；未写入任务`);
@@ -83,6 +97,19 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
     for (const item of data.output) {
       if (item.type === 'function_call') calls.push(item);
       if (item.type === 'message' && Array.isArray(item.content)) for (const part of item.content) if (part.type === 'output_text' && typeof part.text === 'string') texts.push(part.text);
+    }
+  } else if (config.protocol === 'anthropic') {
+    if (!['end_turn', 'tool_use'].includes(data.stop_reason) || !Array.isArray(data.content)) throw new Error('Anthropic 响应未完成或格式无效');
+    for (const part of data.content) {
+      if (part.type === 'text' && typeof part.text === 'string') texts.push(part.text);
+      if (part.type === 'tool_use') calls.push({ name: part.name, arguments: JSON.stringify(part.input) });
+    }
+  } else if (config.protocol === 'gemini') {
+    const candidate = data.candidates?.[0];
+    if (!candidate || candidate.finishReason !== 'STOP' || !Array.isArray(candidate.content?.parts)) throw new Error('Gemini 响应未完成或被过滤');
+    for (const part of candidate.content.parts) {
+      if (!part.thought && typeof part.text === 'string') texts.push(part.text);
+      if (part.functionCall) calls.push({ name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args) });
     }
   } else {
     const choice = data.choices?.[0]; if (!choice || !['stop', 'tool_calls'].includes(choice.finish_reason)) throw new Error('模型响应未完成或接口不支持工具调用');

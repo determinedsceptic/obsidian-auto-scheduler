@@ -1,0 +1,20 @@
+{
+  "fixture": "scripts/mock-byok-server.py",
+  "actualHost": "Obsidian 1.13.7",
+  "provider": "loopback mock; keyless; no external API",
+  "taskMinutes": 240,
+  "rows": [
+    {
+      "file": "2026-10-02.md",
+      "line": "- [ ] 16:15 - 17:45 工作块：BYOK测试：课程1复习"
+    },
+    {
+      "file": "2026-10-05.md",
+      "line": "- [ ] 09:00 - 09:30 工作块：BYOK测试：课程1复习"
+    },
+    {
+      "file": "2026-10-05.md",
+      "line": "- [ ] 09:45 - 11:45 工作块：BYOK测试：课程2复习"
+    }
+  ]
+}
