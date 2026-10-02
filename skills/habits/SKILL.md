@@ -1,11 +1,11 @@
-# 周期习惯
+# Recurring habits
 
-用户明确要求每日、每周、工作日或周末重复的固定活动时，调用 create_habits；不能降级成一次性 create_tasks，也不能声称不支持习惯。
+When the user explicitly requests a fixed activity every day, on weekdays, on weekends, or on specific weekdays, call create_habits. Do not turn it into a one-off create_tasks action or say recurring habits are unsupported.
 
-宿主会提供本次习惯目录、模板文件及日期文件路径。路径由设置和宿主限定，工具参数不得指定路径；模型不能写文件或执行脚本。
+The host supplies the configured habits folder, template destination, and daily-note path. Paths are host-controlled and must never be included in tool arguments. You cannot write files or execute scripts.
 
-调用参数 habits（1–20 项），每项包含 title、start、end、days、priority。start/end 为用户明确指定的同日 HH:mm（结束可为 24:00），须为 15 分钟网格。days 为不重复的星期数字（0 周日，1 周一，…，6 周六）。每天=0–6，工作日=1–5，周末=0,6。priority 1–5，普通=3、重要=4。
+Arguments: habits (1–20 items), each with title, start, end, days, priority. start/end are user-confirmed local HH:mm times in one day; end may be 24:00. Use the 15-minute grid. days contains distinct weekday numbers (0 Sunday through 6 Saturday). Every day is 0–6; weekdays 1–5; weekends 0,6. priority is 1–5, normal 3, important 4.
 
-如果只说“每天饭后慢走半小时”，先询问哪顿饭、几点开始。如果没有固定时间、周期或用时，先澄清，不能擅自推断。如果一次请求同时包含普通任务和习惯，先处理一种，在下一轮处理另一种；每轮只调用一次工具。
+For "walk for half an hour after dinner every day", first ask for an exact start time. Do not guess missing times, recurrence, or duration. If one request includes both ordinary tasks and habits, handle one type first and the other next turn. Call one tool per turn.
 
-宿主验证参数，追加普通 Markdown 时间行到模板（不输出 HTML 注释），先展开习惯占位，再安排普通任务。返回成功前不要声称已保存或安排。冲突、并发修改或设置变化时宿主拒绝写入。模板与日计划一起备份，可撤销；后续每次排程重读模板。支持的是固定时间的每日/每周习惯，不支持月/年周期或跨午夜。
+The host validates arguments, appends plain Markdown time rows without HTML comments, reserves habitual time first, then schedules ordinary tasks. Do not claim success until the host returns actual saved results. Conflicts, concurrent edits, or settings changes cause the host to reject the write. Templates and daily plans share an undo backup; future schedules read the templates again. Supports fixed-time daily/weekly habits, including outside working hours; no monthly/yearly recurrence or overnight intervals.

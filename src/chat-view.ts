@@ -11,7 +11,7 @@ export class ChatView extends ItemView {
   private closed = false;
   constructor(leaf: WorkspaceLeaf, private plugin: AutoScheduler) { super(leaf); }
   getViewType(): string { return CHAT_VIEW; }
-  getDisplayText(): string { return 'AI 任务助手'; }
+  getDisplayText(): string { return 'AI scheduling assistant'; }
   getIcon(): string { return 'calendar-clock'; }
   async onOpen(): Promise<void> { this.closed = false; this.render(); }
   async onClose(): Promise<void> { this.closed = true; this.messages = []; this.draftText = ''; this.contentEl.empty(); }
@@ -20,35 +20,35 @@ export class ChatView extends ItemView {
     if (this.closed) return;
     const root = this.contentEl; root.empty(); root.addClass('auto-scheduler-chat');
     const header = root.createDiv({ cls: 'auto-scheduler-chat-header' });
-    const configure = header.createEl('button', { text: '配置服务商/API令牌' }); configure.disabled = this.busy;
+    const configure = header.createEl('button', { text: 'Configure provider / API key' }); configure.disabled = this.busy;
     configure.addEventListener('click', () => this.plugin.openProvider(this.plugin.byok.providers.find(p => p.id === this.plugin.byok.activeProviderId)));
     const log = root.createDiv({ cls: 'auto-scheduler-chat-log', attr: { 'aria-live': 'polite' } });
     for (const message of this.messages) {
       const row = log.createDiv({ cls: `auto-scheduler-message auto-scheduler-${message.role}` });
-      row.createEl('strong', { text: message.role === 'user' ? '你' : '助手' });
+      row.createEl('strong', { text: message.role === 'user' ? 'You' : 'Assistant' });
       row.createEl('p', { text: message.content });
-      const copy = row.createEl('button', { text: '复制', cls: 'auto-scheduler-message-copy', attr: { 'aria-label': '复制消息' } });
+      const copy = row.createEl('button', { text: 'Copy', cls: 'auto-scheduler-message-copy', attr: { 'aria-label': 'Copy message' } });
       copy.addEventListener('click', () => {
-        void navigator.clipboard.writeText(message.content).then(() => { copy.textContent = '已复制'; }, () => new Notice('复制失败，请选中文字后复制'));
+        void navigator.clipboard.writeText(message.content).then(() => { copy.textContent = 'Copied'; }, () => new Notice('Could not copy. Select the text and use your system copy shortcut.'));
       });
       if (message.notes?.length) {
         const links = row.createDiv({ cls: 'auto-scheduler-note-links' });
         for (const note of message.notes) {
-          const link = links.createEl('a', { text: `打开 ${note.date}`, href: '#', cls: 'internal-link' });
-          link.addEventListener('click', e => { e.preventDefault(); void this.plugin.openScheduledNote(note.path).catch(error => new Notice(`打开日期笔记失败：${(error as Error).message}`)); });
+          const link = links.createEl('a', { text: `Open ${note.date}`, href: '#', cls: 'internal-link' });
+          link.addEventListener('click', e => { e.preventDefault(); void this.plugin.openScheduledNote(note.path).catch(error => new Notice(`Could not open daily note: ${(error as Error).message}`)); });
         }
       }
     }
-    if (this.busy) log.createEl('p', { text: '正在生成任务并安排时间…' });
+    if (this.busy) log.createEl('p', { text: 'Creating tasks and scheduling…' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
-    const input = composer.createEl('textarea', { attr: { placeholder: '描述任务、预计用时与重要性…', 'aria-label': '任务对话', rows: '3', maxlength: '12000' } });
+    const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task or habit, its duration, and priority…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; });
     input.disabled = this.busy;
     const actions = composer.createDiv({ cls: 'auto-scheduler-actions' });
-    const send = actions.createEl('button', { text: '发送', cls: 'mod-cta' }); send.disabled = this.busy || !this.plugin.byok.providers.length;
+    const send = actions.createEl('button', { text: 'Send', cls: 'mod-cta' }); send.disabled = this.busy || !this.plugin.byok.providers.length;
     send.addEventListener('click', () => { void this.send(input.value); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); void this.send(input.value); } });
-    const clear = actions.createEl('button', { text: '清空对话' }); clear.disabled = this.busy;
+    const clear = actions.createEl('button', { text: 'Clear chat' }); clear.disabled = this.busy;
     clear.addEventListener('click', () => { this.messages = []; this.draftText = ''; this.render(); });
     log.scrollTop = log.scrollHeight;
   }
@@ -58,10 +58,10 @@ export class ChatView extends ItemView {
     const providerId = this.plugin.byok.activeProviderId;
     const configKey = JSON.stringify(config), settingsKey = JSON.stringify(settings);
     this.busy = true; let token: string;
-    try { endpoint(config); token = await this.plugin.getApiToken(); if (config.requiresKey !== false && !token.trim()) throw new Error('请先点击配置服务商 / API 令牌'); }
+    try { endpoint(config); token = await this.plugin.getApiToken(); if (config.requiresKey !== false && !token.trim()) throw new Error('First select Configure provider / API key'); }
     catch (error) { this.busy = false; new Notice((error as Error).message); return; }
     if (this.closed) { this.busy = false; return; }
-    if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('模型配置已变化，请重新发送'); this.render(); return; }
+    if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
     this.draftText = ''; this.messages.push({ role: 'user', content: message }); this.busy = true; this.render();
     try {
       const reply = await chat(config, token, this.messages.map(({ role, content }) => ({ role, content })), settings, new Date(), async (url, headers, body) => {
@@ -69,17 +69,17 @@ export class ChatView extends ItemView {
         return { status: result.status, json: result.status >= 200 && result.status < 300 ? result.json : {} };
       });
       if (this.closed) return;
-      if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('接口或排程设置已变化，请重新发送');
+      if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
       if (reply.tasks.length || reply.habits.length) {
         const result = reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
         if (!this.closed) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
         if (!this.closed && result.notes.length) {
           try { await this.plugin.openScheduledNote(result.notes[0].path); }
-          catch (error) { if (!this.closed) this.messages.push({ role: 'assistant', content: `排程已写入，但打开日期笔记失败：${(error as Error).message}` }); }
+          catch (error) { if (!this.closed) this.messages.push({ role: 'assistant', content: `Schedule saved, but the daily note could not be opened: ${(error as Error).message}` }); }
         }
       } else this.messages.push({ role: 'assistant', content: reply.text });
     } catch (error) {
-      if (!this.closed) this.messages.push({ role: 'assistant', content: `任务处理失败：${(error as Error).message}` });
+      if (!this.closed) this.messages.push({ role: 'assistant', content: `Request failed: ${(error as Error).message}` });
     } finally { this.busy = false; this.render(); }
   }
 }

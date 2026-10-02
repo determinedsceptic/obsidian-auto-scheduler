@@ -1,0 +1,23 @@
+name: Release
+on:
+  push:
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck && npm test && npm run smoke && npm run release:check && npm run package
+      - name: Verify tag matches manifest
+        run: node -e 'if (process.env.GITHUB_REF_NAME !== require("./manifest.json").version) process.exit(1)'
+      - name: Publish installation files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" main.js manifest.json styles.css --verify-tag --title "Auto Scheduler $GITHUB_REF_NAME" --notes-file docs/release-notes.md

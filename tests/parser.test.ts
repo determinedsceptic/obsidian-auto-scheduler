@@ -19,7 +19,7 @@ describe('任务解析', () => {
     ['priority=5', 'priority=3 due=2026-02-30'], ['priority=5', 'priority=3 due=2026-10-03 earliest=2026-10-04'],
     ['priority=5', 'priority=3 split=maybe'], ['id=a', 'id=../a'], ['remaining=60', 'remaining=60 min=90'],
   ])('拒绝非法字段 %s -> %s', (from, to) => { expect(parse(row.replace(from, to)).errors).toHaveLength(1); });
-  it('报告跨文件重复 ID', () => { expect(parseTasks([{ path: 'a.md', content: row }, { path: 'b.md', content: row }]).errors[0].message).toContain('重复 ID'); });
+  it('报告跨文件重复 ID', () => { expect(parseTasks([{ path: 'a.md', content: row }, { path: 'b.md', content: row }]).errors[0].message).toContain('Duplicate ID'); });
   it('日期截止为次日零点，日期 earliest 为当日零点', () => {
     const t = parse(row.replace('priority=5', 'priority=5 due=2026-10-03 earliest=2026-10-01')).tasks[0];
     expect(t.due).toBe(localMinute('2026-10-04', '00:00')); expect(t.earliest).toBe(localMinute('2026-10-01', '00:00'));

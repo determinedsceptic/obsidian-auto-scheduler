@@ -54,7 +54,7 @@ describe('周期习惯模板', () => {
     expect(p.result.blocks.find(b => b.taskId === 'a')?.start).toBe(interval('09:30', '10:30').start);
     expect(p.result.days[0].occupied).toBe(90);
   });
-  it('非工作日和晚间也记录，不扣除工作窗口之外的容量', async () => {
+  it('非Working days和晚间也记录，不扣除工作窗口之外的容量', async () => {
     const v = new MemoryVault(); v.files = { 'Habits/Template.md': row(undefined, '19:00-19:30') };
     const p = await createPreview(v, { ...settings, weekdays: [1] }, now);
     expect(p.result.errors).toEqual([]); expect(p.result.blocks).toHaveLength(7);
@@ -63,18 +63,18 @@ describe('周期习惯模板', () => {
   it('固定日程或习惯缓冲冲突阻止整批写入', async () => {
     const v = new MemoryVault(); v.files['Habits/Template.md'] = row();
     v.files['Scheduler/Fixed.md'] = '- 2026-10-01 09:15-10:00 会议';
-    let p = await preview(v); expect(p.result.errors.some(e => e.message.includes('冲突'))).toBe(true);
-    await expect(applyPreview(v, v, p, settings, now)).rejects.toThrow('错误'); expect(v.writes).toBe(0);
+    let p = await preview(v); expect(p.result.errors.some(e => e.message.toLowerCase().includes('conflict'))).toBe(true);
+    await expect(applyPreview(v, v, p, settings, now)).rejects.toThrow('errors'); expect(v.writes).toBe(0);
     delete v.files['Scheduler/Fixed.md']; v.files['Habits/Template.md'] += '\n' + row('id=other days=4', '09:30-10:00');
     p = await createPreview(v, { ...settings, blockBuffer: 15 }, now);
-    expect(p.result.errors.some(e => e.message.includes('冲突'))).toBe(true);
+    expect(p.result.errors.some(e => e.message.toLowerCase().includes('conflict'))).toBe(true);
   });
   it.each(['修改', '新增', '删除'])('模板%s使预览过期', async mode => {
     const v = new MemoryVault(); v.files['Habits/Template.md'] = row(); const p = await preview(v);
     if (mode === '修改') v.files['Habits/Template.md'] += '\n';
     if (mode === '新增') v.files['Habits/Other.md'] = '# 新模板';
     if (mode === '删除') delete v.files['Habits/Template.md'];
-    await expect(applyPreview(v, v, p, settings, now)).rejects.toThrow('习惯模板'); expect(v.writes).toBe(0);
+    await expect(applyPreview(v, v, p, settings, now)).rejects.toThrow('habits template'); expect(v.writes).toBe(0);
   });
   it('重启后已完成实例保留，其他日期随模板改时，撤销不改模板', async () => {
     const v = new MemoryVault(); v.files = { 'Habits/Template.md': row() };
@@ -96,6 +96,6 @@ describe('周期习惯模板', () => {
   });
   it('保留习惯实例 ID 命名空间，防止普通任务碰撞', async () => {
     const v = new MemoryVault(); v.files['Tasks/A.md'] = '- [ ] 伪实例 <!-- as id=habit_exercise_20261001 remaining=30 -->';
-    expect((await preview(v)).result.errors.some(e => e.message.includes('保留'))).toBe(true);
+    expect((await preview(v)).result.errors.some(e => e.message.includes('reserved'))).toBe(true);
   });
 });

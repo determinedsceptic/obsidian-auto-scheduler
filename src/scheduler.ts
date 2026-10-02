@@ -13,23 +13,23 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
   const lockedMinutes = new Map<string, number>();
   const bufferedFixed = merge(fixed.map(i => ({ start: i.start - settings.fixedBuffer, end: i.end + settings.fixedBuffer })));
   for (const block of protectedBlocks) {
-    const fail = (message: string): void => { errors.push({ path: settings.outputFile, line: 0, message: `块 ${block.id}：${message}` }); };
-    if (!taskMap.has(block.taskId)) fail('引用未知任务 ID');
-    if (block.start % GRID || block.end % GRID) fail('锁定块需在 15 分钟网格上');
-    if (bufferedFixed.some(i => overlap(block, i))) fail('与固定日程或其缓冲冲突');
+    const fail = (message: string): void => { errors.push({ path: settings.outputFile, line: 0, message: `Block ${block.id}: ${message}` }); };
+    if (!taskMap.has(block.taskId)) fail('References an unknown task ID');
+    if (block.start % GRID || block.end % GRID) fail('Locked blocks must use the 15-minute grid');
+    if (bufferedFixed.some(i => overlap(block, i))) fail('Conflicts with a fixed event or its buffer');
     const task = taskMap.get(block.taskId);
-    if (task && !task.completed && ((task.earliest !== undefined && block.start < task.earliest) || (task.due !== undefined && block.end > task.due))) fail('违反任务 earliest/due 约束');
+    if (task && !task.completed && ((task.earliest !== undefined && block.start < task.earliest) || (task.due !== undefined && block.end > task.due))) fail('Violates the task earliest/due constraints');
     lockedMinutes.set(block.taskId, (lockedMinutes.get(block.taskId) ?? 0) + block.end - block.start);
   }
   for (let i = 0; i < protectedBlocks.length; i++) for (let j = i + 1; j < protectedBlocks.length; j++) {
     const a = protectedBlocks[i], b = protectedBlocks[j];
-    if (overlap({ start: a.start, end: a.end + settings.blockBuffer }, { start: b.start, end: b.end + settings.blockBuffer })) errors.push({ path: settings.outputFile, line: 0, message: `锁定块或缓冲冲突：${a.id} / ${b.id}` });
+    if (overlap({ start: a.start, end: a.end + settings.blockBuffer }, { start: b.start, end: b.end + settings.blockBuffer })) errors.push({ path: settings.outputFile, line: 0, message: `Locked block or buffer conflict: ${a.id} / ${b.id}` });
   }
   for (const task of tasks) {
     const minutes = lockedMinutes.get(task.id) ?? 0;
-    if (!task.completed && minutes > task.remaining) errors.push({ path: task.path, line: task.line, message: `锁定时间超过剩余用时：${task.id}` });
-    if (!task.completed && !task.split && protectedBlocks.filter(b => b.taskId === task.id).length > 1) errors.push({ path: task.path, line: task.line, message: `不可拆分任务不能具有多个锁定块：${task.id}` });
-    if (!task.completed && !task.split && minutes > 0 && minutes !== task.remaining) errors.push({ path: task.path, line: task.line, message: `不可拆分任务的锁定块必须覆盖全部剩余时间：${task.id}` });
+    if (!task.completed && minutes > task.remaining) errors.push({ path: task.path, line: task.line, message: `Locked time exceeds remaining duration: ${task.id}` });
+    if (!task.completed && !task.split && protectedBlocks.filter(b => b.taskId === task.id).length > 1) errors.push({ path: task.path, line: task.line, message: `An unsplittable task cannot have multiple locked blocks: ${task.id}` });
+    if (!task.completed && !task.split && minutes > 0 && minutes !== task.remaining) errors.push({ path: task.path, line: task.line, message: `A locked block for an unsplittable task must cover all remaining time: ${task.id}` });
   }
   if (errors.length) return result;
   result.blocks = [...previous.filter(b => !inRange(b)), ...protectedBlocks];
@@ -42,9 +42,9 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
   for (const task of ordered) {
     let remaining = task.remaining - (lockedMinutes.get(task.id) ?? 0);
     if (!remaining) continue;
-    let reason = '可行时间或每日容量不足';
-    if (task.due !== undefined && task.due <= nowMinute) reason = '截止已过';
-    else if (task.earliest !== undefined && task.earliest >= localMinute(until, '00:00')) reason = '最早开始时间在排程范围外';
+    let reason = 'Insufficient available time or daily capacity';
+    if (task.due !== undefined && task.due <= nowMinute) reason = 'Deadline has passed';
+    else if (task.earliest !== undefined && task.earliest >= localMinute(until, '00:00')) reason = 'Earliest start is outside the scheduling range';
     else {
       let largestGap = 0;
       for (const day of days) {
@@ -76,8 +76,8 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
           }
         }
       }
-      if (remaining && !task.split) reason = '缺少满足容量和缓冲约束的连续区间';
-      else if (remaining && largestGap < task.min) reason = '可行空隙不足最小工作块长度（含缓冲约束）';
+      if (remaining && !task.split) reason = 'No continuous interval satisfies capacity and buffers';
+      else if (remaining && largestGap < task.min) reason = 'Available gaps are shorter than the minimum block including buffers';
     }
     if (remaining) result.unscheduled.push({ taskId: task.id, title: task.title, remaining, reason });
   }

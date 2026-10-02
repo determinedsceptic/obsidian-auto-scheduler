@@ -1,0 +1,43 @@
+{
+  "author": "Codex",
+  "date": "2026-10-01",
+  "codeCommit": "e75dff893ccbd14c9edf575da04a4c43b0d6c3da",
+  "upstreamCommit": "a06130967bd862a642416e10970ca4bf4cfc7e11",
+  "upstreamTree": "cccc5e02f97d348882554da16decdacffb9bcb08",
+  "node": "v22.22.2",
+  "commands": [
+    "npm run typecheck",
+    "npm test",
+    "npm run smoke",
+    "npm run package",
+    "node scripts/gantt-interop.mjs",
+    "git -C ../obsidian-gantt-calendar fsck --full"
+  ],
+  "results": {
+    "tests": 118,
+    "typecheck": "passed",
+    "hostSmoke": "passed; includes multi-file apply/restart/undo",
+    "upstreamParserSerializer": "passed",
+    "gitObjectIntegrity": "passed"
+  },
+  "sha256": {
+    "gantt-typecheck.log": "e238b5f680b50dc6159f58f6f95b476c3d8627410971a7af9aec7a5134c4ba5e",
+    "gantt-tests.log": "127e5a60a88eef684e3820b98fc7aa21a7b2d438d17143a213335fa55a9c5015",
+    "gantt-smoke.log": "2a18e1f39c5e51b2e267d119b1a8c91d397a4000fff378a5bf1ae6c14fcc4f1c",
+    "gantt-package.log": "a305ebe719616ff307ad8b30e33e68b9ec8a2205735f94d3a4e66aa6232e8787",
+    "gantt-interop.json": "ebed041bf689449ba16b133c1fa94bff2e6bbe88ea5b2ee91be12578be1f1d72"
+  },
+  "bundleSha256": "0d62772174e7f49ec817155fffd0ae2927ed139832ba887a6e58c868018c5aa3",
+  "installedTo": "<test-vault>/.obsidian/plugins/auto-scheduler",
+  "limits": [
+    "Full Gantt Calendar UI not tested",
+    "Daily batch is not a cross-file atomic transaction",
+    "Existing settings and undo not changed during bundle installation"
+  ],
+  "related": [
+    "spec.md",
+    "plan.md",
+    "review.md",
+    "compatibility.md"
+  ]
+}

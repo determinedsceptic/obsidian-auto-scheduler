@@ -26,13 +26,13 @@ describe('BYOK providers and discovery', () => {
   });
   it('rejects malformed provider settings, duplicate models and plaintext key fields', () => {
     for (const patch of [{ models: [] }, { models: ['x', 'x'] }, { baseUrl: 'https://example.test/?key=abc' }, { id: '../vault' }]) expect(() => validateProvider(provider(patch))).toThrow();
-    expect(() => validateProvider({ ...provider(), apiKey: 'test-only' } as ProviderConfig)).toThrow('未知字段');
+    expect(() => validateProvider({ ...provider(), apiKey: 'test-only' } as ProviderConfig)).toThrow('unknown fields');
   });
   it('discovers compatible models without sending a chat request', async () => {
     const r = await discoverModels(provider(), 'test-only', async (url, headers) => {
       expect(url).toBe('https://example.test/v1/models'); expect(headers.Authorization).toBe('Bearer test-only');
       return { status: 200, json: { data: [{ id: 'b' }, { id: 'a' }, { id: 'a' }] } };
-    }); expect(r.models).toEqual(['a', 'b']); expect(r.note).toContain('工具调用能力需实际对话验证');
+    }); expect(r.models).toEqual(['a', 'b']); expect(r.note).toContain('Verify tool calling with an actual conversation');
   });
   it('discovers Gemini generation models using headers rather than URL keys', async () => {
     const r = await discoverModels(provider({ protocol: 'gemini' }), 'test-only', async (url, headers) => {
@@ -43,12 +43,12 @@ describe('BYOK providers and discovery', () => {
   it('allows keyless local services and manual setup after discovery is unavailable', async () => {
     const p = provider({ ...PROVIDER_TEMPLATES.ollama, models: ['local-model'] });
     const r = await discoverModels(p, '', async (_, headers) => { expect(headers.Authorization).toBeUndefined(); return { status: 200, json: { data: [{ id: 'local-model' }] } }; }); expect(r.authenticated).toBe(false);
-    await expect(discoverModels(p, '', async () => ({ status: 404, json: {} }))).rejects.toThrow('手动填写'); expect(() => validateProvider(p)).not.toThrow();
+    await expect(discoverModels(p, '', async () => ({ status: 404, json: {} }))).rejects.toThrow('Enter model IDs manually'); expect(() => validateProvider(p)).not.toThrow();
   });
   it('distinguishes invalid authentication from timeouts and malformed discovery', async () => {
-    await expect(discoverModels(provider(), 'test-only', async () => ({ status: 401, json: { error: 'secret' } }))).rejects.toThrow('拒绝鉴权');
-    await expect(discoverModels(provider(), 'test-only', () => new Promise(() => {}), 5)).rejects.toThrow('超时');
-    await expect(discoverModels(provider(), 'test-only', async () => ({ status: 200, json: { data: {} } }))).rejects.toThrow('格式无效');
+    await expect(discoverModels(provider(), 'test-only', async () => ({ status: 401, json: { error: 'secret' } }))).rejects.toThrow('Authentication rejected');
+    await expect(discoverModels(provider(), 'test-only', () => new Promise(() => {}), 5)).rejects.toThrow('timed out');
+    await expect(discoverModels(provider(), 'test-only', async () => ({ status: 200, json: { data: {} } }))).rejects.toThrow('Invalid model list format');
   });
 });
 describe('native provider tool protocols', () => {
@@ -92,6 +92,6 @@ describe('credential isolation and compatibility', () => {
   });
   it('reports secure-storage failure without a plaintext fallback', async () => {
     const c = new Credentials('vault-one', { getSecret: () => { throw new Error('test-secret'); }, setSecret: () => { throw new Error('test-secret'); } });
-    await expect(c.get('a')).rejects.toThrow('Keychain 读取失败'); await expect(c.set('a', 'test-only')).rejects.toThrow('未降级为明文');
+    await expect(c.get('a')).rejects.toThrow('Could not read Obsidian Keychain'); await expect(c.set('a', 'test-only')).rejects.toThrow('not saved as plain text');
   });
 });

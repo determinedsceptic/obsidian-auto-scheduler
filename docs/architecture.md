@@ -1,27 +1,35 @@
-# 项目架构
+# Architecture
 
-作者：Codex；日期：2026-10-01。根据 Alex 的 GitHub 同步请求整理。来源：spec.md、plan.md 与 Gantt Calendar commit a061309。实现版本由本文件所在 Git 提交确定。
+A TypeScript Obsidian plugin with an esbuild CommonJS bundle. Runtime imports only `obsidian`; Node.js is used by build/test scripts, not the installed plugin.
 
-采用 Gantt Calendar 的 Obsidian TypeScript 插件结构：src/main.ts 入口、根目录 manifest.json / versions.json / styles.css、esbuild 构建、独立测试和工具脚本。按当前功能规模拆分职责；将日历插件的 Markdown schema 作为兼容边界。
-
-| 文件 | 职责 |
+| Module | Responsibility |
 | --- | --- |
-| src/main.ts | 插件生命周期、命令、设置和预览界面；公共 Obsidian Vault API 适配 |
-| src/types.ts | 任务、时间块、设置、备份和诊断类型 |
-| src/parser.ts | 明确估时任务及固定日程读取、字段验证 |
-| src/calendar-format.ts | Tasks emoji / Dataview 日期、优先级与结构化隐藏元数据 |
-| src/daily.ts | YYYY-MM-DD.md 的 Day planner 分区、手写占用与受管区保留 |
-| src/time.ts | 本地时间、15 分钟网格、路径/设置验证、时间区间操作 |
-| src/scheduler.ts | 确定性容量约束排程；不依赖 Obsidian |
-| src/output.ts | 工作块读取、渲染、差异比较；保留管理区外内容 |
-| src/tracking.ts | 每日纯列表区域和内部带元数据表示的转换、插件跟踪记录校验 |
-| src/transaction.ts | 只读预览快照、备份、比较写入、多文件失败恢复与撤销 |
-| src/queue.ts | 顺序执行设置和写入操作 |
+| `main.ts` | Lifecycle, commands, settings, native vault adapter, and serialized operations. |
+| `chat-view.ts`, `provider-modal.ts` | Sidebar conversation, copying, and BYOK setup. |
+| `providers.ts`, `credentials.ts` | Provider/model routing, discovery, isolated host Keychain or session credentials. |
+| `llm.ts` | Four transport schemas and strict task/habit tool dispatch. |
+| `habit-tool.ts`, `skills/habits/SKILL.md` | Bundled model instructions, host-controlled paths, validated template creation. |
+| `parser.ts`, `calendar-format.ts` | Source estimates, event syntax, Tasks/Dataview compatibility. |
+| `habits.ts` | Readable recurring templates, stable occurrence identity, fixed-time expansion. |
+| `time.ts`, `scheduler.ts` | Local-time/grid constraints and deterministic capacity-aware scheduling. |
+| `daily.ts`, `output.ts`, `tracking.ts` | Daily sections, rendering, diffs, and clean-list tracking. |
+| `transaction.ts`, `queue.ts` | Read-only snapshots, durable recovery, compare-and-write, undo, and serialization. |
+| `ai-result.ts` | User-facing times and links derived from applied results. |
 
-数据流：Markdown → 格式解析/输入校验 → 排程 → 输出渲染/读回校验 → 预览 → 输入快照检查 → 持久化备份 → Vault 比较写入。手动排程在预览界面确认应用；AI 对话在校验成功后直接应用，src/ai-result.ts 从已写入的结果生成时间清单和本地日期链接。多文件写入没有跨文件原子性。
+```mermaid
+flowchart LR
+  A[Chat or Markdown] --> B[Host validation]
+  B --> C[Expand habits first]
+  C --> D[Local scheduler]
+  D --> E[Render and validate]
+  E --> F[Snapshot check]
+  F --> G[Save undo backup]
+  G --> H[Compare and write]
+  H --> I[Saved times and daily-note links]
+```
 
-tests/ 测试纯逻辑与事务边界；scripts/smoke.mjs 验证构建产物在模拟宿主中的行为；scripts/gantt-interop.mjs 直接执行固定版本上游 parser/serializer；demo-vault/ 仅含合成示例；validation/ 保存验证记录。
+Manual scheduling inserts a preview before snapshot verification; AI creation applies directly after validation. Habit creation stages the new template in memory and schedules from that staged content. The template is written alongside daily notes only after the original source snapshot is checked. Recovery covers both.
 
-Git 管理源码、锁文件、配置、设计及验证文档。node_modules/、main.js、dist/ 和本地测试库不入库。构建产物由 npm run package 生成，CI 模板配置 artifact（尚未启用）；本次同步不创建 Release 或版本标签。
+The host has no multi-file transaction API. A partial write is visible and recoverable, rather than described as fully atomic. Clean daily output stores annotated representations in plugin data; matching allows completion-checkbox changes but refuses ambiguous title/time edits.
 
-运行时仅依赖 Obsidian；上游源码不是 vendored 依赖。不引入其 React、日历界面或飞书同步系统。本插件仍支持 Obsidian 桌面端 1.6.6+，Gantt 互操作的参考版本本身要求 1.13.0+。
+Tests cover pure logic and transaction boundaries; `scripts/smoke.mjs` loads the actual built bundle into an isolated host simulation. Screenshots exercise a real Obsidian vault and deterministic localhost provider. No upstream calendar source is bundled.

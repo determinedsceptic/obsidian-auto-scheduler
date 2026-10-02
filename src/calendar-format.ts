@@ -7,7 +7,7 @@ export function calendarDate(body: string, field: 'due' | 'start' | 'scheduled')
   const values = [...inline, ...emoji];
   if (!values.length) return undefined;
   const parsed = values.map(value => parseBoundary(value.replace(' ', 'T'), field === 'due'));
-  if (parsed.some(value => value !== parsed[0])) throw new Error(`${field} 日期字段冲突`);
+  if (parsed.some(value => value !== parsed[0])) throw new Error(`${field} conflicting date fields`);
   return parsed[0];
 }
 export function calendarPriority(body: string): number {
@@ -16,7 +16,7 @@ export function calendarPriority(body: string): number {
   const inline = /\[priority::\s*([^\]]+)\]/i.exec(body);
   if (inline) {
     const value = levels[inline[1].trim().toLowerCase()];
-    if (!value) throw new Error('未知日历 priority 字段');
+    if (!value) throw new Error('Unknown calendar priority field');
     return value;
   }
   const symbol = /🔺|⏫|🔼|🔽|⏬/u.exec(body)?.[0];

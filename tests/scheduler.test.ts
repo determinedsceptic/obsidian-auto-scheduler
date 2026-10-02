@@ -43,9 +43,9 @@ describe('确定性排程', () => {
     const result = schedule([task({ remaining: 75, min: 30 })], [interval('10:00', '11:00')], [], config(), now, 1);
     expect(result.blocks.map(b => b.end - b.start)).toEqual([45, 30]); expect(result.unscheduled).toEqual([]);
   });
-  it('不可拆分任务不得部分安排', () => {
+  it('不Splittable任务不得部分安排', () => {
     const result = schedule([task({ remaining: 120, split: false })], [interval('10:00', '11:00')], [], config(), now, 1);
-    expect(result.blocks).toEqual([]); expect(result.unscheduled[0]).toMatchObject({ remaining: 120, reason: expect.stringContaining('连续') });
+    expect(result.blocks).toEqual([]); expect(result.unscheduled[0]).toMatchObject({ remaining: 120, reason: expect.stringContaining('continuous') });
   });
   it('保留锁定块并扣除本周剩余量', () => {
     const locked = block(); const result = schedule([task({ remaining: 120 })], [], [locked], config(), now, 1);
@@ -64,13 +64,13 @@ describe('确定性排程', () => {
     ['锁定块彼此冲突', () => schedule([task({ remaining: 120 })], [], [block(), block({ id: 'other' })], config(), now, 1)],
     ['锁定块缓冲冲突', () => schedule([task({ remaining: 120 })], [], [block(), block({ id: 'other', ...interval('10:00', '11:00') })], config({ blockBuffer: 15 }), now, 1)],
   ])('阻止应用：%s', (_, run) => { expect(run().errors.length).toBeGreaterThan(0); });
-  it('不可拆分任务不能通过多个锁定块拆分', () => {
+  it('不Splittable任务不能通过多个锁定块拆分', () => {
     const result = schedule([task({ split: false })], [], [block({ ...interval('09:00', '09:30') }), block({ id: 'part2', ...interval('10:00', '10:30') })], config(), now, 1);
-    expect(result.errors.some(e => e.message.includes('多个锁定块'))).toBe(true);
+    expect(result.errors.some(e => e.message.includes('multiple locked blocks'))).toBe(true);
   });
   it('受 earliest/due 限制，过期与范围外分别解释', () => {
     const result = schedule([task({ id: 'expired', due: localMinute('2026-09-30', '12:00') }), task({ id: 'future', earliest: localMinute('2026-10-10', '09:00') }), task({ id: 'bound', earliest: localMinute('2026-10-01', '09:20'), due: localMinute('2026-10-01', '10:30') })], [], [], config(), now, 1);
-    expect(result.unscheduled.map(t => t.reason)).toEqual(['截止已过', '最早开始时间在排程范围外']);
+    expect(result.unscheduled.map(t => t.reason)).toEqual(['Deadline has passed', 'Earliest start is outside the scheduling range']);
     expect(result.blocks.map(b => [clock(b.start), clock(b.end)])).toEqual([['09:30', '10:30']]);
   });
   it('跨月日期递增，不使用固定 UTC 日长', () => { expect(addDays('2026-10-31', 1)).toBe('2026-11-01'); });

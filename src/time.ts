@@ -10,11 +10,11 @@ export function clock(minute: number): string {
   const d = atDate(minute); return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 export function dayDate(key: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) throw new Error(`非法日期：${key}`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) throw new Error(`Invalid date: ${key}`);
   const [y, m, d] = key.split('-').map(Number);
-  if (y < 1900 || y > 9999) throw new Error(`年份超出支持范围：${key}`);
+  if (y < 1900 || y > 9999) throw new Error(`Year out of supported range: ${key}`);
   const result = new Date(y, m - 1, d);
-  if (dateKey(result) !== key) throw new Error(`非法日期：${key}`);
+  if (dateKey(result) !== key) throw new Error(`Invalid date: ${key}`);
   return result;
 }
 export function addDays(key: string, count: number): string {
@@ -22,20 +22,20 @@ export function addDays(key: string, count: number): string {
 }
 export function clockMinutes(value: string, allowMidnightEnd = false): number {
   if (allowMidnightEnd && value === '24:00') return 1440;
-  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) throw new Error(`非法时间：${value}`);
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) throw new Error(`Invalid time: ${value}`);
   const [h, m] = value.split(':').map(Number); return h * 60 + m;
 }
 export function localMinute(key: string, value: string): number {
   const offset = clockMinutes(value, true);
   if (offset === 1440) return epochMinute(dayDate(addDays(key, 1)));
   const d = dayDate(key); d.setHours(Math.floor(offset / 60), offset % 60, 0, 0);
-  if (dateKey(d) !== key || clock(epochMinute(d)) !== value) throw new Error(`时间发生跳变：${key} ${value}`);
+  if (dateKey(d) !== key || clock(epochMinute(d)) !== value) throw new Error(`Local time jumps at: ${key} ${value}`);
   return epochMinute(d);
 }
 export function parseBoundary(value: string, endOfDate = false): number {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return localMinute(value, endOfDate ? '24:00' : '00:00');
   const match = /^(\d{4}-\d{2}-\d{2})T((?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value);
-  if (!match) throw new Error(`日期需为 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm：${value}`);
+  if (!match) throw new Error(`Use YYYY-MM-DD or YYYY-MM-DDTHH:mm: ${value}`);
   return localMinute(match[1], match[2]);
 }
 export const overlap = (a: Interval, b: Interval): boolean => a.start < b.end && b.start < a.end;
@@ -77,31 +77,31 @@ export function validateSettings(settings: Settings): string[] {
   for (const field of ['taskFolder', 'habitFolder', 'fixedFile', 'outputFile'] as const) {
     const value = settings[field];
     if (!safeVaultPath(value)) {
-      errors.push(`${field} 必须是库内相对路径，不能包含隐藏目录或 ..`);
+      errors.push(`${field} must be a vault-relative path without hidden folders or ..`);
     }
   }
-  if ([settings.taskFolder, settings.dailyFolder].some(folder => folder === settings.habitFolder || folder?.startsWith(settings.habitFolder + '/')) || [settings.fixedFile, settings.outputFile].some(path => path === settings.habitFolder || path?.startsWith(settings.habitFolder + '/'))) errors.push('习惯目录不能包含任务目录、每日目录或固定/输出文件');
-  if (!settings.fixedFile?.endsWith('.md') || !settings.outputFile?.endsWith('.md')) errors.push('固定日程和输出路径必须以 .md 结尾');
-  if (settings.fixedFile === settings.outputFile) errors.push('固定日程和输出文件不能相同');
-  if (settings.taskFolder === settings.outputFile || settings.taskFolder === settings.fixedFile) errors.push('任务目录不能是输入/输出文件');
-  if (!Array.isArray(settings.weekdays) || !settings.weekdays.length || new Set(settings.weekdays).size !== settings.weekdays.length || settings.weekdays.some(n => !Number.isInteger(n) || n < 0 || n > 6)) errors.push('工作日需为不重复的 0–6（0 为周日）');
-  if (!['plain', 'day-planner', 'gantt'].includes(settings.outputMode)) errors.push('未知输出格式');
-  if (!['single', 'daily'].includes(settings.outputLocation)) errors.push('未知输出位置');
-  if (typeof settings.ganttFilter !== 'string' || settings.ganttFilter.length > 100 || /[\r\n<>\[\]%]/.test(settings.ganttFilter)) errors.push('Gantt 前缀须为单行普通文本');
-  if (!safeVaultPath(settings.dailyFolder)) errors.push('dailyFolder 必须是安全的库内目录');
-  if (settings.outputLocation === 'daily' && settings.outputMode === 'plain') errors.push('每日笔记需要 Day Planner 或 Gantt 格式');
+  if ([settings.taskFolder, settings.dailyFolder].some(folder => folder === settings.habitFolder || folder?.startsWith(settings.habitFolder + '/')) || [settings.fixedFile, settings.outputFile].some(path => path === settings.habitFolder || path?.startsWith(settings.habitFolder + '/'))) errors.push('The habits folder cannot contain the task folder, daily folder, or fixed/output files');
+  if (!settings.fixedFile?.endsWith('.md') || !settings.outputFile?.endsWith('.md')) errors.push('Fixed-event and output paths must end in .md');
+  if (settings.fixedFile === settings.outputFile) errors.push('Fixed-event and output files cannot be the same');
+  if (settings.taskFolder === settings.outputFile || settings.taskFolder === settings.fixedFile) errors.push('The task folder cannot be an input/output file');
+  if (!Array.isArray(settings.weekdays) || !settings.weekdays.length || new Set(settings.weekdays).size !== settings.weekdays.length || settings.weekdays.some(n => !Number.isInteger(n) || n < 0 || n > 6)) errors.push('Working days must be distinct values 0–6 (0 is Sunday)');
+  if (!['plain', 'day-planner', 'gantt'].includes(settings.outputMode)) errors.push('Unknown output format');
+  if (!['single', 'daily'].includes(settings.outputLocation)) errors.push('Unknown output location');
+  if (typeof settings.ganttFilter !== 'string' || settings.ganttFilter.length > 100 || /[\r\n<>\[\]%]/.test(settings.ganttFilter)) errors.push('Gantt prefix must be plain text on one line');
+  if (!safeVaultPath(settings.dailyFolder)) errors.push('dailyFolder must be a safe vault-relative folder');
+  if (settings.outputLocation === 'daily' && settings.outputMode === 'plain') errors.push('Daily notes require Day Planner or Gantt format');
   for (const field of ['dailyCapacity', 'fixedBuffer', 'blockBuffer'] as const) {
-    if (!Number.isInteger(settings[field]) || settings[field] < (field === 'dailyCapacity' ? 15 : 0) || settings[field] > 1440 || settings[field] % GRID) errors.push(`${field} 需为 15 分钟倍数，且在合法范围内`);
+    if (!Number.isInteger(settings[field]) || settings[field] < (field === 'dailyCapacity' ? 15 : 0) || settings[field] > 1440 || settings[field] % GRID) errors.push(`${field} must be a multiple of 15 minutes within the allowed range`);
   }
   try {
-    if (!Array.isArray(settings.periods) || !settings.periods.length) throw new Error('至少设置一个工作时段');
+    if (!Array.isArray(settings.periods) || !settings.periods.length) throw new Error('Set at least one working period');
     const periods = settings.periods.map(period => {
-      if (typeof period !== 'string' || !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(period)) throw new Error('工作时段格式为 HH:mm-HH:mm');
+      if (typeof period !== 'string' || !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(period)) throw new Error('Working-period format is HH:mm-HH:mm');
       const [a, b] = period.split('-'); const start = clockMinutes(a), end = clockMinutes(b, true);
-      if (end <= start || start % GRID || end % GRID) throw new Error('工作时段必须同日、递增，且为 15 分钟网格');
+      if (end <= start || start % GRID || end % GRID) throw new Error('Working periods must increase within one day on the 15-minute grid');
       return { start, end };
     }).sort((a, b) => a.start - b.start);
-    if (periods.some((p, i) => i > 0 && overlap(p, periods[i - 1]))) errors.push('工作时段不能重叠');
+    if (periods.some((p, i) => i > 0 && overlap(p, periods[i - 1]))) errors.push('Working periods cannot overlap');
   } catch (error) { errors.push((error as Error).message); }
   return errors;
 }
@@ -111,7 +111,7 @@ export function assertStableWeek(startKey: string): void {
     const d = dayDate(addDays(startKey, i));
     for (let hour = 0; hour < 24; hour++) {
       const check = new Date(d); check.setHours(hour);
-      if (check.getTimezoneOffset() !== first) throw new Error('本周有时区/夏令时跳变，初版不支持该时间范围');
+      if (check.getTimezoneOffset() !== first) throw new Error('This week has a time-zone or DST transition, which is not supported yet');
     }
   }
 }

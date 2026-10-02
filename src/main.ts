@@ -25,31 +25,31 @@ class ObsidianVault implements VaultPort {
   async listTasks(folder: string, excluded: string[]): Promise<string[]> {
     const path = normalizePath(folder);
     if (!this.app.vault.getAbstractFileByPath(path)) return [];
-    if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFolder)) throw new Error(`任务目录不存在：${path}。请先设置任务目录`);
+    if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFolder)) throw new Error(`Task folder is not a directory: ${path}. Configure a tasks folder first.`);
     return this.app.vault.getMarkdownFiles().filter(f => f.path.startsWith(`${path}/`) && !excluded.includes(f.path)).map(f => f.path).sort();
   }
   async read(path: string): Promise<string | null> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!file) return null;
-    if (!(file instanceof TFile)) throw new Error(`路径不是文件：${path}`);
+    if (!(file instanceof TFile)) throw new Error(`Path is not a file: ${path}`);
     return this.app.vault.read(file);
   }
   async writeChecked(path: string, expected: string | null, next: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (expected !== null) {
-      if (!(file instanceof TFile)) throw new Error('输出文件被删除或类型发生变化，请重新预览');
+      if (!(file instanceof TFile)) throw new Error('Output was deleted or its type changed. Preview again.');
       await this.app.vault.process(file, current => {
-        if (current !== expected) throw new Error('输出在写入前发生变化，拒绝覆盖');
+        if (current !== expected) throw new Error('Output changed before writing; refusing to overwrite');
         return next;
       });
     } else {
-      if (file) throw new Error('输出文件已由其他操作创建，请重新预览');
+      if (file) throw new Error('Output was created by another operation. Preview again.');
       const parts = path.split('/').slice(0, -1); let parent = '';
       for (const part of parts) {
         parent = parent ? `${parent}/${part}` : part;
         const entry = this.app.vault.getAbstractFileByPath(parent);
         if (!entry) await this.app.vault.createFolder(parent);
-        else if (!(entry instanceof TFolder)) throw new Error(`输出父路径不是目录：${parent}`);
+        else if (!(entry instanceof TFolder)) throw new Error(`Output parent is not a folder: ${parent}`);
       }
       // create refuses an existing file; do not fall back to modify.
       await this.app.vault.create(path, next);
@@ -86,9 +86,9 @@ export default class AutoScheduler extends Plugin {
     const saved = await this.loadData() as Partial<PluginState> | null;
     this.state.settings = { ...DEFAULT_SETTINGS, ...(saved?.settings ?? {}) };
     if (saved?.undo && validUndo(saved.undo)) this.state.undo = saved.undo;
-    else if (saved?.undo) new Notice('Auto Scheduler：撤销记录格式异常，未启用自动恢复。请保留插件 data.json 备份。');
+    else if (saved?.undo) new Notice('Invalid undo record; automatic recovery is disabled. Keep a backup of the plugin data.json.');
     if (saved?.tracking) {
-      if (!validTracking(saved.tracking)) throw new Error('工作块跟踪数据异常，请保留 data.json 备份');
+      if (!validTracking(saved.tracking)) throw new Error('Invalid tracking data. Keep a backup of data.json.');
       this.state.tracking = saved.tracking;
     }
     this.state.llm = { protocol: saved?.llm?.protocol ?? DEFAULT_LLM.protocol, baseUrl: saved?.llm?.baseUrl ?? DEFAULT_LLM.baseUrl, model: saved?.llm?.model ?? DEFAULT_LLM.model };
@@ -96,37 +96,37 @@ export default class AutoScheduler extends Plugin {
     else { this.state.byok = migrateByok(this.state.llm, crypto.randomUUID().replace(/-/g, '')); this.state.llm = activeConfig(this.state.byok); }
     const secretStorage = (this.app as App & { secretStorage?: SecretPort }).secretStorage;
     this.credentials = new Credentials(this.byok.namespace, secretStorage && typeof secretStorage.getSecret === 'function' && typeof secretStorage.setSecret === 'function' ? secretStorage : undefined);
-    if (saved?.aiTasks) { if (!validAiTasks(saved.aiTasks)) throw new Error('AI 任务数据无效，请保留 data.json 备份'); this.state.aiTasks = saved.aiTasks; }
+    if (saved?.aiTasks) { if (!validAiTasks(saved.aiTasks)) throw new Error('Invalid AI task data. Keep a backup of data.json.'); this.state.aiTasks = saved.aiTasks; }
     if (!saved?.byok) await this.saveData(this.state);
     this.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
-    this.addCommand({ id: 'open-chat', name: '打开 AI 任务助手', callback: () => { void this.action(() => this.openChat()); } });
+    this.addCommand({ id: 'open-chat', name: 'Open AI assistant', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));
-    this.addCommand({ id: 'create-habit-template', name: '创建习惯模板', callback: () => { void this.action(async () => {
-      if (!safeVaultPath(this.state.settings.habitFolder)) throw new Error('请设置安全的习惯目录');
+    this.addCommand({ id: 'create-habit-template', name: 'Create habits template', callback: () => { void this.action(async () => {
+      if (!safeVaultPath(this.state.settings.habitFolder)) throw new Error('Configure a safe habits folder');
       const path = `${this.state.settings.habitFolder}/Template.md`;
       if (await this.vaultPort.read(path) === null) await this.vaultPort.writeChecked(path, null, HABIT_TEMPLATE);
       const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(file);
     }); } });
-    this.addCommand({ id: 'preview-week', name: '预览一周排程', callback: () => { void this.action(async () => {
+    this.addCommand({ id: 'preview-week', name: 'Preview weekly schedule', callback: () => { void this.action(async () => {
       const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, false, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
     }); } });
-    this.addCommand({ id: 'clean-daily-output', name: '清理每日排程格式', callback: () => { void this.action(async () => {
-      if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('请先启用每日笔记与每日纯列表');
+    this.addCommand({ id: 'clean-daily-output', name: 'Clean daily schedule format', callback: () => { void this.action(async () => {
+      if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('Enable daily-note output and clean daily lists first');
       const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
     }); } });
-    this.addCommand({ id: 'undo-last', name: '撤销最近一次排程', callback: () => { void this.action(async () => {
-      await undoLast(this.vaultPort, this.storage, this.state.undo); new Notice('已撤销最近一次排程');
+    this.addCommand({ id: 'undo-last', name: 'Undo last schedule', callback: () => { void this.action(async () => {
+      await undoLast(this.vaultPort, this.storage, this.state.undo); new Notice('Last schedule undone');
     }); } });
-    this.addRibbonIcon('calendar-clock', '打开 AI 任务助手', () => { void this.action(() => this.openChat()); });
+    this.addRibbonIcon('calendar-clock', 'Open AI assistant', () => { void this.action(() => this.openChat()); });
   }
   onunload(): void { this.credentials?.clearSession(); }
   async openChat(): Promise<void> {
     let leaf = this.app.workspace.getLeavesOfType(CHAT_VIEW)[0];
-    if (!leaf) { const right = this.app.workspace.getRightLeaf(false); if (!right) throw new Error('无法打开侧栏'); leaf = right; await leaf.setViewState({ type: CHAT_VIEW, active: true }); }
+    if (!leaf) { const right = this.app.workspace.getRightLeaf(false); if (!right) throw new Error('Could not open the sidebar'); leaf = right; await leaf.setViewState({ type: CHAT_VIEW, active: true }); }
     await this.app.workspace.revealLeaf(leaf);
   }
   refreshChats(): void { for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.refresh(); }
@@ -140,15 +140,15 @@ export default class AutoScheduler extends Plugin {
   async saveProvider(provider: ProviderConfig, token: string): Promise<void> {
     await this.operations.run(async () => {
       validateProvider(provider);
-      if (provider.requiresKey && !token.trim()) throw new Error('请填写本服务商的 API 令牌');
+      if (provider.requiresKey && !token.trim()) throw new Error('Enter an API key for this provider');
       const providers = this.byok.providers.filter(p => p.id !== provider.id); providers.push(provider);
       const byok = { ...this.byok, providers, activeProviderId: provider.id, activeModel: provider.models.includes(this.byok.activeModel) ? this.byok.activeModel : provider.models[0] }; validateByok(byok);
       const previousKey = await this.credentials.get(provider.id);
       await this.credentials.set(provider.id, token.trim());
       const next = { ...this.state, byok, llm: activeConfig(byok) };
       try { await this.saveData(next); } catch {
-        try { await this.credentials.set(provider.id, previousKey); } catch { throw new Error('配置保存失败且令牌回滚失败，请在本机 Keychain 检查本服务商凭据'); }
-        throw new Error('配置保存失败，已恢复原令牌');
+        try { await this.credentials.set(provider.id, previousKey); } catch { throw new Error('Settings could not be saved and the key could not be restored. Check this provider in your device Keychain.'); }
+        throw new Error('Settings could not be saved. The previous key was restored.');
       }
       this.state = next; this.refreshChats();
     });
@@ -160,21 +160,21 @@ export default class AutoScheduler extends Plugin {
       const byok = { ...this.byok, providers, activeProviderId: selected?.id ?? '', activeModel: selected?.models.includes(this.byok.activeModel) ? this.byok.activeModel : selected?.models[0] ?? '' }; validateByok(byok);
       const previousKey = await this.credentials.get(id); await this.credentials.set(id, '');
       const next = { ...this.state, byok, llm: selected ? activeConfig(byok) : { ...DEFAULT_LLM } };
-      try { await this.saveData(next); } catch { await this.credentials.set(id, previousKey); throw new Error('移除失败，已恢复原令牌'); }
+      try { await this.saveData(next); } catch { await this.credentials.set(id, previousKey); throw new Error('Removal failed. The previous key was restored.'); }
       this.state = next; this.refreshChats();
     });
   }
   async scheduleAi(drafts: TaskDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
-      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('排程设置已变化，请重新发送');
-      if (this.state.aiTasks.length + drafts.length > 10000) throw new Error('AI 任务数量超过上限');
+      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
+      if (this.state.aiTasks.length + drafts.length > 10000) throw new Error('AI task limit reached');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const added = materializeTasks(drafts, settings, new Date(), crypto.randomUUID().replace(/-/g, ''));
       const preview = await createPreview(this.vaultPort, settings, new Date(), this.state.tracking, false, this.state.aiTasks, added);
-      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}${e.line ? ':' + e.line : ''}：${e.message}`).join('\n'));
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}${e.line ? ':' + e.line : ''}: ${e.message}`).join('\n'));
       const ids = new Set(added.map(t => t.id));
-      if (!preview.result.blocks.some(b => ids.has(b.taskId))) throw new Error('未来七天没有可安排这些新任务的时间，未创建新任务。请调整工作时段、容量或截止时间后重试');
+      if (!preview.result.blocks.some(b => ids.has(b.taskId))) throw new Error('No time is available for these new tasks in the next seven days. No new tasks were created. Adjust working hours, capacity, or deadlines and try again.');
       let backupSaved = false;
       const storage: StatePort = {
         getTracking: this.storage.getTracking,
@@ -188,7 +188,7 @@ export default class AutoScheduler extends Plugin {
         const result = await applyPreview(this.vaultPort, storage, preview, settings);
         return describeAiSchedule(preview, result.warning);
       } catch (error) {
-        if (backupSaved) throw new Error(`排程写入未完成，可能已有部分日期写入；恢复备份已保存。请检查笔记并运行“撤销最近一次排程”。${(error as Error).message}`);
+        if (backupSaved) throw new Error(`Scheduling did not finish; some daily notes may have been written. A recovery backup is saved. Inspect the notes and run Undo last schedule. ${(error as Error).message}`);
         throw error;
       }
     });
@@ -196,7 +196,7 @@ export default class AutoScheduler extends Plugin {
 
   async scheduleHabits(drafts: HabitDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
-      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('排程设置已变化，请重新发送');
+      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const path = habitPath(settings), before = await this.vaultPort.read(path);
@@ -205,8 +205,8 @@ export default class AutoScheduler extends Plugin {
       const created = new Set(parseHabits([{ path, content: after }]).habits.filter(h => !previous.has(h.id)).map(h => h.id));
       const now = new Date();
       const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], { [path]: after });
-      if (preview.snapshot[path] !== before) throw new Error('习惯模板已变化，请重新发送');
-      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}:${e.line}：${e.message}`).join('\n'));
+      if (preview.snapshot[path] !== before) throw new Error('Habits template changed. Send your message again.');
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}:${e.line}: ${e.message}`).join('\n'));
       let backupSaved = false;
       const storage: StatePort = {
         getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
@@ -219,14 +219,14 @@ export default class AutoScheduler extends Plugin {
         const applied = await applyPreview(this.vaultPort, storage, preview, settings, now);
         const blocks = preview.result.blocks.filter(b => [...created].some(id => b.taskId === `habit_${id}_${b.date.replace(/-/g, '')}`));
         const notes = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${settings.dailyFolder}/${date}.md` }));
-        const lines = [`已保存周期习惯到 ${path}；以后每次排程会先调用此模板。`, '已写入每日笔记：'];
-        for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}：${b.title}（重要性 ${b.priority ?? 3}/5）`);
-        if (preview.result.unscheduled.length) lines.push('部分普通任务暂时无法安排，可调整容量后重新排程。');
+        const lines = [`Recurring habits saved to ${path}. Future schedules read this template first.`, 'Saved to daily notes:'];
+        for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)`);
+        if (preview.result.unscheduled.length) lines.push('Some ordinary tasks could not fit. Adjust capacity and replan later.');
         if (applied.warning) lines.push(applied.warning);
-        lines.push('运行“撤销最近一次排程”可同时恢复模板和日计划。');
+        lines.push('Run Undo last schedule to restore both the template and daily plans.');
         return { text: lines.join('\n'), notes };
       } catch (error) {
-        if (backupSaved) throw new Error(`习惯写入未完成，可能已有部分文件写入；请运行“撤销最近一次排程”。${(error as Error).message}`);
+        if (backupSaved) throw new Error(`Habit creation did not finish; some files may have been written. Run Undo last schedule. ${(error as Error).message}`);
         throw error;
       }
     });
@@ -234,14 +234,14 @@ export default class AutoScheduler extends Plugin {
 
   async openScheduledNote(path: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) throw new Error(`日期笔记不存在：${path}`);
+    if (!(file instanceof TFile)) throw new Error(`Daily note not found: ${path}`);
     await this.app.workspace.getLeaf('tab').openFile(file);
   }
 
   async action(work: () => Promise<void>): Promise<void> {
     // Serialize all writes, including rapid settings edits. Never discard keystrokes.
     await this.operations.run(work).catch(error => {
-      new Notice(`Auto Scheduler：${(error as Error).message}`, 12000);
+      new Notice(`Auto Scheduler: ${(error as Error).message}`, 12000);
     });
   }
   async updateSettings(patch: Partial<Settings>): Promise<void> {
@@ -254,11 +254,11 @@ export default class AutoScheduler extends Plugin {
   async apply(preview: Preview, done: () => void, originalSettingsKey?: string): Promise<void> {
     await this.action(async () => {
       if (originalSettingsKey !== undefined) {
-        if (JSON.stringify(this.state.settings) !== originalSettingsKey) throw new Error('设置已变化，请重新生成预览');
+        if (JSON.stringify(this.state.settings) !== originalSettingsKey) throw new Error('Settings changed. Generate a new preview.');
         const next = { ...this.state, settings: preview.settings }; await this.saveData(next); this.state = next;
       }
       const result = await applyPreview(this.vaultPort, this.storage, preview, this.state.settings);
-      new Notice(result.warning ?? (result.changed ? '排程已写入；可通过命令撤销' : '排程无变化，无需写入'), result.warning ? 12000 : 5000);
+      new Notice(result.warning ?? (result.changed ? 'Schedule saved. Use the undo command to restore it.' : 'Schedule unchanged; nothing to write'), result.warning ? 12000 : 5000);
       done();
     });
   }
@@ -268,53 +268,53 @@ class PreviewModal extends Modal {
   onOpen(): void {
     this.modalEl.addClass('auto-scheduler-modal');
     const { contentEl } = this; const { result, settings, diff } = this.preview;
-    contentEl.createEl('h2', { text: '一周排程预览' });
-    contentEl.createEl('p', { text: `${this.preview.today} 起一周 · ${this.preview.timezone} · 输出：${settings.outputLocation === 'daily' ? settings.dailyFolder + '/YYYY-MM-DD.md' : settings.outputFile}` });
-    contentEl.createEl('p', { text: '未锁定的本周工作块会被替换。保留手动移动的工作块，带元数据格式可用 locked=true 保留手动位置。纯列表模式支持勾选完成，编辑时间或标题前请先撤销。手写源任务的 remaining 需手动维护；AI 任务按勾选工作块计算未完成量。' });
+    contentEl.createEl('h2', { text: 'Weekly schedule preview' });
+    contentEl.createEl('p', { text: `${this.preview.today} onward · ${this.preview.timezone} · Output: ${settings.outputLocation === 'daily' ? settings.dailyFolder + '/YYYY-MM-DD.md' : settings.outputFile}` });
+    contentEl.createEl('p', { text: 'Unlocked blocks in this week are replaced. In metadata mode, set locked=true to retain a manual position. Clean lists support completion checkboxes; undo before editing generated times or titles. Maintain remaining minutes for handwritten tasks; AI tasks account for completed blocks automatically.' });
     const creating = this.preview.aiTasksAfter.filter(t => !this.preview.aiTasksBefore.some(old => old.id === t.id));
     if (creating.length) {
-      contentEl.createEl('h3', { text: '将创建的 AI 任务' });
-      for (const t of creating) contentEl.createEl('p', { text: `${t.title} · ${t.remaining} 分钟 · 优先级 ${t.priority} · ${t.split ? '可拆分' : '连续完成'} · 最小块 ${t.min} 分钟` });
+      contentEl.createEl('h3', { text: 'New AI tasks' });
+      for (const t of creating) contentEl.createEl('p', { text: `${t.title} · ${t.remaining} min · Priority ${t.priority} · ${t.split ? 'Splittable' : 'Continuous'} · Minimum block ${t.min} min` });
     }
-    if (this.preview.snapshot[settings.fixedFile] === null) contentEl.createEl('p', { text: `固定日程文件不存在：${settings.fixedFile}。本次按无固定日程处理，请确认空闲时段。`, cls: 'auto-scheduler-warning' });
+    if (this.preview.snapshot[settings.fixedFile] === null) contentEl.createEl('p', { text: `Fixed-events file not found: ${settings.fixedFile}. No events from this file were used. Check your availability.`, cls: 'auto-scheduler-warning' });
     if (result.errors.length) {
-      contentEl.createEl('h3', { text: '需要修正的输入' }); const list = contentEl.createEl('ul');
-      for (const error of result.errors) list.createEl('li', { text: `${error.path}${error.line ? `:${error.line}` : ''}：${error.message}` });
+      contentEl.createEl('h3', { text: 'Inputs to fix' }); const list = contentEl.createEl('ul');
+      for (const error of result.errors) list.createEl('li', { text: `${error.path}${error.line ? `:${error.line}` : ''}: ${error.message}` });
     }
-    contentEl.createEl('p', { text: `新增 ${diff.added.length} · 移除 ${diff.removed.length} · 保留 ${diff.retained.length}` });
+    contentEl.createEl('p', { text: `Added ${diff.added.length} · Removed ${diff.removed.length} · Retained ${diff.retained.length}` });
     if (diff.removed.length) {
-      const detail = contentEl.createEl('details'); detail.createEl('summary', { text: '将移除的工作块' });
+      const detail = contentEl.createEl('details'); detail.createEl('summary', { text: 'Blocks to remove' });
       for (const b of diff.removed) detail.createEl('p', { text: `${b.date} ${clock(b.start)}–${endClock(b)} · ${b.taskId}` });
     }
     for (const day of result.days) {
-      contentEl.createEl('h3', { text: `${day.date} · 占用 ${day.occupied}/${day.capacity} 分钟${day.overCapacity ? '（已有日程超额，本日不新增）' : ''}` });
+      contentEl.createEl('h3', { text: `${day.date} · Occupied ${day.occupied}/${day.capacity} min${day.overCapacity ? '(existing events exceed capacity; no new work today)' : ''}` });
       const list = contentEl.createEl('ul');
       const blocks = result.blocks.filter(b => b.date === day.date);
-      if (!blocks.length) list.createEl('li', { text: '无工作块' });
+      if (!blocks.length) list.createEl('li', { text: 'No time blocks' });
       for (const block of blocks) {
         const item = list.createEl('li');
-        item.createSpan({ text: `${clock(block.start)}–${endClock(block)} ${block.taskId}${block.completed ? '（已勾选，保留）' : block.locked ? '（锁定）' : ''} ` });
+        item.createSpan({ text: `${clock(block.start)}–${endClock(block)} ${block.completed ? ' · Completed' : block.locked ? ' · Fixed' : ''} ` });
         if (this.preview.aiTasksAfter.some(t => t.id === block.taskId)) { item.createSpan({ text: block.title }); continue; }
         const source = item.createEl('a', { text: block.title, href: '#' });
         source.addEventListener('click', event => { event.preventDefault(); void this.app.workspace.openLinkText(block.path, '', true); });
       }
     }
     if (result.unscheduled.length) {
-      contentEl.createEl('h3', { text: '尚未安排' }); const list = contentEl.createEl('ul');
-      for (const task of result.unscheduled) list.createEl('li', { text: `${task.taskId} · 剩余 ${task.remaining} 分钟 · ${task.reason}` });
+      contentEl.createEl('h3', { text: 'Not yet scheduled' }); const list = contentEl.createEl('ul');
+      for (const task of result.unscheduled) list.createEl('li', { text: `${task.taskId} · Remaining ${task.remaining} min · ${task.reason}` });
     }
     if (this.preview.output !== null) {
-      const detail = contentEl.createEl('details'); detail.createEl('summary', { text: '查看实际写入内容' });
+      const detail = contentEl.createEl('details'); detail.createEl('summary', { text: 'View exact file changes' });
       detail.createEl('pre', { text: this.preview.output });
     }
     const actions = contentEl.createDiv({ cls: 'auto-scheduler-actions' });
-    const apply = actions.createEl('button', { text: '应用排程', cls: 'mod-cta' });
+    const apply = actions.createEl('button', { text: 'Apply schedule', cls: 'mod-cta' });
     apply.disabled = result.errors.length > 0 || this.preview.output === null;
     apply.addEventListener('click', () => {
       apply.disabled = true;
       void this.plugin.apply(this.preview, () => { this.close(); this.applied?.(); }, this.originalSettingsKey).finally(() => { apply.disabled = result.errors.length > 0 || this.preview.output === null; });
     });
-    const cancel = actions.createEl('button', { text: '取消' }); cancel.addEventListener('click', () => this.close());
+    const cancel = actions.createEl('button', { text: 'Cancel' }); cancel.addEventListener('click', () => this.close());
   }
   onClose(): void { this.contentEl.empty(); }
 }
@@ -323,46 +323,46 @@ class SchedulerSettings extends PluginSettingTab {
   display(): void {
     const { containerEl } = this; containerEl.empty();
     const settings = this.plugin.state.settings;
-    containerEl.createEl('h2', { text: 'Auto Scheduler' });
-    containerEl.createEl('p', { text: `本地时区：${timezone()}。预览确认后写入专用文件或每日笔记的 Day planner 管理区。每日笔记中的手写时间段计入占用。` });
+    // The host already displays the plugin name in the settings pane.
+    containerEl.createEl('p', { text: `Local time zone: ${timezone()}. Manual commands preview before writing. AI requests schedule directly. Handwritten daily time ranges count as occupied time.` });
     const text = (name: string, description: string, value: string, update: (value: string) => Partial<Settings>): void => {
       new Setting(containerEl).setName(name).setDesc(description).addText(input => input.setValue(value).onChange(value => { void this.plugin.updateSettings(update(value.trim())); }));
     };
-    containerEl.createEl('h3', { text: 'BYOK 服务商与模型' });
-    containerEl.createEl('p', { text: `令牌保存方式：${this.plugin.credentialMode}。取消配置不保存；本机令牌不写入 data.json 或笔记。` });
-    new Setting(containerEl).setName('添加服务商').setDesc('选择模板、填写令牌、测试并选择模型；支持手动模型 ID。').addButton(b => b.setButtonText('添加服务商').onClick(() => this.plugin.openProvider(undefined, () => this.display())));
-    if (this.plugin.byok.providers.length) new Setting(containerEl).setName('对话模型').addDropdown(input => {
+    containerEl.createEl('h3', { text: 'Providers and models (BYOK)' });
+    containerEl.createEl('p', { text: `API key storage: ${this.plugin.credentialMode}. Cancel discards changes; keys are not written to data.json or notes.` });
+    new Setting(containerEl).setName('Add provider').setDesc('Choose a template, enter your key, and select or enter model IDs.').addButton(b => b.setButtonText('Add provider').onClick(() => this.plugin.openProvider(undefined, () => this.display())));
+    if (this.plugin.byok.providers.length) new Setting(containerEl).setName('Chat model').addDropdown(input => {
       for (const provider of this.plugin.byok.providers) for (const model of provider.models) input.addOption(JSON.stringify([provider.id, model]), `${provider.name} / ${model}`);
       input.setValue(JSON.stringify([this.plugin.byok.activeProviderId, this.plugin.byok.activeModel])).onChange(value => {
         const [id, model] = JSON.parse(value); void this.plugin.selectModel(id, model).catch(error => new Notice((error as Error).message));
       });
     });
     for (const provider of this.plugin.byok.providers) {
-      new Setting(containerEl).setName(provider.name).setDesc(`${provider.protocol} · ${provider.baseUrl} · ${provider.requiresKey ? '需要令牌' : '令牌可选'} · ${provider.models.join(', ')}`)
-        .addButton(b => b.setButtonText('编辑').onClick(() => this.plugin.openProvider(provider, () => this.display())))
-        .addButton(b => b.setButtonText('移除').onClick(() => {
-          const modal = new Modal(this.app); modal.contentEl.createEl('h3', { text: `移除 ${provider.name}？` });
-          modal.contentEl.createEl('p', { text: '将移除此服务商、模型及本插件保存的令牌，不影响已有任务和笔记。' });
-          modal.contentEl.createEl('button', { text: '确认移除' }).addEventListener('click', () => { void this.plugin.removeProvider(provider.id).then(() => { modal.close(); this.display(); }).catch(error => new Notice((error as Error).message)); });
-          modal.contentEl.createEl('button', { text: '取消' }).addEventListener('click', () => modal.close()); modal.open();
+      new Setting(containerEl).setName(provider.name).setDesc(`${provider.protocol} · ${provider.baseUrl} · ${provider.requiresKey ? 'Key required' : 'Key optional'} · ${provider.models.join(', ')}`)
+        .addButton(b => b.setButtonText('Edit').onClick(() => this.plugin.openProvider(provider, () => this.display())))
+        .addButton(b => b.setButtonText('Remove').onClick(() => {
+          const modal = new Modal(this.app); modal.contentEl.createEl('h3', { text: `Remove ${provider.name}?` });
+          modal.contentEl.createEl('p', { text: 'Remove this provider, its models, and the key stored by this plugin. Existing tasks and notes are preserved.' });
+          modal.contentEl.createEl('button', { text: 'Confirm removal' }).addEventListener('click', () => { void this.plugin.removeProvider(provider.id).then(() => { modal.close(); this.display(); }).catch(error => new Notice((error as Error).message)); });
+          modal.contentEl.createEl('button', { text: 'Cancel' }).addEventListener('click', () => modal.close()); modal.open();
         }));
     }
-    text('任务目录', '库内目录，仅扫描该目录下 Markdown', settings.taskFolder, taskFolder => ({ taskFolder }));
-    text('习惯模板目录', '每次排程先读取此目录的 Markdown；使用“创建习惯模板”命令建立示例', settings.habitFolder, habitFolder => ({ habitFolder }));
-    text('固定日程文件', '格式：- YYYY-MM-DD HH:mm-HH:mm 标题；不存在时按空日程处理', settings.fixedFile, fixedFile => ({ fixedFile }));
-    text('输出文件', '专用 Markdown；已有普通笔记不会被接管', settings.outputFile, outputFile => ({ outputFile }));
-    new Setting(containerEl).setName('输出位置').addDropdown(input => input.addOption('single', '专用文件').addOption('daily', '每日笔记：Day planner').setValue(settings.outputLocation).onChange(value => { void this.plugin.updateSettings({ outputLocation: value as Settings['outputLocation'] }); }));
-    new Setting(containerEl).setName('每日纯列表').setDesc('日期文件只输出普通任务列表，管理数据保存到插件数据中；关闭以输出 Gantt 日期字段。').addToggle(input => input.setValue(settings.cleanDaily).onChange(cleanDaily => { void this.plugin.updateSettings({ cleanDaily }); }));
-    text('每日笔记目录', 'YYYY-MM-DD.md；保留 Day planner 下的手写内容和其他章节', settings.dailyFolder, dailyFolder => ({ dailyFolder }));
-    text('Gantt 任务前缀', '与 Gantt Calendar 的全局任务过滤器一致，默认 🎯；可清空', settings.ganttFilter, ganttFilter => ({ ganttFilter }));
-    text('工作日', '逗号分隔：0 为周日，1 为周一，…，6 为周六', Array.isArray(settings.weekdays) ? settings.weekdays.join(',') : String(settings.weekdays), value => ({ weekdays: value.split(',').map(v => v.trim() ? Number(v.trim()) : NaN) }));
-    text('工作时段', '逗号分隔，如 09:00-12:00,14:00-18:00；15 分钟网格', Array.isArray(settings.periods) ? settings.periods.join(',') : String(settings.periods), value => ({ periods: value.split(',').map(v => v.trim()) }));
+    text('Tasks folder', 'Vault-relative folder; scans Markdown files within it', settings.taskFolder, taskFolder => ({ taskFolder }));
+    text('Habits folder', 'Read Markdown templates here before scheduling; use Create habits template for examples', settings.habitFolder, habitFolder => ({ habitFolder }));
+    text('Fixed-events file', 'Format: - YYYY-MM-DD HH:mm-HH:mm Title. A missing file means no fixed events.', settings.fixedFile, fixedFile => ({ fixedFile }));
+    text('Schedule file', 'Dedicated Markdown output; ordinary existing notes are not taken over', settings.outputFile, outputFile => ({ outputFile }));
+    new Setting(containerEl).setName('Output location').addDropdown(input => input.addOption('single', 'Single schedule file').addOption('daily', 'Daily notes: Day planner').setValue(settings.outputLocation).onChange(value => { void this.plugin.updateSettings({ outputLocation: value as Settings['outputLocation'] }); }));
+    new Setting(containerEl).setName('Clean daily lists').setDesc('Write plain time-based tasks to daily notes; tracking stays in plugin data. Turn off for full Gantt date fields.').addToggle(input => input.setValue(settings.cleanDaily).onChange(cleanDaily => { void this.plugin.updateSettings({ cleanDaily }); }));
+    text('Daily notes folder', 'YYYY-MM-DD.md; preserve handwritten content and other sections', settings.dailyFolder, dailyFolder => ({ dailyFolder }));
+    text('Gantt task prefix', 'Match Gantt Calendar task filter, default 🎯. Can be empty.', settings.ganttFilter, ganttFilter => ({ ganttFilter }));
+    text('Working days', 'Comma-separated: 0 is Sunday, 1 is Monday, …, 6 is Saturday', Array.isArray(settings.weekdays) ? settings.weekdays.join(',') : String(settings.weekdays), value => ({ weekdays: value.split(',').map(v => v.trim() ? Number(v.trim()) : NaN) }));
+    text('Working hours', 'Comma-separated, e.g. 09:00-12:00,14:00-18:00; 15-minute grid', Array.isArray(settings.periods) ? settings.periods.join(',') : String(settings.periods), value => ({ periods: value.split(',').map(v => v.trim()) }));
     for (const [field, name, description] of [
-      ['dailyCapacity', '每日容量（分钟）', '包括工作时段中的固定日程、工作块及缓冲'],
-      ['fixedBuffer', '固定日程两侧缓冲', '分钟，15 的倍数，可设 0'],
-      ['blockBuffer', '工作块后缓冲', '分钟，15 的倍数，可设 0'],
+      ['dailyCapacity', 'Daily capacity (minutes)', 'Includes events, time blocks, and buffers within working hours'],
+      ['fixedBuffer', 'Buffer around fixed events', 'Minutes, in multiples of 15; 0 is allowed'],
+      ['blockBuffer', 'Buffer after time blocks', 'Minutes, in multiples of 15; 0 is allowed'],
     ] as const) text(name, description, String(settings[field]), value => ({ [field]: value ? Number(value) : NaN }));
-    new Setting(containerEl).setName('输出格式').setDesc('Gantt 使用完整 start/scheduled/due 日期时间；每日模式请选择 Day Planner 或 Gantt。').addDropdown(input => input.addOption('plain', '普通 Markdown 列表').addOption('day-planner', 'Day Planner').addOption('gantt', 'Gantt Calendar（Dataview）').setValue(settings.outputMode).onChange(value => { void this.plugin.updateSettings({ outputMode: value as Settings['outputMode'] }); }));
-    containerEl.createEl('p', { text: '工作块需保留完整 as-block 注释或结构化元数据。Gantt 锁定字段为 locked=true。改变设置后重新预览；剩余用时请在源任务中维护。' });
+    new Setting(containerEl).setName('Output format').setDesc('Gantt uses full start/scheduled/due dates. Choose Day Planner or Gantt for daily notes.').addDropdown(input => input.addOption('plain', 'Plain Markdown list').addOption('day-planner', 'Day Planner').addOption('gantt', 'Gantt Calendar（Dataview）').setValue(settings.outputMode).onChange(value => { void this.plugin.updateSettings({ outputMode: value as Settings['outputMode'] }); }));
+    containerEl.createEl('p', { text: 'Metadata mode requires complete as-block fields; use locked=true to preserve a position. Clean lists keep tracking in plugin data. Preview again after changing settings.' });
   }
 }

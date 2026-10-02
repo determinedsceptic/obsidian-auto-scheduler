@@ -10,7 +10,7 @@ interface Section { start: number; end: number }
 function section(content: string): Section | undefined {
   const lines = content.split(/\r?\n/), visible = visibleLines(content);
   const headings = visible.filter(l => /^#{1,6}\s+Day planner\s*#*\s*$/i.test(l.text));
-  if (headings.length > 1) throw new Error('Day planner 标题重复，拒绝写入');
+  if (headings.length > 1) throw new Error('Duplicate Day planner headings; refusing to write');
   if (!headings.length) return undefined;
   const heading = headings[0], level = /^#+/.exec(heading.text)![0].length;
   const next = visible.find(l => l.line > heading.line && new RegExp(`^#{1,${level}}\\s+`).test(l.text));
@@ -23,13 +23,13 @@ export function dailyDocument(content: string | null): OutputDocument {
   let text = content ?? ''; const newline = text.includes('\r\n') ? '\r\n' : '\n';
   let part = section(text);
   if (!part) {
-    if (text.includes(START) || text.includes(END)) throw new Error('管理区位于 Day planner 标题之外');
+    if (text.includes(START) || text.includes(END)) throw new Error('Managed region is outside the Day planner heading');
     text += (text ? (text.endsWith('\n') ? newline : newline + newline) : '') + `# Day planner${newline}`;
     part = section(text)!;
   }
   const region = text.slice(part.start, part.end);
   if (text.includes(START) || text.includes(END)) {
-    if (!region.includes(START) || !region.includes(END)) throw new Error('管理区必须完整位于 Day planner 标题下');
+    if (!region.includes(START) || !region.includes(END)) throw new Error('The managed region must be entirely under the Day planner heading');
     return parseOutput(text);
   }
   const prefix = text.slice(0, part.end);
@@ -61,7 +61,7 @@ export function dailyInputs(path: string, content: string | null): { content: st
       if (time) interval = { start: localMinute(date, time[1]), end: localMinute(date, time[2]) };
       else if (!/<!--\s*as\s|%%\[as::/.test(line) && calendarStart !== undefined && calendarEnd !== undefined && /(?:\[(?:start|scheduled)::|[🛫⏳])\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(line) && /(?:\[due::|📅)\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(line)) interval = { start: calendarStart, end: calendarEnd };
       if (interval) {
-        if (interval.end <= interval.start) throw new Error('每日手写日程的结束时间须晚于开始时间');
+        if (interval.end <= interval.start) throw new Error('A handwritten daily event must end after it starts');
         intervals.push(interval);
       }
     } catch (error) { errors.push({ path, line: startLine + number - 1, message: (error as Error).message }); }

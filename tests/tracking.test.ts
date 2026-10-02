@@ -5,7 +5,7 @@ import { dailyDocument, renderDaily } from '../src/daily';
 import { block, config, MemoryVault, now } from './helpers';
 const settings = () => config({ outputLocation: 'daily', outputMode: 'day-planner', cleanDaily: true });
 const preview = (v: MemoryVault) => createPreview(v, settings(), now, v.tracking);
-describe('每日纯列表与插件跟踪', () => {
+describe('Clean daily lists与插件跟踪', () => {
   it('迁移旧前缀与重要性时保持完成状态、时间，撤销后旧跟踪仍有效', async () => {
     const vault = new MemoryVault();
     vault.files['Tasks/A.md'] = vault.files['Tasks/A.md'].replace('priority=3', 'priority=5');
@@ -27,7 +27,7 @@ describe('每日纯列表与插件跟踪', () => {
   it('无前缀的生成任务被手动改名时仍拒绝覆盖', async () => {
     const vault = new MemoryVault(); await applyPreview(vault, vault, await preview(vault), settings(), now);
     vault.files['DailyNotes/2026-10-01.md'] = vault.files['DailyNotes/2026-10-01.md'].replace('分析', '手动改名');
-    expect((await preview(vault)).result.errors[0].message).toContain('拒绝覆盖');
+    expect((await preview(vault)).result.errors[0].message).toContain('refusing to overwrite');
   });
   it('输出无管理注释、日期和工作块元数据，保留来源链接', async () => {
     const vault = new MemoryVault(), p = await preview(vault);
@@ -43,7 +43,7 @@ describe('每日纯列表与插件跟踪', () => {
     const p = await preview(vault); expect(p.result.errors).toEqual([]); expect(p.diff.added).toEqual([]);
     expect(await applyPreview(vault, vault, p, settings(), now)).toEqual({ changed: false }); expect(vault.writes).toBe(1);
   });
-  it('完成勾选保留，管理区域外备注可编辑并保留', async () => {
+  it('完成勾选保留，管理区域外备注可Edit并保留', async () => {
     const vault = new MemoryVault(); await applyPreview(vault, vault, await preview(vault), settings(), now);
     vault.files['DailyNotes/2026-10-01.md'] = vault.files['DailyNotes/2026-10-01.md'].replace('- [ ]', '- [x]') + '\n# 日记\n保留备注\n';
     const p = await preview(vault); expect(p.result.errors).toEqual([]); expect(p.result.blocks[0].completed).toBe(true);
@@ -52,8 +52,8 @@ describe('每日纯列表与插件跟踪', () => {
   it('无法核对时间修改或重复区域时拒绝覆盖', async () => {
     const vault = new MemoryVault(); await applyPreview(vault, vault, await preview(vault), settings(), now);
     vault.files['DailyNotes/2026-10-01.md'] = vault.files['DailyNotes/2026-10-01.md'].replace('09:00', '10:00');
-    const p = await preview(vault); expect(p.result.errors[0].message).toContain('拒绝覆盖');
-    await expect(applyPreview(vault, vault, p, settings(), now)).rejects.toThrow('错误');
+    const p = await preview(vault); expect(p.result.errors[0].message).toContain('refusing to overwrite');
+    await expect(applyPreview(vault, vault, p, settings(), now)).rejects.toThrow('errors');
   });
   it('旧 HTML 输出迁移时保留原字节备注，备份仍可撤销', async () => {
     const vault = new MemoryVault(); const old = renderDaily(dailyDocument('# Day planner\n# 日记\n备注'), [block({ id: 'a_block', locked: false })], 'day-planner');

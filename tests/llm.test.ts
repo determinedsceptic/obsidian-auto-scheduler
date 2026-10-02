@@ -47,12 +47,12 @@ describe('LLM adapters and host validation', () => {
   it.each(['http://example.test/v1', 'https://key@example.test/v1', 'https://example.test/v1?token=abc', 'https://example.test/v1#token'])('rejects unsafe endpoint %s', baseUrl => { expect(() => endpoint({ ...DEFAULT_LLM, baseUrl })).toThrow(); });
   it('permits local HTTP endpoints', () => { expect(endpoint({ ...DEFAULT_LLM, baseUrl: 'http://localhost:1234/v1' })).toContain('localhost:1234'); });
   it('does not expose tokens or server bodies on failed requests', async () => {
-    await expect(chat(DEFAULT_LLM, 'private-token', messages, config(), now, async () => { throw new Error('private-token'); })).rejects.toThrow('LLM 请求失败');
+    await expect(chat(DEFAULT_LLM, 'private-token', messages, config(), now, async () => { throw new Error('private-token'); })).rejects.toThrow('LLM request failed');
     await expect(chat(DEFAULT_LLM, 'private-token', messages, config(), now, async () => ({ status: 401, json: { error: 'private-token' } }))).rejects.toThrow('HTTP 401');
   });
   it('handles timeout and incomplete responses before any task creation', async () => {
-    await expect(chat(DEFAULT_LLM, 'test-only', messages, config(), now, () => new Promise(() => {}), 5)).rejects.toThrow('超时');
-    await expect(chat(DEFAULT_LLM, 'test-only', messages, config(), now, async () => ({ status: 200, json: { ...response, status: 'incomplete' } }))).rejects.toThrow('未完成');
+    await expect(chat(DEFAULT_LLM, 'test-only', messages, config(), now, () => new Promise(() => {}), 5)).rejects.toThrow('timed out');
+    await expect(chat(DEFAULT_LLM, 'test-only', messages, config(), now, async () => ({ status: 200, json: { ...response, status: 'incomplete' } }))).rejects.toThrow('incomplete');
   });
   it('rejects unknown, multiple and malformed tool calls', async () => {
     for (const output of [ [{ type: 'function_call', name: 'delete_file', arguments: args }], [...response.output, ...response.output], [{ ...response.output[0], arguments: 'broken json' }] ]) {
@@ -79,7 +79,7 @@ describe('AI tasks daily transaction', () => {
     expect(Object.values(vault.files).join('\n')).toContain('课程1复习');
     const restarted = new AiVault(); restarted.files = structuredClone(vault.files); restarted.tracking = structuredClone(vault.tracking); restarted.aiTasks = structuredClone(vault.aiTasks); restarted.undo = structuredClone(vault.undo);
     const repeat = await createPreview(restarted, settings, now, restarted.tracking, false, restarted.aiTasks); expect(repeat.result.errors).toEqual([]); expect(repeat.diff.added).toHaveLength(0);
-    await expect(applyPreview(restarted, restarted, preview, settings, now)).rejects.toThrow('变化');
+    await expect(applyPreview(restarted, restarted, preview, settings, now)).rejects.toThrow('changed');
     await undoLast(restarted, restarted, restarted.undo); expect(restarted.aiTasks).toEqual([]); expect(Object.values(restarted.files).join('')).not.toContain('课程');
   });
   it('does not recreate completed AI work after the daily window advances', async () => {
@@ -102,9 +102,9 @@ describe('AI tasks daily transaction', () => {
     const vault = new AiVault(); vault.files = {};
     const tasks = materializeTasks([draft], settings, now, 'conflict');
     const preview = await createPreview(vault, settings, now, {}, false, [], tasks); vault.aiTasks = tasks;
-    await expect(applyPreview(vault, vault, preview, settings, now)).rejects.toThrow('AI 任务已变化'); vault.aiTasks = [];
+    await expect(applyPreview(vault, vault, preview, settings, now)).rejects.toThrow('AI tasks changed'); vault.aiTasks = [];
     const noWork = { ...settings, weekdays: [0], periods: ['09:00-09:15'], dailyCapacity: 15 };
     const blocked = await createPreview(vault, noWork, now, {}, false, [], tasks);
-    await expect(applyPreview(vault, vault, blocked, noWork, now)).rejects.toThrow('没有可写入'); expect(vault.aiTasks).toEqual([]);
+    await expect(applyPreview(vault, vault, blocked, noWork, now)).rejects.toThrow('No blocks can be written'); expect(vault.aiTasks).toEqual([]);
   });
 });

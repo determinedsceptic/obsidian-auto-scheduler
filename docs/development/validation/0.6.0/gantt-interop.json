@@ -1,0 +1,16 @@
+{
+  "commit": "a06130967bd862a642416e10970ca4bf4cfc7e11",
+  "line": "- [ ] 🎯 09:00 - 10:00 [priority:: high] 阅读 [[Tasks/Test]] %%[as-block:: id=b_test task=test locked=true]%% [start:: 2026-10-01 09:00] [scheduled:: 2026-10-01 09:00] [due:: 2026-10-01 10:00]",
+  "serialized": "- [ ] 🎯 09:00 - 10:00 阅读 [[Tasks/Test]] %%[as-block:: id=b_test task=test locked=true]%% [priority:: high] [start:: 2026-10-01 09:00] [scheduled:: 2026-10-01 09:00] [due:: 2026-10-01 10:00]",
+  "checks": [
+    "default global filter",
+    "Dataview detection",
+    "minute precision",
+    "start/scheduled/due times",
+    "priority, metadata and locked roundtrip",
+    "source metadata roundtrip",
+    "no source GUID duplication"
+  ],
+  "status": "passed",
+  "scope": "real upstream parser/serializer, simulated Obsidian host; UI rendering unverified"
+}

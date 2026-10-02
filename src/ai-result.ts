@@ -11,16 +11,16 @@ export function describeAiSchedule(preview: Preview, warning?: string): AiSchedu
   const created = new Set(preview.aiTasksAfter.filter(t => !previous.has(t.id)).map(t => t.id));
   const blocks = preview.result.blocks.filter(b => created.has(b.taskId)).sort((a, b) => a.start - b.start || a.taskId.localeCompare(b.taskId));
   const notes: ScheduledNote[] = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${preview.settings.dailyFolder}/${date}.md` }));
-  const lines = ['已写入每日笔记：'];
-  for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}：${block.title}（重要性 ${block.priority ?? 3}/5）`);
+  const lines = ['Saved to daily notes:'];
+  for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}: ${block.title} (priority ${block.priority ?? 3}/5)`);
   const pending = preview.result.unscheduled.filter(t => created.has(t.taskId));
   if (pending.length) {
-    lines.push('', '尚未安排（任务已保存，可稍后重排）：');
-    for (const task of pending) lines.push(`• ${task.title}：剩余 ${task.remaining} 分钟，${task.reason}`);
+    lines.push('', 'Not yet scheduled (saved for a later replan):');
+    for (const task of pending) lines.push(`• ${task.title}: remaining ${task.remaining} min, ${task.reason}`);
   }
-  if (preview.diff.removed.length) lines.push('', `已有排程同时重新安排，替换了 ${preview.diff.removed.length} 个工作块。`);
-  if (preview.snapshot[preview.settings.fixedFile] === null) lines.push('', '固定日程文件不存在，本次按无固定日程安排。');
-  if (warning) lines.push('', `请检查写入结果：${warning}`);
-  lines.push('', '需要恢复时，运行“撤销最近一次排程”。');
+  if (preview.diff.removed.length) lines.push('', `Existing work was replanned, replacing ${preview.diff.removed.length} time blocks.`);
+  if (preview.snapshot[preview.settings.fixedFile] === null) lines.push('', 'No fixed-events file was found; scheduling used no events from that file.');
+  if (warning) lines.push('', `Review the saved schedule: ${warning}`);
+  lines.push('', 'To restore the previous schedule, run Undo last schedule.');
   return { text: lines.join('\n'), notes };
 }

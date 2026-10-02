@@ -1,0 +1,13 @@
+
+> obsidian-auto-scheduler@0.6.0 test
+> node scripts/run.mjs test
+
+
+ RUN  v4.1.11 <repository>
+
+
+ Test Files  14 passed (14)
+      Tests  219 passed (219)
+   Start at  19:42:49
+   Duration  763ms (transform 730ms, setup 0ms, import 1.12s, tests 906ms, environment 1ms)
+

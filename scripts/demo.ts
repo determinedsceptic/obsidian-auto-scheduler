@@ -36,7 +36,7 @@ const elapsed = performance.now() - start;
 assert.equal(benchmark.errors.length, 0);
 assert(elapsed < 5000, `1000 tasks exceeded 5s: ${elapsed}`);
 const codeDirty = !!execFileSync('git', ['status', '--porcelain', '--', 'src', 'tests', 'scripts', 'package.json', 'package-lock.json', 'tsconfig.json', 'esbuild.config.mjs', 'manifest.json', 'styles.css'], { encoding: 'utf8' }).trim();
-const directory = 'validation/2026-10-01'; await mkdir(directory, { recursive: true });
+const directory = 'local-test-vaults/demo-validation'; await mkdir(directory, { recursive: true });
 for (const mode of ['plain', 'day-planner'] as const) {
   const output = renderOutput(parseOutput(null), result.blocks, mode);
   assert.equal(parseOutput(output).blocks.length, result.blocks.length);
@@ -50,7 +50,7 @@ const record = {
   command: 'npm run demo', configuration: DEFAULT_SETTINGS, smallSample: { blocks: small.blocks.length, unscheduled: small.unscheduled },
   week: { blocks: result.blocks.length, unscheduled: result.unscheduled, days: result.days },
   performance: { tasks: large.length, milliseconds: Number(elapsed.toFixed(2)), blocks: benchmark.blocks.length },
-  output: ['validation/2026-10-01/demo-plain.md', 'validation/2026-10-01/demo-day-planner.md'],
+  output: ['local-test-vaults/demo-validation/demo-plain.md', 'local-test-vaults/demo-validation/demo-day-planner.md'],
 };
 await writeFile(`${directory}/demo-result.json`, JSON.stringify(record, null, 2) + '\n');
 console.log(JSON.stringify({ smallBlocks: small.blocks.length, weekBlocks: result.blocks.length, unscheduled: result.unscheduled, benchmarkMs: record.performance.milliseconds }, null, 2));

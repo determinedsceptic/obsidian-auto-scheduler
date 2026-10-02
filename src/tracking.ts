@@ -37,7 +37,7 @@ export function rehydrate(text: string | null, pair?: TrackingPair): string | nu
     const protectedRecord = pair.after ?? pair.before;
     if (!protectedRecord || !/^\s*- \[[ xX]\].*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}/m.test(text)) return text;
   }
-  throw new Error('生成的工作块已被编辑或跟踪区域不唯一，拒绝覆盖；请撤销或恢复该区域后重新预览');
+  throw new Error('Generated blocks were edited or the tracked region is not unique; refusing to overwrite. Undo or restore the region and preview again.');
 }
 export function validTracking(value: unknown): value is Tracking {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;

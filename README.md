@@ -1,184 +1,142 @@
 # Auto Scheduler
 
-在 Obsidian 中为带预计用时的 Markdown 任务生成一周工作块。AI 对话直接排程，手动命令先预览再应用；支持每日容量、固定日程、缓冲、锁定和最近一次撤销。
+Turn tasks and recurring habits into a seven-day plan in your Obsidian daily notes.
 
-- 作者：Alex Hu（需求）、Codex（实现）
-- 日期：2026-10-02；版本：0.3.2
-- 支持范围：Obsidian 桌面端 1.6.6+；本地单用户
-- 设计来源：`intend.md` → `spec.md` → `plan.md`
-- 验证与审查：`validation/2026-10-01/`、`review.md`、`compatibility.md`
-- Git 记录每个源码/配置/文档版本；验证结果中记录代码提交和 fixture 校验和
-- 状态：本地开发版，产品效果尚未由实际使用验证
+Describe what you need to do, give an estimated duration, and let the local scheduler find time around your events, habits, and daily capacity. Use the optional AI assistant with your own provider, or schedule Markdown tasks entirely offline.
 
-## AI 对话创建任务
+![AI-created study plan in Obsidian](docs/screenshots/study-plan.png)
 
-1. 在左侧点击日历图标，或运行 **Auto Scheduler: 打开 AI 任务助手**，打开右侧对话面板。
-2. 默认设置为 **Responses**、`https://api.openai.com/v1`、`gpt-6-luna`。点击侧栏 **配置服务商 / API 令牌**，在服务商对话框输入令牌并保存。也可在设置 → Auto Scheduler → BYOK 添加多个服务商。
-3. 输入“我有两门课要复习，每门预计2小时，很重要，帮我安排一下”，点击发送（或 Cmd/Ctrl+Enter）。缺少用时等必要信息时模型会追问。
-4. 模型调用 `create_tasks`，插件校验并直接应用本地排程，不弹出一周预览。AI 回答列出实际写入的日期、起止时间及未安排的剩余用时。
-5. 任务记录到 `每日笔记目录/YYYY-MM-DD.md` 的 `# Day planner` 下，自动打开最早安排的日期笔记；跨多天时可点击回答中的日期链接。AI 流程启用每日纯列表。重新安排用“预览一周排程”；恢复用“撤销最近一次排程”。校验失败不写入，完全无可安排时间时不创建新任务；部分写入失败明确提示检查和撤销。
+## What it does
 
-```markdown
-# Day planner
-- [ ] 14:00 - 16:00 ⏫ 课程1复习
-```
+- **Chat to schedule.** Create tasks or fixed-time recurring habits. The reply lists actual saved times and opens the corresponding daily note.
+- **Plan locally.** Priority, deadlines, working hours, fixed events, buffers, and daily capacity determine the schedule. A model cannot choose file paths or overwrite arbitrary notes.
+- **Keep readable notes.** Time-based checkboxes appear under `# Day planner` in `YYYY-MM-DD.md`, without hidden management comments in clean daily mode.
+- **Reserve habits first.** Daily, weekday, weekend, or selected-day habits can also occur outside working hours.
+- **Preview and undo.** Manual scheduling previews file changes. AI actions apply directly after validation. The last operation can be undone across a plugin restart.
+- **Bring your own model.** OpenAI Responses, OpenAI-compatible Chat Completions, Anthropic Messages, and Google Gemini; local Ollama and LM Studio endpoints are supported when the model implements tool calling.
 
-AI 任务及未安排量的来源保存在插件 `data.json` 的 `aiTasks` 中，和跟踪/撤销数据一起备份。用时为 15 分钟倍数；重要默认优先级4；具体时间由原排程器安排，模型不能指定文件路径或覆盖笔记。本次排程包含已有手写源任务及 AI 任务。已完成工作块从 AI 总用时中扣除，包括过去日期的勾选；未勾选的过期工作会重新安排。每次只保留最近一次撤销记录。
+Desktop only; minimum Obsidian version **1.6.6**. The interface and documentation default to English. AI conversations can use your own language; existing Chinese habit templates remain supported.
 
-**BYOK 配置**：参考 [Copilot 的服务商配置流程](https://github.com/logancyang/obsidian-copilot/blob/master/docs/settings.md)，通过 **添加服务商** 选择 OpenAI、Anthropic、Gemini、OpenRouter、DeepSeek、Ollama、LM Studio 或自定义模板。配置显示名称、协议、API 根地址、令牌及多个模型；在设置 → Auto Scheduler → 对话模型选择服务商和模型。侧栏顶部仅保留“配置服务商/API令牌”。编辑模型列表也在服务商对话框中完成；移除服务商会先显示确认，不影响笔记或 AI 任务。
+## Installation
 
-**测试与模型发现**：点击“测试连接并发现模型”执行 GET /models，勾选需要的模型；列表过长可搜索。也可每行手动填写一个准确模型 ID。部分服务不提供模型列表，网络暂时失败仍可保存离线配置；明确返回鉴权拒绝时需更正令牌。发现列表成功不表示该模型支持函数工具调用，需要实际对话验收。模型目录可能包含不适用于聊天的模型，插件不会自动选择发现结果。
+The project is preparing its first community-directory submission; it is **not yet listed** in Obsidian's Community plugins browser.
 
-**协议**：OpenAI 默认使用 Responses（默认 gpt-6-luna）；兼容网关、OpenRouter、DeepSeek 及本地服务使用 Chat Completions；Anthropic 使用 Messages，Gemini 使用 generateContent。只支持可调用 create_tasks 工具的聊天模型，不包含 Copilot 的 Agent、索引、订阅代理或 Codex CLI 登录。默认模型及 GPT-6 Chat Completions 的 reasoning_effort=none 限制参考 [GPT-6 Luna 官方文档](https://developers.openai.com/api/docs/models/gpt-6-luna)。
+For now, build from source or install the three plugin files from a published [GitHub release](https://github.com/determinedsceptic/obsidian-auto-scheduler/releases) when available:
 
-**令牌保存**：Obsidian 1.11.4+ 且提供 SecretStorage 时，令牌保存到本机 Obsidian Keychain；旧宿主降级为会话内存，重载后需重新输入。设置页会显示当前方式。令牌不写入 data.json、Markdown、日志或 Git。每个服务商独立保存；更换地址或协议不会复用原令牌，需重新输入。密码框不展示已保存的令牌；留空在地址/协议未变时保留。取消不保存；清除令牌只在点击保存时执行，需要令牌的服务商仍需有效令牌或移除该服务商。本机 Keychain 不随笔记同步到其他设备，迁移后需在新设备配置令牌。
+1. Create `<vault>/.obsidian/plugins/auto-scheduler/`.
+2. Put `main.js`, `manifest.json`, and `styles.css` in that folder.
+3. Reload Obsidian and enable **Auto Scheduler** under **Settings → Community plugins**.
+4. Try it in a separate vault before using existing notes. Back up plugin data along with your notes.
 
-对话仅存内存。请求发送对话、日期、工作日/时段/容量及习惯 skill 指定的库内模板/日计划路径，不发送笔记正文、绝对文件路径或已有任务。使用 Obsidian requestUrl，不依赖浏览器 CORS，当前版本等待完整回复，未实现流式输出。HTTPS（本机 localhost/127.0.0.1 可用 HTTP）；超时不自动重试。供应商可能保留自己的请求记录，请按其政策使用。Codex 账户登录与 API 令牌/计费独立。
+Do not install GitHub's source-code ZIP as a plugin; it does not contain the built `main.js`.
 
-升级 0.2.0 时旧地址/模型迁移为“已有 LLM 配置”，AI 任务、跟踪与撤销保留。旧版会话令牌需重新配置。不完整的旧表单回退默认服务商，可重新编辑。
+## Quick start
 
-当前命令：**打开 AI 任务助手**、**预览一周排程**、**清理每日排程格式**、**撤销最近一次排程**。任务目录不存在时可只使用 AI 任务；已有目录仍会扫描手写任务。
+1. Click the calendar-clock ribbon icon, or run **Auto Scheduler: Open AI assistant**.
+2. Select **Configure provider / API key**. Choose a provider, its endpoint, and a tool-capable model. Enter your own key if required. Model discovery is optional; exact model IDs can be entered manually.
+3. Try: **“Review two courses, two hours each, high priority. Please schedule them.”**
+4. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
+5. Replan with **Preview weekly schedule**. Use **Undo last schedule** to restore the last write.
 
-每日任务显示重要性：🔺 最高（5）、⏫ 重要（4）、🔼 普通（3）、🔽 较低（2）、⏬ 最低（1）。排程先按重要性降序、再按截止日期分配可用时间；笔记中的任务按时间顺序显示。旧受管列表运行“清理每日排程格式”可去掉“工作块：”并更新重要性，时间和完成状态保持不变。
-
-## 任务格式
-
-默认扫描 `Tasks/` 的 Markdown 文件及子目录；可以在插件设置中改路径。只参与带 `as` 注释的复选框列表项，不修改源笔记。
+For offline scheduling, configure **Output location → Daily notes: Day planner**, **Output format → Day Planner**, and **Clean daily lists**, then add estimated tasks in `Tasks/`:
 
 ```markdown
-- [ ] 写实验分析 <!-- as id=analysis remaining=120 priority=4 due=2026-10-07 earliest=2026-10-01 split=true min=30 -->
-- [ ] 整理材料 <!-- as id=materials remaining=60 priority=2 split=false -->
+- [ ] Prepare a report <!-- as id=report remaining=120 priority=4 split=true min=30 -->
+- [ ] Review the slides <!-- as id=slides remaining=45 priority=3 split=false -->
 ```
 
-`id` 必须唯一，使用字母、数字、下划线或短横线。`remaining` 为分钟，`priority` 为 1–5（5 最高），remaining 必填；priority 可省略，使用日历字段或默认 3。`due` 和 `earliest` 可省略，格式为日期或 `YYYY-MM-DDTHH:mm`；日期截止包含当天。`split` 默认 true，`min` 默认 30 分钟；用时和最小块必须为 15 的倍数，且 min 不超过 remaining。15 分钟任务需明确写 `min=15`。
+Run **Preview weekly schedule**, inspect the result, then select **Apply schedule**. Ordinary tasks without explicit IDs and estimates are left alone.
 
-完成源任务可以勾选复选框，插件不再安排它。普通任务、代码围栏中的示例不参与排程。保留原有 Tasks/Dataview 标签；显式 `as` 约束优先；省略时读取 Tasks emoji 或 Dataview 的 priority/due/start/scheduled。medium 和 normal 均映射为 3，high 为 4，highest 为 5，low 为 2，lowest 为 1。`[-]` 表示取消，不再排程；`[/]` 表示进行中，仍参与排程。
+## Examples
 
-## 固定日程与工作时间
+Screenshots below are real Obsidian captures using synthetic notes and a deterministic localhost API fixture. They demonstrate the actual plugin interface and scheduler; **no paid model was called**. See [reproduce the examples](examples/README.md).
 
-默认固定日程文件 `Scheduler/Fixed.md`：
+### 1. A study plan that fits around events
+
+Prompt: “Review Linear Algebra and Statistics, two hours each, high priority.” The host schedules the work, reports actual times, and opens the day containing the first block.
+
+![Study request and saved daily note](docs/screenshots/study-plan.png)
+
+### 2. Habits that repeat without clutter
+
+Prompt: “Every day, walk from 19:00 to 19:30, normal priority.” The host saves a readable habit template and creates independent occurrences for the next seven days.
+
+![Recurring habit and its saved schedule](docs/screenshots/recurring-habit.png)
+
+You can also edit `Habits/Template.md` directly:
 
 ```markdown
-# 固定日程
-- 2026-10-02 10:00-11:00 组会
+- 19:00-19:30 Evening walk (every day)
+- 07:30-08:00 ⏫ Exercise (Mon, Wed, Fri)
+- 22:00-22:15 🔽 Read a book (weekends)
 ```
 
-文件不存在时按无固定日程处理，并在预览中提示。单文件模式读取此文件；每日模式还读取每日笔记 Day planner 下管理区外的手写时间范围，以及具有完整开始/结束日期时间的 Gantt 任务。不获取 ICS 或外部日历事件。
+No recurrence suffix means every day. Default template examples are inside a code fence and inactive; copy a line outside the fence to enable it. No IDs or HTML comments are needed. Habit names and source paths identify occurrences; keep them unchanged when editing times if you want to preserve completion associations.
 
-默认周一到周五 09:00–12:00、14:00–18:00，每日容量 360 分钟；固定日程前后 15 分钟缓冲，每个工作块后 15 分钟缓冲。容量包含工作时段中的事件及缓冲并集。生成块会预留完整末尾缓冲，不跨工作时段和任务时间边界。均可在设置中调整，使用 15 分钟网格。
+### 3. A preview before changing a busy week
 
-排程覆盖本地今天到第六天，今天只安排未来时间。采用优先级、截止、最早开始、ID 的确定性顺序，逐项选择最早可行时段；可能保留部分未安排量，不保证全局最优。包含夏令时跳变的周会拒绝排程。
+Manual preview shows daily occupied capacity, additions and removals, errors, and remaining unscheduled work. A full day does not cause work to overlap events or silently disappear.
 
-## 预览、应用、锁定、撤销
+![Weekly capacity preview](docs/screenshots/weekly-preview.png)
 
-1. 执行命令 **Auto Scheduler: 预览一周排程**。日历按钮现在打开 AI 任务助手。
-2. 检查新增/移除/保留项、逐日容量和未安排原因；可以展开实际写入内容。
-3. 点击“应用排程”，写入默认 `Scheduler/Schedule.md`，或配置的每日笔记。管理区外文字保持原样，已有普通同名笔记会被拒绝接管。
-4. 如需保留某工作块，将它的 `as-block` 注释改为 `locked=true`，再预览。
-5. 执行 **Auto Scheduler: 撤销最近一次排程**。仅保留最近一次备份，可跨重启；输出被修改后拒绝自动覆盖。撤销新建输出时保留空管理文件，不删除文件。
+### 4. A provider you control
 
-预览后源笔记、固定日程、输出或设置改变，就需要重新预览。应用时有单文件原子核对和写后检查；Obsidian 不提供跨文件事务，写入期间源文件变化会显示警告。
+Use hosted APIs or a compatible local service. Changing the endpoint or protocol requires a new key; saved keys are never silently forwarded to a different endpoint.
 
-手动拖动未锁定块后，下一次预览会替换它。锁定或勾选的本周工作块从源任务 remaining 中扣除；历史块保留且不扣本周量。更新 remaining 时注意这一约定，避免重复扣减。插件不会从执行时间自动估算 remaining。
+![Provider configuration without a saved API key](docs/screenshots/provider-settings.png)
 
-写入失败时，备份仍在插件目录 `data.json` 的 `undo` 字段中（before/after/path）。先检查输出与备份，保存两者后再手动恢复；多日记录的 `entries` 保存各文件；自动撤销先检查所有目标，再恢复已经写入的部分。任何不同于 before/after/恢复内容的手动改动都会拒绝覆盖。更换输出路径不迁移旧文件；撤销仍作用于记录的原路径。
+## Commands
 
-## Day Planner
+| Command | Purpose |
+| --- | --- |
+| Open AI assistant | Open the chat sidebar. |
+| Create habits template | Create and open an example template without replacing an existing one. |
+| Preview weekly schedule | Preview today plus six days, then apply manually. |
+| Clean daily schedule format | Remove legacy display metadata from existing tracked daily output without replanning. |
+| Undo last schedule | Restore the latest template and schedule write, if the files are unchanged. |
 
-设置“输出格式”为 **Day Planner**：
+## Privacy, payments, and accounts
 
-```markdown
-- [ ] 09:00 - 10:00 ⏫ 写实验分析 [[Tasks/Project]] [scheduled:: 2026-10-02] <!-- as-block id=b_analysis_1 task=analysis locked=false -->
-```
+**Local scheduling needs no account, API key, or network connection.** Optional AI chat requires a provider that supports tool calling; hosted providers may require an account and charge API fees independently of this plugin. An existing ChatGPT or Codex subscription does not itself provide an API key.
 
-工作块日期放在 scheduled 中，源任务业务截止不复制到输出。该模式参考 Day Planner 0.35.1 的公开格式。若 Day Planner 启用了过滤器，请允许专用输出文件/工作块；时间拖动后保留完整注释并锁定。勾选的是工作块，不会勾选源任务。
+The plugin sends chat messages, local date/time, scheduling constraints, the bundled habits skill, and configured **vault-relative** habit/daily-note paths to your selected endpoint. It does not send vault note bodies, existing task lists, or absolute filesystem paths. Model discovery contacts that same provider's `/models` endpoint. Your provider's own retention and billing policies apply.
 
-切换格式后，未锁定的本周块会采用新格式；锁定、勾选和历史块保留原始行，可能出现混合格式。独立文件中的普通列表不会被 Day Planner 当作 scheduled 任务读取。
+There is no plugin telemetry, advertising, remote code execution, automatic self-update, or access to files outside the vault. Keys are stored in the host's **Obsidian Keychain** when its public API is available; otherwise keys stay in memory until reload. Keys are not written to Markdown, plugin `data.json`, logs, or Git. Chat history is in memory and clears when the panel closes.
 
-详见 [compatibility.md](compatibility.md)。已做源码和格式测试，尚未完成两插件的实机互操作验收。
+Read [privacy and recovery](docs/privacy.md) before using AI with private text.
 
-## 每日笔记与 Gantt Calendar
+## Scheduling rules and limits
 
-在设置中选择 **输出位置 → 每日笔记：Day planner**，指定每日目录（默认 `DailyNotes`），输出格式选择 **Gantt Calendar（Dataview）**。插件把工作块分配到今日起七天的 `YYYY-MM-DD.md`，只更新 `# Day planner` 内由插件数据记录的生成列表；其他章节和手写任务保持原样。没有标题时追加，重复标题会拒绝写入。没有工作块的日期不会新建空笔记。
+- The plan covers the current local day plus six days. New ordinary work starts in the future; habits record their confirmed fixed time, including an elapsed time today.
+- All durations and endpoints use a **15-minute grid**. Habits must fit within one day; an end at `24:00` is supported.
+- Ordinary tasks are allocated by priority, then deadline, earliest start, and stable ID. The greedy schedule is deterministic, not globally optimal; some work may remain unscheduled.
+- Events and habits reserve time before ordinary work. Buffers count toward capacity within working hours. Habit conflicts reject the write rather than move a fixed activity.
+- No monthly/yearly habits, overnight intervals, external calendar sync, ICS import, or background monitoring of other plugins' newly created notes.
+- Weeks containing a local daylight-saving transition are rejected. Mobile is not supported; native UI validation currently covers macOS. Windows/Linux host UI validation remains open.
+- Clean lists support completion checkboxes and edits outside the generated region. Editing generated titles or times can invalidate tracking; undo before changing them.
+- Multi-file writes are not atomic. A durable backup is saved first, and partial writes can be recovered with undo. Only the most recent operation is retained.
 
-每日模式默认启用“每日纯列表”，最终文件不含管理标记、scheduled 日期字段或工作块 ID：
+For task fields, settings, fixed events, and calendar formats, see [usage](docs/usage.md) and [compatibility](docs/compatibility.md).
 
-```markdown
-# Day planner
-- [ ] 14:00 - 16:00 ⏫ 写实验分析 [[Tasks/Project]]
-```
+## Development
 
-跟踪信息及锁定状态保存到插件 `data.json` 的 tracking 字段，与撤销备份一起先保存后写笔记。请保留/备份插件数据。支持勾选完成和编辑生成列表外的备注；改时间/标题导致无法核对时拒绝覆盖。需要修改生成列表时先撤销再重排。`Auto Scheduler: 清理每日排程格式` 会清理本周已有输出的管理字段，保留时间、完成状态及源链接，不重新排程。新建纯列表文件撤销后只保留标题。
-
-以下为关闭“每日纯列表”后的 Gantt 日期字段兼容格式。纯列表日期来自文件名，Gantt 原生字段解析器无法从普通时钟列表获得 start/due；需要完整 Gantt 字段时关闭该设置。
-
-Gantt Calendar 默认过滤器是 `🎯`；本插件的 **Gantt 任务前缀** 应与其一致。上游需启用 Dataview 任务格式，甘特图时间字段使用 startDate → dueDate。源任务可写为：
-
-```markdown
-# Day planner
-- [ ] 🎯 写实验分析 [priority:: high] [due:: 2026-10-07 17:00] %%[as:: id=analysis remaining=120]%%
-```
-
-ID 和预计用时是自动排程必需信息。普通任务没有这些信息时保留，但不猜测用时。每日模式额外扫描本周目标每日文件中的源任务；如需扫描历史每日笔记的未完成任务，将“任务目录”也设为每日目录。日记中的其他章节不纳入每日任务读取。
-
-输出示例：
-
-```markdown
-- [ ] 🎯 09:00 - 10:00 ⏫ 写实验分析 [[Tasks/Project]] %%[as-block:: id=b_analysis_1 task=analysis locked=false]%% [start:: 2026-10-02 09:00] [scheduled:: 2026-10-02 09:00] [due:: 2026-10-02 10:00]
-```
-
-输出的 due 是工作块结束时间，业务截止只留在源任务。结构化元数据可由 Gantt Calendar 编辑器保留，旧 HTML 元数据仍可读取。上游解析器和序列化器已实测往返；尚未验证其完整界面。Gantt 拖动后需让时钟范围、start/scheduled/due 一致，跨日移动还需移到对应日期文件；不一致时预览拒绝应用。保留手动位置需 `locked=true`。循环任务不自动展开。
-
-多文件写入不是原子事务：完整备份先持久化，部分失败后可用撤销命令恢复已写文件。新建每日文件撤销后保留标题；字段兼容模式另保留空管理区。原单文件模式及默认设置继续保留，切换位置不自动迁移旧排程。
-
-参考库位于相邻 `../obsidian-gantt-calendar`，固定提交 `a06130967bd862a642416e10970ca4bf4cfc7e11`。运行 `node scripts/gantt-interop.mjs` 可重复上游格式互操作测试。
-
-## 仓库与架构
-
-GitHub：[determinedsceptic/obsidian-auto-scheduler](https://github.com/determinedsceptic/obsidian-auto-scheduler)。主分支 main；源码、依赖锁文件、设计和验证记录由 Git 管理。
-
-参考 Gantt Calendar 的 TypeScript / Obsidian 插件结构，职责划分见 [docs/architecture.md](docs/architecture.md)。versions.json 记录各版本最低 Obsidian 版本。CI 模板 [.github/ci.yml.example](.github/ci.yml.example) 在 Node 22/24 上执行类型检查、测试、宿主 smoke、打包及固定上游版本格式互操作。现有 GitHub 凭据没有 workflow 权限，因此模板尚未启用；取得该权限后放入 .github/workflows/ci.yml 即可。
-
-## 构建与本地试用
-
-开发使用 Node 20/22 LTS 或 24+，npm。项目 `.npmrc` 固定 peer 解析策略，锁文件固定实际依赖。
+Node **22 or 24** and npm are recommended. The lockfile and `.npmrc` fix dependency resolution.
 
 ```sh
 npm ci --ignore-scripts
 npm run typecheck
 npm test
-npm run demo
 npm run smoke
+npm run release:check
 npm run package
 ```
 
-`dist/auto-scheduler/` 包含 `main.js`、`manifest.json`、`styles.css` 和本说明。先在一个独立测试库中，把前三个文件放到 `.obsidian/plugins/auto-scheduler/`，重载 Obsidian 后启用社区插件；把 `demo-vault/` 中的虚构 Tasks 和 Scheduler 文件复制到测试库。演示 fixture 固定于 2026-10-01；今天试用可以原样使用，以后需把日期移到试用周。安装到真实库由 Alex 决定。
+The three installation files are generated in `dist/auto-scheduler/`. `npm run dev` rebuilds on source changes. It does not install the plugin or launch Obsidian.
 
-`npm run demo` 只读虚构 fixture，输出到 `validation/2026-10-01/`，不会触碰真实笔记库。包含一天小样本、一周完整案例、1000 任务短时性能检查。`npm run dev` 监视源码并构建，不安装或启动插件。
+See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), and [release preparation](docs/releasing.md). Historical design decisions and validation records remain in [docs/development](docs/development/README.md).
 
-## 周期习惯
+## License and acknowledgements
 
-运行 **Auto Scheduler: 创建习惯模板**，创建并打开 `Habits/Template.md`，已有文件不会覆盖。设置中可以修改习惯目录，目录内所有 Markdown 都参与排程。
+[MIT](LICENSE), copyright 2026 Alex Hu. This is an independent community project, not an official Obsidian product.
 
-直接在代码块外填写普通时间任务列表：
-
-```markdown
-- 19:00-19:30 晚上锻炼（周一、周三、周五）
-- 22:00-22:15 🔽 睡前阅读（每天）
-```
-
-无星期说明默认每天；也可用（工作日）或（周末）。重要性采用 Tasks 符号 🔺、⏫、🔼、🔽、⏬，不填默认普通。无需写 ID、启停字段或 HTML 注释。默认示例放在代码块内，复制到代码块外后启用；删除行或移入代码块可停用。标题和来源路径共同确定实例身份，修改时间或星期仍保留完成关联；改名或移动文件会成为新习惯。
-
-AI 创建任务或 **预览一周排程**时先读取模板，展开当天起七天的固定习惯，再用剩余时间安排任务。无普通任务也可生成习惯计划，支持周末及工作时段外。习惯遵守原缓冲设置，冲突时整批拒绝写入。日期文件只显示普通时间任务行及重要性，勾选记录当天完成；重复生成不会重复追加。已完成实例及历史记录保留，撤销不改模板。
-
-兼容 0.4.0 的旧注释模板。首版支持每日/每周同日固定时间及 15 分钟网格，不支持跨午夜、月/年重复；其他插件或原生创建日期笔记不会自动触发。
-
-## 在 AI 对话中创建习惯
-
-直接说“每天 19:00–19:30 饭后慢走，普通重要性”，或“每周一、三、五 19:00–19:30 锻炼，很重要”。仅说“每天饭后慢走半小时”时，AI 会先询问哪顿饭和具体开始时间。
-
-插件内置 [周期习惯 skill](skills/habits/SKILL.md)，每次请求注入当前设置的习惯目录及日计划路径。所有 BYOK 协议注册 `create_habits`（title、start、end、days、priority）。本地 harness 验证参数，固定写入 **习惯目录/AI-Habits.md**；默认 `Habits/AI-Habits.md`。模型不能决定文件路径。模板仍为普通时间列表，不含 HTML 注释。
-
-创建后立即生成当天起七天的计划，回复实际时间并打开最早的日期文件。以后生成新日期计划会先读取该模板。模板和日计划共同纳入快照、备份和撤销，冲突或并发修改时不覆盖文件。同名同文件习惯重复添加会报错；已有习惯可编辑模板，随后重新排程。一次对话工具调用处理一类对象：普通任务或习惯。
-
-对话文字可以选取并用系统快捷键复制，也可点击每条消息的“复制”按钮。
+[Day Planner](https://github.com/ivan-lednev/obsidian-day-planner) and [Gantt Calendar](https://github.com/sustcsugar/obsidian-gantt-calendar) informed the Markdown interoperability design. [Copilot](https://github.com/logancyang/obsidian-copilot) informed the provider-configuration workflow. Their implementations are not bundled or vendored. See [acknowledgements](docs/acknowledgements.md).

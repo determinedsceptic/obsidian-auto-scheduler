@@ -7,41 +7,41 @@ export interface TaskDraft { title: string; minutes: number; priority: number; s
 export interface LlmReply { text: string; tasks: TaskDraft[]; habits: HabitDraft[] }
 export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<{ status: number; json: unknown }>;
 const properties = {
-  title: { type: 'string', description: '单行任务名称，不含 Markdown 或管理字段' },
-  minutes: { type: 'integer', description: '用户确认的预计用时（分钟），15 的倍数' },
+  title: { type: 'string', description: 'Single-line task name without Markdown or management fields' },
+  minutes: { type: 'integer', description: 'User-confirmed duration in minutes, a multiple of 15' },
   priority: { type: 'integer', enum: [1, 2, 3, 4, 5] }, split: { type: 'boolean' },
-  minMinutes: { type: 'integer', description: '最小工作块分钟数，15 的倍数' },
-  due: { type: ['string', 'null'], description: '本地 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm，未指定为 null' },
-  earliest: { type: ['string', 'null'], description: '本地 YYYY-MM-DD 或 YYYY-MM-DDTHH:mm，未指定为 null' },
+  minMinutes: { type: 'integer', description: 'Minimum block duration in minutes, a multiple of 15' },
+  due: { type: ['string', 'null'], description: 'Local YYYY-MM-DD or YYYY-MM-DDTHH:mm; null if unspecified' },
+  earliest: { type: ['string', 'null'], description: 'Local YYYY-MM-DD or YYYY-MM-DDTHH:mm; null if unspecified' },
 };
-export const taskTool = { name: 'create_tasks', description: '生成新任务供宿主校验并自动排程；实际时间由本地排程器决定，不保证全部能安排。', strict: true,
+export const taskTool = { name: 'create_tasks', description: 'Create new tasks for host validation and local scheduling. The host chooses actual times; not all work is guaranteed to fit.', strict: true,
   parameters: { type: 'object', properties: { tasks: { type: 'array', items: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false } } }, required: ['tasks'], additionalProperties: false } };
 function object(value: unknown): Record<string, any> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('模型返回格式无效');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid model response format');
   return value as Record<string, any>;
 }
 function keys(value: Record<string, unknown>, expected: string[]): void {
-  if (Object.keys(value).some(k => !expected.includes(k)) || expected.some(k => !(k in value))) throw new Error('模型任务字段无效');
+  if (Object.keys(value).some(k => !expected.includes(k)) || expected.some(k => !(k in value))) throw new Error('Invalid model task fields');
 }
 export function validateDrafts(value: unknown): TaskDraft[] {
   const args = object(value); keys(args, ['tasks']);
-  if (!Array.isArray(args.tasks) || !args.tasks.length || args.tasks.length > 20) throw new Error('一次需生成 1–20 个任务');
+  if (!Array.isArray(args.tasks) || !args.tasks.length || args.tasks.length > 20) throw new Error('Create 1–20 tasks per request');
   return args.tasks.map((input: unknown) => {
     const t = object(input); keys(t, Object.keys(properties));
-    if (typeof t.title !== 'string' || !t.title.trim() || t.title.length > 200 || /[\r\n\x00-\x1f<>\[\]%]/.test(t.title)) throw new Error('任务标题需为不含管理字段的单行文本');
-    if (!Number.isInteger(t.minutes) || t.minutes < 15 || t.minutes > 10080 || t.minutes % 15) throw new Error('任务用时需为 15–10080 分钟，且为 15 的倍数');
-    if (!Number.isInteger(t.priority) || t.priority < 1 || t.priority > 5 || typeof t.split !== 'boolean') throw new Error('任务优先级或拆分设置无效');
-    if (!Number.isInteger(t.minMinutes) || t.minMinutes < 15 || t.minMinutes > t.minutes || t.minMinutes % 15) throw new Error('最小工作块需为 15 分钟倍数，且不超过任务用时');
+    if (typeof t.title !== 'string' || !t.title.trim() || t.title.length > 200 || /[\r\n\x00-\x1f<>\[\]%]/.test(t.title)) throw new Error('Task titles must be single-line text without management fields');
+    if (!Number.isInteger(t.minutes) || t.minutes < 15 || t.minutes > 10080 || t.minutes % 15) throw new Error('Task duration must be 15–10080 minutes, in multiples of 15');
+    if (!Number.isInteger(t.priority) || t.priority < 1 || t.priority > 5 || typeof t.split !== 'boolean') throw new Error('Invalid task priority or splitting settings');
+    if (!Number.isInteger(t.minMinutes) || t.minMinutes < 15 || t.minMinutes > t.minutes || t.minMinutes % 15) throw new Error('Minimum blocks must be multiples of 15 minutes and no longer than the task');
     for (const field of ['due', 'earliest']) if (t[field] !== null) {
-      if (typeof t[field] !== 'string' || t[field].length > 16) throw new Error('任务日期格式无效');
+      if (typeof t[field] !== 'string' || t[field].length > 16) throw new Error('Invalid task date format');
       parseBoundary(t[field], field === 'due');
     }
-    if (t.due !== null && t.earliest !== null && parseBoundary(t.due, true) <= parseBoundary(t.earliest)) throw new Error('截止时间必须晚于最早开始时间');
+    if (t.due !== null && t.earliest !== null && parseBoundary(t.due, true) <= parseBoundary(t.earliest)) throw new Error('The deadline must be after the earliest start');
     return { ...t, title: t.title.trim() } as TaskDraft;
   });
 }
 export function materializeTasks(drafts: TaskDraft[], settings: Settings, now: Date, batchId: string): Task[] {
-  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(batchId)) throw new Error('任务批次 ID 无效');
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(batchId)) throw new Error('Invalid task batch ID');
   const checked = validateDrafts({ tasks: drafts });
   return checked.map((t, i) => ({ id: `ai_${batchId}_${i + 1}`, title: t.title,
     path: `${settings.dailyFolder}/${dateKey(now)}.md`, line: 0, remaining: t.minutes, priority: t.priority,
@@ -58,14 +58,14 @@ export function validAiTasks(value: unknown): value is Task[] {
     })());
 }
 export function endpoint(config: LlmSettings): string {
-  if (!['responses', 'chat-completions', 'anthropic', 'gemini'].includes(config.protocol) || !config.model.trim() || config.model.length > 200 || /[\r\n]/.test(config.model)) throw new Error('请配置有效的接口和模型 ID');
-  let url: URL; try { url = new URL(config.baseUrl); } catch { throw new Error('Base URL 无效'); }
-  if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('Base URL 必须使用 HTTPS（本机可用 HTTP），且不能包含令牌、查询参数或片段');
+  if (!['responses', 'chat-completions', 'anthropic', 'gemini'].includes(config.protocol) || !config.model.trim() || config.model.length > 200 || /[\r\n]/.test(config.model)) throw new Error('Configure a valid protocol and model ID');
+  let url: URL; try { url = new URL(config.baseUrl); } catch { throw new Error('Invalid base URL'); }
+  if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('The base URL must use HTTPS (HTTP is allowed for localhost) and cannot contain credentials, a query, or a fragment');
   const base = url.toString().replace(/\/$/, '');
   return base + (config.protocol === 'responses' ? '/responses' : config.protocol === 'anthropic' ? '/messages' : config.protocol === 'gemini' ? `/models/${encodeURIComponent(config.model.replace(/^models\//, ''))}:generateContent` : '/chat/completions');
 }
 export function authHeaders(config: LlmSettings, token: string): Record<string, string> {
-  if (/[\r\n\x00-\x1f]/.test(token)) throw new Error('API 令牌格式无效');
+  if (/[\r\n\x00-\x1f]/.test(token)) throw new Error('Invalid API key format');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (config.protocol === 'anthropic') { headers['anthropic-version'] = '2023-06-01'; if (token.trim()) headers['x-api-key'] = token.trim(); }
   else if (config.protocol === 'gemini') { if (token.trim()) headers['x-goog-api-key'] = token.trim(); }
@@ -74,9 +74,11 @@ export function authHeaders(config: LlmSettings, token: string): Record<string, 
 }
 export async function chat(config: LlmSettings, token: string, messages: ChatMessage[], settings: Settings, now: Date, transport: Transport, timeoutMs = 60000): Promise<LlmReply> {
   const url = endpoint(config);
-  if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('请在侧栏填写 API 令牌');
-  if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('对话过长，请清空对话后重试');
-  const system = `你是 Obsidian 任务助手。当前本地日期时间 ${dateKey(now)} ${now.toTimeString().slice(0, 5)}。工作日 ${settings.weekdays.join(',')}（0周日）；时段 ${settings.periods.join(',')}；每日容量 ${settings.dailyCapacity} 分钟。允许 create_tasks 创建单次任务，create_habits 创建周期习惯。用中文回复；缺少用时、意图不明确或不满足15分钟网格时先问用户，不自行猜测。重要=优先级4，普通=3。未指定日期设null；可拆分默认true，最小块默认30分钟（任务不足30则15）。课程未命名可用课程1、课程2。用户没有请求创建时只对话。不要猜测或承诺具体安排和已写入：工具只生成任务参数，宿主校验、排程、写入后会给出实际结果。不能删除、修改现有任务或指定输出路径，时段由本地排程器决定。\n${habitInstructions(settings)}`;
+  if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('Configure an API key in the sidebar');
+  if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('Conversation too long. Clear the chat and try again.');
+  const system = `You are an Obsidian scheduling assistant. Local date and time: ${dateKey(now)} ${now.toTimeString().slice(0, 5)}. Working days: ${settings.weekdays.join(',')} (0 is Sunday); hours: ${settings.periods.join(',')}; daily capacity: ${settings.dailyCapacity} minutes.
+Use create_tasks for explicitly requested one-off tasks and create_habits for fixed-time recurring habits. Reply in the user's language; use English by default. Ask for missing durations, unclear intent, or times that do not fit the 15-minute grid. Do not invent constraints. Important means priority 4; normal means 3. Unspecified dates are null. Tasks are splittable by default, with 30-minute minimum blocks (15 for shorter tasks). Unnamed courses can be Course 1 and Course 2. Do not create anything unless the user asks. Do not promise a time or claim files have been written: the host validates, schedules, and reports actual results. You cannot delete or modify existing tasks or choose output paths. The local scheduler chooses ordinary task times; habits use the user's confirmed fixed times, including outside working hours.
+${habitInstructions(settings)}`;
   const tools = [taskTool, habitTool];
   const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: tools.map(tool => ({ type: 'function', ...tool })), parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
     : config.protocol === 'anthropic' ? { model: config.model, system, messages, max_tokens: 4096,
@@ -88,45 +90,45 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
       ...(config.model.startsWith('gpt-6') ? { reasoning_effort: 'none', max_completion_tokens: 4096 } : { max_tokens: 4096 }) };
   let timer: ReturnType<typeof setTimeout> | undefined;
   let response: Awaited<ReturnType<Transport>>;
-  try { response = await Promise.race([transport(url, authHeaders(config, token), JSON.stringify(body)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('请求超时')), timeoutMs); })]); }
-  catch { throw new Error('LLM 请求失败或超时，请检查网络、接口配置后重试；未写入任务'); }
+  try { response = await Promise.race([transport(url, authHeaders(config, token), JSON.stringify(body)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Request timed out')), timeoutMs); })]); }
+  catch { throw new Error('LLM request failed or timed out. Check your network and provider settings. No tasks were written.'); }
   finally { if (timer) clearTimeout(timer); }
-  if (response.status < 200 || response.status >= 300) throw new Error(`LLM 接口返回 HTTP ${response.status}，请检查令牌、模型权限和额度；未写入任务`);
-  if (JSON.stringify(response.json).length > 1000000) throw new Error('模型返回内容过大');
+  if (response.status < 200 || response.status >= 300) throw new Error(`LLM returned HTTP ${response.status}. Check your API key, model access, and quota. No tasks were written.`);
+  if (JSON.stringify(response.json).length > 1000000) throw new Error('Model response too large');
   const data = object(response.json); const calls: { name: string; arguments: string }[] = []; const texts: string[] = [];
   if (config.protocol === 'responses') {
-    if (data.status && data.status !== 'completed') throw new Error('模型响应未完成，请重试或减少任务数量');
-    if (!Array.isArray(data.output)) throw new Error('Responses 返回格式无效');
+    if (data.status && data.status !== 'completed') throw new Error('Model response incomplete. Retry with fewer tasks.');
+    if (!Array.isArray(data.output)) throw new Error('Invalid Responses format');
     for (const item of data.output) {
       if (item.type === 'function_call') calls.push(item);
       if (item.type === 'message' && Array.isArray(item.content)) for (const part of item.content) if (part.type === 'output_text' && typeof part.text === 'string') texts.push(part.text);
     }
   } else if (config.protocol === 'anthropic') {
-    if (!['end_turn', 'tool_use'].includes(data.stop_reason) || !Array.isArray(data.content)) throw new Error('Anthropic 响应未完成或格式无效');
+    if (!['end_turn', 'tool_use'].includes(data.stop_reason) || !Array.isArray(data.content)) throw new Error('Incomplete or invalid Anthropic response');
     for (const part of data.content) {
       if (part.type === 'text' && typeof part.text === 'string') texts.push(part.text);
       if (part.type === 'tool_use') calls.push({ name: part.name, arguments: JSON.stringify(part.input) });
     }
   } else if (config.protocol === 'gemini') {
     const candidate = data.candidates?.[0];
-    if (!candidate || candidate.finishReason !== 'STOP' || !Array.isArray(candidate.content?.parts)) throw new Error('Gemini 响应未完成或被过滤');
+    if (!candidate || candidate.finishReason !== 'STOP' || !Array.isArray(candidate.content?.parts)) throw new Error('Gemini response incomplete or filtered');
     for (const part of candidate.content.parts) {
       if (!part.thought && typeof part.text === 'string') texts.push(part.text);
       if (part.functionCall) calls.push({ name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args) });
     }
   } else {
-    const choice = data.choices?.[0]; if (!choice || !['stop', 'tool_calls'].includes(choice.finish_reason)) throw new Error('模型响应未完成或接口不支持工具调用');
+    const choice = data.choices?.[0]; if (!choice || !['stop', 'tool_calls'].includes(choice.finish_reason)) throw new Error('Model response incomplete or provider does not support tool calls');
     const message = object(choice.message); if (typeof message.content === 'string') texts.push(message.content);
     if (message.tool_calls) {
-      if (!Array.isArray(message.tool_calls) || message.tool_calls.some((c: any) => c.type !== 'function')) throw new Error('模型工具调用格式无效');
+      if (!Array.isArray(message.tool_calls) || message.tool_calls.some((c: any) => c.type !== 'function')) throw new Error('Invalid model tool-call format');
       for (const call of message.tool_calls) calls.push(object(call.function) as { name: string; arguments: string });
     }
   }
-  if (calls.length > 1 || calls.some(c => !['create_tasks', 'create_habits'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('模型请求了不支持的工具调用');
+  if (calls.length > 1 || calls.some(c => !['create_tasks', 'create_habits'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('The model requested an unsupported tool call');
   let tasks: TaskDraft[] = []; let habits: HabitDraft[] = [];
-  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('模型任务 JSON 无效'); } if (calls[0].name === 'create_habits') habits = validateHabitDrafts(args); else tasks = validateDrafts(args); }
+  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('Invalid tool argument JSON'); } if (calls[0].name === 'create_habits') habits = validateHabitDrafts(args); else tasks = validateDrafts(args); }
   const text = texts.join('\n').trim();
-  if (text.length > 12000) throw new Error('模型回复过长，请减少任务数量后重试');
-  if (!text && !tasks.length && !habits.length) throw new Error('模型未返回回复或任务');
-  return { text: text || '任务参数已生成，由本地排程器安排时间。', tasks, habits };
+  if (text.length > 12000) throw new Error('Model reply too long. Retry with fewer tasks.');
+  if (!text && !tasks.length && !habits.length) throw new Error('The model returned no reply or action');
+  return { text: text || 'Parameters received; the local scheduler will choose actual times.', tasks, habits };
 }

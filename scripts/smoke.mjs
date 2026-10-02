@@ -67,7 +67,7 @@ assert.equal(plugin.commands.length, 5);
 plugin.commands.find(command => command.id === 'preview-week').callback();
 await plugin.operations.tail;
 assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
-const apply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+const apply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
 assert(apply); assert.equal(apply.disabled, false); apply.events.click(); await plugin.operations.tail;
 assert.equal(creates, 1); assert(files.get('Scheduler/Schedule.md').includes('task=host'));
 assert(saved.undo); assert.equal(files.get('Tasks/Host.md'), original);
@@ -76,12 +76,12 @@ const restarted = new AutoScheduler(app); await restarted.onload();
 restarted.commands.find(command => command.id === 'undo-last').callback(); await restarted.operations.tail;
 assert.equal(processes, 1); assert.equal(saved.undo, null);
 assert(!files.get('Scheduler/Schedule.md').includes('as-block')); assert.equal(files.get('Tasks/Host.md'), original);
-assert(notices.some(text => text.includes('已写入'))); assert(notices.some(text => text.includes('已撤销')));
+assert(notices.some(text => text.includes('Schedule saved'))); assert(notices.some(text => text.includes('Last schedule undone')));
 // A custom output may equal the DEFAULT fixed path when fixedFile is changed.
 // Undo path validation must be independent of today's/default settings.
 await restarted.updateSettings({ fixedFile: 'Scheduler/Meetings.md', outputFile: 'Scheduler/Fixed.md' });
 restarted.commands.find(command => command.id === 'preview-week').callback(); await restarted.operations.tail;
-const customApply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+const customApply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
 customApply.events.click(); await restarted.operations.tail; assert(saved.undo);
 const customRestart = new AutoScheduler(app); await customRestart.onload();
 assert(customRestart.state.undo, 'Custom path undo was discarded at restart');
@@ -94,7 +94,7 @@ files.set('DailyNotes/2026-10-01.md', '# Day planner\n- [ ] 09:00 - 10:00 会议
 const dailyOriginal = files.get('DailyNotes/2026-10-01.md');
 await customRestart.updateSettings({ outputLocation: 'daily', outputMode: 'gantt', weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 180, fixedBuffer: 0, blockBuffer: 0 });
 customRestart.commands.find(command => command.id === 'preview-week').callback(); await customRestart.operations.tail;
-const dailyApply = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+const dailyApply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
 assert.equal(dailyApply.disabled, false); dailyApply.events.click(); await customRestart.operations.tail;
 assert(saved.undo.entries.length >= 2); assert(files.get('DailyNotes/2026-10-01.md').includes('10:00 -')); assert(!files.get('DailyNotes/2026-10-01.md').includes('[start::')); assert(saved.tracking);
 const dailyRestart = new AutoScheduler(app); await dailyRestart.onload(); assert(dailyRestart.state.undo);
@@ -133,7 +133,7 @@ console.log('PASS: BYOK legacy migration preserves AI tasks/undo, provider/model
 
 const beforeFailedSave = JSON.stringify(migrated.state); const originalSaveData = migrated.saveData.bind(migrated);
 migrated.saveData = async () => { throw new Error('disk unavailable'); };
-await assert.rejects(migrated.saveProvider({ id: 'rollback-test', name: 'Rollback', protocol: 'chat-completions', baseUrl: 'https://example.test/v1', requiresKey: true, models: ['model'] }, 'fixture-new-token'), /已恢复原令牌/);
+await assert.rejects(migrated.saveProvider({ id: 'rollback-test', name: 'Rollback', protocol: 'chat-completions', baseUrl: 'https://example.test/v1', requiresKey: true, models: ['model'] }, 'fixture-new-token'), /previous key was restored/);
 assert.equal(JSON.stringify(migrated.state), beforeFailedSave); assert.equal(await migrated.credentials.get('rollback-test'), '');
 migrated.saveData = originalSaveData;
 console.log('PASS: provider save failure restores prior credential and leaves model configuration unchanged');
@@ -145,7 +145,7 @@ await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: '
 await chatPlugin.updateSettings({ weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 60, fixedBuffer: 0, blockBuffer: 0 });
 const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen();
 const header = chatView.contentEl.children.find(node => node.options.cls === 'auto-scheduler-chat-header');
-assert.equal(header.children.length, 1); assert.equal(header.children[0].options.text, '配置服务商/API令牌');
+assert.equal(header.children.length, 1); assert.equal(header.children[0].options.text, 'Configure provider / API key');
 assert(!chatView.contentEl.all().some(node => node.tag === 'select' || node.tag === 'h3'));
 const draft = { ...aiDraft, minutes: 600 };
 mockResponse = { output: [
@@ -156,11 +156,11 @@ const modalBeforeChat = latestModal;
 await chatView.send('帮我安排课程复习，预计10小时');
 assert.equal(latestModal, modalBeforeChat); assert.equal(chatView.busy, false);
 const answer = chatView.messages.at(-1);
-assert(answer.content.includes('2026-10-01 09:00–10:00：课程复习'));
-assert(answer.content.includes('剩余 180 分钟')); assert(!answer.content.includes('20点'));
+assert(answer.content.includes('2026-10-01 09:00–10:00: 课程复习'));
+assert(answer.content.includes('remaining 180 min')); assert(!answer.content.includes('20点'));
 assert.equal(answer.notes.length, 7); assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
 assert([...files.values()].every(text => !text.includes('as-block') && !text.includes('scheduled::')));
-const dateLink = chatView.contentEl.all().find(node => node.tag === 'a' && node.options.text === '打开 2026-10-02');
+const dateLink = chatView.contentEl.all().find(node => node.tag === 'a' && node.options.text === 'Open 2026-10-02');
 dateLink.events.click({ preventDefault() {} }); await Promise.resolve();
 assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-02.md');
 mockResponse = { output: [{ type: 'message', content: [{ type: 'output_text', text: '有什么需要调整的？' }] }] };
@@ -174,8 +174,8 @@ app.workspace.getLeaf = () => ({ openFile: async () => { throw new Error('naviga
 await chatPlugin.updateSettings({ dailyCapacity: 180 });
 mockResponse = { output: [{ type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [aiDraft] }) }] };
 await chatView.send('再安排一门课程，两小时');
-assert(chatView.messages.at(-1).content.includes('排程已写入，但打开日期笔记失败'));
-assert(chatView.messages.at(-2).content.includes('已写入每日笔记')); assert.equal(saved.aiTasks.length, 2);
+assert(chatView.messages.at(-1).content.includes('Schedule saved, but the daily note could not be opened'));
+assert(chatView.messages.at(-2).content.includes('Saved to daily notes')); assert.equal(saved.aiTasks.length, 2);
 app.workspace.getLeaf = openLeaf;
 chatPlugin.commands.find(command => command.id === 'undo-last').callback(); await chatPlugin.operations.tail;
 assert.equal(saved.aiTasks.length, 1);
@@ -183,13 +183,13 @@ assert.equal(saved.aiTasks.length, 1);
 await chatPlugin.updateSettings({ dailyCapacity: 15 });
 const noCapacityState = JSON.stringify(saved), noCapacityFiles = JSON.stringify([...files]);
 await chatView.send('帮我安排另一个任务');
-assert(chatView.messages.at(-1).content.includes('未创建新任务'));
+assert(chatView.messages.at(-1).content.includes('No new tasks were created'));
 assert.equal(JSON.stringify(saved), noCapacityState); assert.equal(JSON.stringify([...files]), noCapacityFiles);
 await chatPlugin.updateSettings({ dailyCapacity: 180 });
 files.set('Tasks/Invalid.md', '- [ ] 错误 <!-- as id=invalid remaining=5 -->');
 const invalidState = JSON.stringify(saved);
 await chatView.send('安排新任务');
-assert(chatView.messages.at(-1).content.includes('任务处理失败')); assert.equal(JSON.stringify(saved), invalidState);
+assert(chatView.messages.at(-1).content.includes('Request failed')); assert.equal(JSON.stringify(saved), invalidState);
 files.delete('Tasks/Invalid.md');
 // A batch failure after the first write must report partial state, retain backup, and undo.
 const createFile = app.vault.create, processFile = app.vault.process;
@@ -198,7 +198,7 @@ app.vault.create = async (...args) => { if (writesBeforeFailure-- <= 0) throw ne
 app.vault.process = async (...args) => { if (writesBeforeFailure-- <= 0) throw new Error('write unavailable'); return processFile(...args); };
 const partialFilesBefore = new Map(files);
 await chatView.send('安排新任务');
-assert(chatView.messages.at(-1).content.includes('可能已有部分日期写入')); assert(saved.undo);
+assert(chatView.messages.at(-1).content.includes('some daily notes may have been written')); assert(saved.undo);
 app.vault.create = createFile; app.vault.process = processFile;
 chatPlugin.commands.find(command => command.id === 'undo-last').callback(); await chatPlugin.operations.tail;
 assert.equal(saved.aiTasks.length, 1);
@@ -219,7 +219,7 @@ habitPlugin.commands.find(c => c.id === 'preview-week').callback(); await habitP
 assert.equal(latestModal.preview.result.errors.length, 0);
 assert.equal(latestModal.preview.result.blocks.length, 7);
 console.log('PASS: habit template command opens note, never overwrites, and generates seven fixed occurrences without tasks or LLM');
-const applyHabits = latestModal.contentEl.all().find(node => node.options.text === '应用排程');
+const applyHabits = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
 applyHabits.events.click(); await habitPlugin.operations.tail;
 assert(files.get('DailyNotes/2026-10-01.md').includes('19:00 - 19:30 ⏫ 晚间习惯'));
 assert(!files.get('DailyNotes/2026-10-01.md').includes('as-block'));
@@ -242,11 +242,11 @@ mockResponse = { output: [{ type: 'function_call', name: 'create_habits', argume
 const oldModal = latestModal;
 await habitView.send('每天19点饭后慢走半小时');
 assert.equal(latestModal, oldModal); assert.equal(saved.aiTasks.length, 0);
-assert(files.get('Templates/Habits/AI-Habits.md').includes('19:00-19:30 🔼 饭后慢走（周日、周一、周二、周三、周四、周五、周六）'));
-assert(habitView.messages.at(-1).content.includes('2026-10-01 19:00–19:30：饭后慢走'));
+assert(files.get('Templates/Habits/AI-Habits.md').includes('19:00-19:30 🔼 饭后慢走 (Sun, Mon, Tue, Wed, Thu, Fri, Sat)'));
+assert(habitView.messages.at(-1).content.includes('2026-10-01 19:00–19:30: 饭后慢走'));
 assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
 assert(JSON.parse(requests.at(-1).body).instructions.includes('Templates/Habits/AI-Habits.md'));
-const copyButton = habitView.contentEl.all().find(n => n.options.attr?.['aria-label'] === '复制消息');
+const copyButton = habitView.contentEl.all().find(n => n.options.attr?.['aria-label'] === 'Copy message');
 copyButton.events.click(); await Promise.resolve(); assert.equal(clipboardCopies.at(-1), '每天19点饭后慢走半小时');
 const css = await readFile('styles.css', 'utf8'); assert(css.includes('-webkit-user-select: text')); assert(css.includes('user-select: text'));
 const habitSaved = new AutoScheduler(app); await habitSaved.onload();

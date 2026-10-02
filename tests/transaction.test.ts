@@ -26,18 +26,18 @@ describe('预览、应用、撤销', () => {
     if (mode === '删除任务文件') delete vault.files['Tasks/A.md'];
     if (mode === '修改固定日程') vault.files['Scheduler/Fixed.md'] = '- 2026-10-01 09:00-10:00 会议';
     if (mode === '输出被其他操作创建') vault.files['Scheduler/Schedule.md'] = emptyManagedFile();
-    await expect(applyPreview(vault, vault, preview, config(), now)).rejects.toThrow('变化'); expect(vault.writes).toBe(0);
+    await expect(applyPreview(vault, vault, preview, config(), now)).rejects.toThrow('changed'); expect(vault.writes).toBe(0);
   });
   it('设置变化和预览过期拒绝应用', async () => {
     const vault = new MemoryVault(); const preview = await createPreview(vault, config(), now);
-    await expect(applyPreview(vault, vault, preview, config({ dailyCapacity: 60 }), now)).rejects.toThrow('设置');
-    await expect(applyPreview(vault, vault, preview, config(), new Date('2026-10-02T08:00:00+08:00'))).rejects.toThrow('日期');
-    await expect(applyPreview(vault, vault, preview, config(), new Date('2026-10-01T09:01:00+08:00'))).rejects.toThrow('开始时间');
+    await expect(applyPreview(vault, vault, preview, config({ dailyCapacity: 60 }), now)).rejects.toThrow('Settings');
+    await expect(applyPreview(vault, vault, preview, config(), new Date('2026-10-02T08:00:00+08:00'))).rejects.toThrow('date');
+    await expect(applyPreview(vault, vault, preview, config(), new Date('2026-10-01T09:01:00+08:00'))).rejects.toThrow('start time');
   });
   it('拒绝有非法任务元数据的预览', async () => {
     const vault = new MemoryVault(); vault.files['Tasks/A.md'] += '\n- [ ] 非法 <!-- as id=b remaining=5 priority=3 -->';
     const preview = await createPreview(vault, config(), now); expect(preview.result.errors.length).toBeGreaterThan(0);
-    await expect(applyPreview(vault, vault, preview, config(), now)).rejects.toThrow('错误'); expect(vault.writes).toBe(0);
+    await expect(applyPreview(vault, vault, preview, config(), now)).rejects.toThrow('errors'); expect(vault.writes).toBe(0);
   });
   it('普通同名笔记不会被接管', async () => {
     const vault = new MemoryVault(); vault.files['Scheduler/Schedule.md'] = '用户笔记';
@@ -60,7 +60,7 @@ describe('预览、应用、撤销', () => {
   it('跨文件并发窗口写后检测并提示', async () => {
     const vault = new MemoryVault(); const preview = await createPreview(vault, config(), now);
     vault.afterWrite = () => { vault.files['Tasks/A.md'] += '\n'; };
-    expect((await applyPreview(vault, vault, preview, config(), now)).warning).toContain('写入期间');
+    expect((await applyPreview(vault, vault, preview, config(), now)).warning).toContain('while writing');
   });
   it('重启后加载备份可撤销已有输出，恢复字节内容', async () => {
     const vault = new MemoryVault(); const original = `前言\r\n${START}\r\n\r\n${END}\r\n后记`;
@@ -76,7 +76,7 @@ describe('预览、应用、撤销', () => {
   it('撤销拒绝覆盖用户或 Day Planner 后续修改', async () => {
     const vault = new MemoryVault(); await applyPreview(vault, vault, await createPreview(vault, config(), now), config(), now);
     vault.files['Scheduler/Schedule.md'] += '\n手动修改';
-    await expect(undoLast(vault, vault, vault.undo)).rejects.toThrow('拒绝覆盖'); expect(vault.undo).not.toBeNull();
+    await expect(undoLast(vault, vault, vault.undo)).rejects.toThrow('refusing to overwrite'); expect(vault.undo).not.toBeNull();
   });
   it('保护管理区外文字并排除输出自导入', async () => {
     const vault = new MemoryVault(); const settings = config({ outputFile: 'Tasks/Schedule.md', outputMode: 'day-planner' });

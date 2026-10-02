@@ -22,7 +22,7 @@ export const timezone = (): string => Intl.DateTimeFormat().resolvedOptions().ti
 function settingKey(settings: Settings): string { return JSON.stringify(settings); }
 async function snapshot(vault: VaultPort, settings: Settings, today: string, historyPaths: string[] = [], sourcePaths: string[] = []): Promise<Record<string, string | null>> {
   const targets = settings.outputLocation === 'daily' ? dailyPaths(settings, today) : [settings.outputFile];
-  if (targets.includes(settings.fixedFile)) throw new Error('每日输出不能与固定日程文件相同');
+  if (targets.includes(settings.fixedFile)) throw new Error('Daily output cannot be the fixed-events file');
   const paths = await vault.listTasks(settings.taskFolder, [settings.fixedFile, ...(settings.outputLocation === 'single' ? targets : [])]);
   const habitPaths = await vault.listTasks(settings.habitFolder, []);
   const all = [...new Set([...paths, ...habitPaths, settings.fixedFile, ...targets, ...historyPaths, ...sourcePaths])].sort();
@@ -40,8 +40,8 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   const today = dateKey(now);
   const historyPaths = aiTasks.length && frozen.outputLocation === 'daily' ? Object.keys(tracking).filter(p => safeVaultPath(p) && p.startsWith(frozen.dailyFolder + '/') && /\/\d{4}-\d{2}-\d{2}\.md$/.test(p) && p.slice(-13, -3) < today) : [];
   const sourcePaths = Object.keys(habitUpdates);
-  if (formatOnly && sourcePaths.length) throw new Error('格式清理不能修改习惯');
-  if (sourcePaths.some(p => !safeVaultPath(p) || !p.startsWith(frozen.habitFolder + '/') || !p.endsWith('.md'))) throw new Error('习惯工具只能写入配置的习惯目录');
+  if (formatOnly && sourcePaths.length) throw new Error('Format cleanup cannot change habits');
+  if (sourcePaths.some(p => !safeVaultPath(p) || !p.startsWith(frozen.habitFolder + '/') || !p.endsWith('.md'))) throw new Error('The habits tool can only write inside the configured habits folder');
   const inputs = await snapshot(vault, frozen, today, historyPaths, sourcePaths);
   const targets = frozen.outputLocation === 'daily' ? dailyPaths(frozen, today) : [frozen.outputFile];
   const trackingSnapshot: Tracking = JSON.parse(JSON.stringify(tracking));
@@ -61,7 +61,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   }
   const parsed = parseTasks(Object.entries(inputs).filter(([path]) => !path.startsWith(frozen.habitFolder + '/') && path !== frozen.fixedFile && (frozen.outputLocation === 'daily' || path !== frozen.outputFile)).map(([path, content]) => ({ path, content: daily.get(path)?.content ?? content ?? '' })));
   const allAiTasks: Task[] = JSON.parse(JSON.stringify([...aiTasks, ...addedTasks]));
-  if (new Set([...parsed.tasks, ...allAiTasks].map(t => t.id)).size !== parsed.tasks.length + allAiTasks.length) throw new Error('任务 ID 重复');
+  if (new Set([...parsed.tasks, ...allAiTasks].map(t => t.id)).size !== parsed.tasks.length + allAiTasks.length) throw new Error('Duplicate task IDs');
   const historyCompleted = new Map<string, number>();
   for (const path of historyPaths) {
     try { for (const b of dailyDocument(virtual[path]).blocks) if (b.completed) historyCompleted.set(b.taskId, (historyCompleted.get(b.taskId) ?? 0) + b.end - b.start); }
@@ -69,11 +69,11 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   }
   parsed.tasks.push(...allAiTasks.map(t => {
     const done = historyCompleted.get(t.id) ?? 0;
-    if (done > t.remaining) dailyErrors.push({ path: t.path, line: 0, message: `AI 已完成用时超过任务总用时：${t.id}` });
+    if (done > t.remaining) dailyErrors.push({ path: t.path, line: 0, message: `Completed AI time exceeds task duration: ${t.id}` });
     const remaining = Math.max(0, t.remaining - done);
     return { ...t, remaining, min: Math.min(t.min, remaining), completed: t.completed || remaining === 0 };
   }));
-  if (parsed.tasks.some(t => isHabit(t.id))) parsed.errors.push({ path: frozen.taskFolder, line: 0, message: 'habit_ 是习惯实例的保留 ID 前缀' });
+  if (parsed.tasks.some(t => isHabit(t.id))) parsed.errors.push({ path: frozen.taskFolder, line: 0, message: 'habit_ is a reserved ID prefix for habit occurrences' });
   const habits = parseHabits(Object.entries({ ...inputs, ...habitUpdates }).filter(([path]) => path.startsWith(frozen.habitFolder + '/')).map(([path, content]) => ({ path, content: content ?? '' })));
   parsed.errors.push(...habits.errors, ...dailyErrors, ...[...daily.values()].flatMap(d => d.errors));
   const fixed = parseFixed({ path: frozen.fixedFile, content: inputs[frozen.fixedFile] ?? '' });
@@ -86,9 +86,9 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   try {
     const documents = Object.fromEntries(targets.map(path => [path, frozen.outputLocation === 'daily' ? dailyDocument(virtual[path]) : parseOutput(inputs[path])]));
     const oldBlocks = Object.values(documents).flatMap(d => d.blocks);
-    if (new Set(oldBlocks.map(b => b.id)).size !== oldBlocks.length) throw new Error('每日笔记中存在重复工作块 ID');
+    if (new Set(oldBlocks.map(b => b.id)).size !== oldBlocks.length) throw new Error('Duplicate block IDs in daily notes');
     if (frozen.outputLocation === 'daily') for (const [path, doc] of Object.entries(documents)) {
-      if (doc.blocks.some(b => !path.endsWith(`/${b.date}.md`))) throw new Error(`工作块日期与每日笔记不符：${path}`);
+      if (doc.blocks.some(b => !path.endsWith(`/${b.date}.md`))) throw new Error(`Block date does not match the daily note: ${path}`);
     }
     const expanded = expandHabits(habits.habits, oldBlocks, today);
     if (!formatOnly) parsed.tasks.push(...expanded.tasks);
@@ -117,20 +117,20 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   return preview;
 }
 export async function applyPreview(vault: VaultPort, state: StatePort, preview: Preview, settings: Settings, now = new Date()): Promise<{ changed: boolean; warning?: string }> {
-  if (preview.result.errors.length || preview.output === null) throw new Error('预览含错误，不能应用');
-  if (preview.settingsKey !== settingKey(settings) || preview.timezone !== timezone() || preview.today !== dateKey(now)) throw new Error('设置、时区或日期已变化，请重新预览');
-  if (!same(preview.snapshot, await snapshot(vault, preview.settings, preview.today, preview.historyPaths, preview.sourcePaths))) throw new Error('任务、习惯模板、固定日程或输出已变化，请重新预览');
-  if (state.getTracking && JSON.stringify(state.getTracking()) !== JSON.stringify(preview.tracking)) throw new Error('工作块跟踪数据已变化，请重新预览');
-  if (state.getAiTasks && JSON.stringify(state.getAiTasks()) !== JSON.stringify(preview.aiTasksBefore)) throw new Error('AI 任务已变化，请重新预览');
+  if (preview.result.errors.length || preview.output === null) throw new Error('Preview contains errors and cannot be applied');
+  if (preview.settingsKey !== settingKey(settings) || preview.timezone !== timezone() || preview.today !== dateKey(now)) throw new Error('Settings, time zone, or date changed. Preview again.');
+  if (!same(preview.snapshot, await snapshot(vault, preview.settings, preview.today, preview.historyPaths, preview.sourcePaths))) throw new Error('Tasks, habits template, fixed events, or output changed. Preview again.');
+  if (state.getTracking && JSON.stringify(state.getTracking()) !== JSON.stringify(preview.tracking)) throw new Error('Tracking data changed. Preview again.');
+  if (state.getAiTasks && JSON.stringify(state.getAiTasks()) !== JSON.stringify(preview.aiTasksBefore)) throw new Error('AI tasks changed. Preview again.');
   const outputs = preview.outputs ?? { [settings.outputFile]: preview.output };
   const entries: FileChange[] = Object.entries(outputs).filter(([path, after]) => preview.snapshot[path] !== after).map(([path, after]) => ({ path, before: preview.snapshot[path], after, trackingBefore: preview.nextTracking[path]?.before, trackingAfter: preview.nextTracking[path]?.after,
     restored: preview.sourcePaths.includes(path) && preview.snapshot[path] === null ? '' : settings.outputLocation === 'daily' && preview.snapshot[path] === null ? (settings.cleanDaily ? '# Day planner\n' : renderDaily(dailyDocument(null), [], settings.outputMode, settings.ganttFilter)) : undefined }));
   if (!entries.length) {
-    if (JSON.stringify(preview.aiTasksBefore) !== JSON.stringify(preview.aiTasksAfter)) throw new Error('本周没有可写入的工作块，请调整容量或时段后重新安排');
+    if (JSON.stringify(preview.aiTasksBefore) !== JSON.stringify(preview.aiTasksAfter)) throw new Error('No blocks can be written this week. Adjust capacity or working hours and replan.');
     return { changed: false };
   }
   const added = new Set(preview.diff.added.map(b => b.id));
-  if (preview.result.blocks.some(b => added.has(b.id) && !b.locked && !b.completed && b.start < epochMinute(now))) throw new Error('拟新增工作块的开始时间已过，请重新预览');
+  if (preview.result.blocks.some(b => added.has(b.id) && !b.locked && !b.completed && b.start < epochMinute(now))) throw new Error('The start time of a new block has passed. Preview again.');
   const undo: UndoRecord = { ...entries[0], entries, createdAt: now.toISOString(), aiTasksBefore: preview.aiTasksBefore, aiTasksAfter: preview.aiTasksAfter };
   // Backup must be durable before any Markdown mutation. Retain it if a write fails.
   await state.saveUndo(undo, preview.nextTracking, preview.aiTasksAfter);
@@ -138,20 +138,20 @@ export async function applyPreview(vault: VaultPort, state: StatePort, preview: 
   try {
     const after = await snapshot(vault, preview.settings, preview.today, preview.historyPaths, preview.sourcePaths);
     const expected = { ...preview.snapshot, ...Object.fromEntries(entries.map(e => [e.path, e.after])) };
-    if (!same(expected, after)) return { changed: true, warning: '写入期间输入或输出发生变化；请检查结果，可撤销后重新预览' };
-  } catch { return { changed: true, warning: '排程已写入，但写后检查失败；请检查结果，撤销备份已保存' }; }
+    if (!same(expected, after)) return { changed: true, warning: 'Inputs or outputs changed while writing. Inspect the results; you can undo and preview again.' };
+  } catch { return { changed: true, warning: 'Schedule saved, but verification failed. Inspect the results; an undo backup is saved.' }; }
   return { changed: true };
 }
 export async function undoLast(vault: VaultPort, state: StatePort, record: UndoRecord | null): Promise<void> {
-  if (!record) throw new Error('没有可撤销的排程');
-  if (record.aiTasksAfter && state.getAiTasks && JSON.stringify(record.aiTasksAfter) !== JSON.stringify(state.getAiTasks())) throw new Error('AI 任务已变化，拒绝覆盖撤销');
+  if (!record) throw new Error('No schedule to undo');
+  if (record.aiTasksAfter && state.getAiTasks && JSON.stringify(record.aiTasksAfter) !== JSON.stringify(state.getAiTasks())) throw new Error('AI tasks changed; refusing to overwrite during undo');
   const entries = record.entries ?? [record];
   // Preflight the entire batch. Retry after an interrupted undo can skip restored entries.
   const pending: FileChange[] = [];
   for (const entry of entries) {
     const current = await vault.read(entry.path), restored = entry.before ?? entry.restored ?? emptyManagedFile();
     if (current === entry.before || current === restored) continue;
-    if (current !== entry.after) throw new Error('输出已被修改或最近写入未完成，拒绝覆盖；请检查备份');
+    if (current !== entry.after) throw new Error('Output was modified or the last write did not finish; refusing to overwrite. Inspect the backup.');
     pending.push(entry);
   }
   for (const entry of pending) await vault.writeChecked(entry.path, entry.after, entry.before ?? entry.restored ?? emptyManagedFile());

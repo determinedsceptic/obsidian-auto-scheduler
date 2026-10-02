@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { END, START, blockLine, diffBlocks, parseOutput, renderOutput } from '../src/output';
 import { block, interval } from './helpers';
-describe('专用输出文件', () => {
+describe('专用Schedule file', () => {
   it.each(['plain', 'day-planner'] as const)('可读回 %s 格式，保留原始保护块', mode => {
     const b = block({ raw: undefined });
     const text = renderOutput(parseOutput(null), [b], mode);
@@ -20,7 +20,7 @@ describe('专用输出文件', () => {
     expect(output.startsWith('个人前言\r\n')).toBe(true); expect(output.endsWith('\r\n尾注没有换行')).toBe(true); expect(output.replace(/\r\n/g, '')).not.toContain('\n');
   });
   it.each(['普通笔记', `${START}\n${START}\n${END}`, `${END}\n${START}`, `${START}\n不要删除我\n${END}`, `前言 ${START}\n${END}`, `${START}\n${END}后缀`])('拒绝非法管理区 %s', content => { expect(() => parseOutput(content)).toThrow(); });
-  it('拒绝重复块 ID', () => { expect(() => parseOutput(`${START}\n${blockLine(block(), 'plain')}\n${blockLine(block(), 'plain')}\n${END}`)).toThrow('重复'); });
+  it('拒绝重复Block ID', () => { expect(() => parseOutput(`${START}\n${blockLine(block(), 'plain')}\n${blockLine(block(), 'plain')}\n${END}`)).toThrow('Duplicate'); });
   it('不接管非标元数据、跨日倒序时间或错误日期', () => {
     const text = renderOutput(parseOutput(null), [block()], 'plain');
     expect(() => parseOutput(text.replace('locked=true', 'locked=maybe'))).toThrow();

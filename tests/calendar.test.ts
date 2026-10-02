@@ -17,8 +17,8 @@ describe('Gantt Calendar / 每日笔记', () => {
     const parsed = parseTasks([{ path: 'Tasks/A.md', content: '- [ ] 工作 %%[as:: id=a remaining=60 priority=2 due=2026-10-03]%% [priority:: high] [due:: 2026-10-02]' }]);
     expect(parsed.errors).toEqual([]); expect(parsed.tasks[0].priority).toBe(2);
   });
-  it('取消任务不参与排程；普通任务不猜测估时', () => {
-    expect(parseTasks([{ path: 'A.md', content: '- [-] 已取消 <!-- as id=a remaining=60 -->\n- [ ] 普通任务 📅 2026-10-02' }]).tasks).toMatchObject([{ completed: true }]);
+  it('Cancel任务不参与排程；普通任务不猜测估时', () => {
+    expect(parseTasks([{ path: 'A.md', content: '- [-] 已Cancel <!-- as id=a remaining=60 -->\n- [ ] 普通任务 📅 2026-10-02' }]).tasks).toMatchObject([{ completed: true }]);
   });
   it.each([['09:00', '10:00'], ['23:00', '24:00']])('Gantt 时间和隐藏元数据可往返 %s-%s', (start, end) => {
     const b = block({ ...interval(start, end) });
@@ -34,7 +34,7 @@ describe('Gantt Calendar / 每日笔记', () => {
   });
   it('拒绝时钟与 Gantt 字段不一致，保留上游重排字段', () => {
     const line = blockLine(block(), 'gantt');
-    expect(() => parseOutput(`${START}\n${line.replace('[due:: 2026-10-01 10:00]', '[due:: 2026-10-01 11:00]')}\n${END}`)).toThrow('不一致');
+    expect(() => parseOutput(`${START}\n${line.replace('[due:: 2026-10-01 10:00]', '[due:: 2026-10-01 11:00]')}\n${END}`)).toThrow('does not match');
     const reordered = line.replace(/ (%%.+?%%)/, '') + ' ' + /%%.+?%%/.exec(line)![0];
     expect(parseOutput(`${START}\n${reordered}\n${END}`).blocks).toHaveLength(1);
   });
@@ -70,7 +70,7 @@ describe('Gantt Calendar / 每日笔记', () => {
     const vault = new MemoryVault(), settings = dailySettings();
     const preview = await createPreview(vault, settings, now);
     vault.files['DailyNotes/2026-10-04.md'] = '新笔记';
-    await expect(applyPreview(vault, vault, preview, settings, now)).rejects.toThrow('变化');
+    await expect(applyPreview(vault, vault, preview, settings, now)).rejects.toThrow('changed');
   });
   it('七日备份先保存，部分写入失败可撤销并恢复已有笔记', async () => {
     const vault = new MemoryVault(), settings = dailySettings();
@@ -89,7 +89,7 @@ describe('Gantt Calendar / 每日笔记', () => {
     vault.files['Tasks/A.md'] = '- [ ] 工作 <!-- as id=a remaining=360 priority=3 -->';
     await applyPreview(vault, vault, await createPreview(vault, settings, now), settings, now);
     const first = vault.files['DailyNotes/2026-10-01.md']; vault.files['DailyNotes/2026-10-02.md'] += '\n手改';
-    await expect(undoLast(vault, vault, vault.undo)).rejects.toThrow('拒绝覆盖'); expect(vault.files['DailyNotes/2026-10-01.md']).toBe(first);
+    await expect(undoLast(vault, vault, vault.undo)).rejects.toThrow('refusing to overwrite'); expect(vault.files['DailyNotes/2026-10-01.md']).toBe(first);
   });
   it('新增每日文件撤销保留空管理区，可再次排程', async () => {
     const vault = new MemoryVault(), settings = dailySettings();
@@ -115,7 +115,7 @@ describe('每日事务恢复边界', () => {
     expect(parseOutput(vault.files['DailyNotes/2026-10-01.md']).blocks).toHaveLength(0);
     expect(parseOutput(vault.files['DailyNotes/2026-10-02.md']).blocks).toHaveLength(0);
   });
-  it('任务目录就是每日目录时不重复导入，只读取 Day planner 源任务', async () => {
+  it('Tasks folder就是每日目录时不重复导入，只读取 Day planner 源任务', async () => {
     const vault = new MemoryVault(), settings = config({ taskFolder: 'DailyNotes', outputLocation: 'daily', outputMode: 'gantt' });
     vault.files = {
       'DailyNotes/2026-09-30.md': '# Day planner\n- [ ] 历史未完成 %%[as:: id=history remaining=60]%%',
@@ -130,6 +130,6 @@ describe('每日事务恢复边界', () => {
     vault.files['DailyNotes/2026-10-01.md'] = '# Day planner\n- [ ] 10:00 - 09:00 错误';
     expect((await createPreview(vault, settings, now)).result.errors).not.toHaveLength(0);
     vault.files['DailyNotes/2026-10-01.md'] = renderDaily(dailyDocument(null), [block({ date: '2026-10-02', ...interval('09:00', '10:00', '2026-10-02') })], 'gantt');
-    expect((await createPreview(vault, settings, now)).result.errors[0].message).toContain('日期');
+    expect((await createPreview(vault, settings, now)).result.errors[0].message).toContain('date');
   });
 });
