@@ -283,6 +283,12 @@ class SchedulerSettings extends PluginSettingTab {
     containerEl.createEl('h3', { text: 'BYOK 服务商与模型' });
     containerEl.createEl('p', { text: `令牌保存方式：${this.plugin.credentialMode}。取消配置不保存；本机令牌不写入 data.json 或笔记。` });
     new Setting(containerEl).setName('添加服务商').setDesc('选择模板、填写令牌、测试并选择模型；支持手动模型 ID。').addButton(b => b.setButtonText('添加服务商').onClick(() => this.plugin.openProvider(undefined, () => this.display())));
+    if (this.plugin.byok.providers.length) new Setting(containerEl).setName('对话模型').addDropdown(input => {
+      for (const provider of this.plugin.byok.providers) for (const model of provider.models) input.addOption(JSON.stringify([provider.id, model]), `${provider.name} / ${model}`);
+      input.setValue(JSON.stringify([this.plugin.byok.activeProviderId, this.plugin.byok.activeModel])).onChange(value => {
+        const [id, model] = JSON.parse(value); void this.plugin.selectModel(id, model).catch(error => new Notice((error as Error).message));
+      });
+    });
     for (const provider of this.plugin.byok.providers) {
       new Setting(containerEl).setName(provider.name).setDesc(`${provider.protocol} · ${provider.baseUrl} · ${provider.requiresKey ? '需要令牌' : '令牌可选'} · ${provider.models.join(', ')}`)
         .addButton(b => b.setButtonText('编辑').onClick(() => this.plugin.openProvider(provider, () => this.display())))

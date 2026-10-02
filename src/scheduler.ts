@@ -71,7 +71,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
             }
             if (length < lower) continue;
             const end = start + length;
-            const block: Block = { id: `b_${task.id}_${day.date.replace(/-/g, '')}_${Math.round(start)}_${length}`, taskId: task.id, date: day.date, start, end, title: task.title, path: task.path, locked: false, completed: false };
+            const block: Block = { id: `b_${task.id}_${day.date.replace(/-/g, '')}_${Math.round(start)}_${length}`, taskId: task.id, date: day.date, start, end, title: task.title, priority: task.priority, path: task.path, locked: false, completed: false };
             result.blocks.push(block); day.occupied = merge([...day.occupied, { start, end: end + settings.blockBuffer }]); remaining -= length;
           }
         }

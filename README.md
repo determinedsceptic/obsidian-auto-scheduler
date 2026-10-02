@@ -3,7 +3,7 @@
 在 Obsidian 中为带预计用时的 Markdown 任务生成一周工作块。AI 对话直接排程，手动命令先预览再应用；支持每日容量、固定日程、缓冲、锁定和最近一次撤销。
 
 - 作者：Alex Hu（需求）、Codex（实现）
-- 日期：2026-10-02；版本：0.3.1
+- 日期：2026-10-02；版本：0.3.2
 - 支持范围：Obsidian 桌面端 1.6.6+；本地单用户
 - 设计来源：`intend.md` → `spec.md` → `plan.md`
 - 验证与审查：`validation/2026-10-01/`、`review.md`、`compatibility.md`
@@ -20,12 +20,12 @@
 
 ```markdown
 # Day planner
-- [ ] 14:00 - 16:00 工作块：课程1复习
+- [ ] 14:00 - 16:00 ⏫ 课程1复习
 ```
 
 AI 任务及未安排量的来源保存在插件 `data.json` 的 `aiTasks` 中，和跟踪/撤销数据一起备份。用时为 15 分钟倍数；重要默认优先级4；具体时间由原排程器安排，模型不能指定文件路径或覆盖笔记。本次排程包含已有手写源任务及 AI 任务。已完成工作块从 AI 总用时中扣除，包括过去日期的勾选；未勾选的过期工作会重新安排。每次只保留最近一次撤销记录。
 
-**BYOK 配置**：参考 [Copilot 的服务商配置流程](https://github.com/logancyang/obsidian-copilot/blob/master/docs/settings.md)，通过 **添加服务商** 选择 OpenAI、Anthropic、Gemini、OpenRouter、DeepSeek、Ollama、LM Studio 或自定义模板。配置显示名称、协议、API 根地址、令牌及多个模型；聊天侧栏选择“服务商 / 模型”。编辑模型列表也在服务商对话框中完成；移除服务商会先显示确认，不影响笔记或 AI 任务。
+**BYOK 配置**：参考 [Copilot 的服务商配置流程](https://github.com/logancyang/obsidian-copilot/blob/master/docs/settings.md)，通过 **添加服务商** 选择 OpenAI、Anthropic、Gemini、OpenRouter、DeepSeek、Ollama、LM Studio 或自定义模板。配置显示名称、协议、API 根地址、令牌及多个模型；在设置 → Auto Scheduler → 对话模型选择服务商和模型。侧栏顶部仅保留“配置服务商/API令牌”。编辑模型列表也在服务商对话框中完成；移除服务商会先显示确认，不影响笔记或 AI 任务。
 
 **测试与模型发现**：点击“测试连接并发现模型”执行 GET /models，勾选需要的模型；列表过长可搜索。也可每行手动填写一个准确模型 ID。部分服务不提供模型列表，网络暂时失败仍可保存离线配置；明确返回鉴权拒绝时需更正令牌。发现列表成功不表示该模型支持函数工具调用，需要实际对话验收。模型目录可能包含不适用于聊天的模型，插件不会自动选择发现结果。
 
@@ -38,6 +38,8 @@ AI 任务及未安排量的来源保存在插件 `data.json` 的 `aiTasks` 中�
 升级 0.2.0 时旧地址/模型迁移为“已有 LLM 配置”，AI 任务、跟踪与撤销保留。旧版会话令牌需重新配置。不完整的旧表单回退默认服务商，可重新编辑。
 
 当前命令：**打开 AI 任务助手**、**预览一周排程**、**清理每日排程格式**、**撤销最近一次排程**。任务目录不存在时可只使用 AI 任务；已有目录仍会扫描手写任务。
+
+每日任务显示重要性：🔺 最高（5）、⏫ 重要（4）、🔼 普通（3）、🔽 较低（2）、⏬ 最低（1）。排程先按重要性降序、再按截止日期分配可用时间；笔记中的任务按时间顺序显示。旧受管列表运行“清理每日排程格式”可去掉“工作块：”并更新重要性，时间和完成状态保持不变。
 
 ## 任务格式
 
@@ -86,7 +88,7 @@ AI 任务及未安排量的来源保存在插件 `data.json` 的 `aiTasks` 中�
 设置“输出格式”为 **Day Planner**：
 
 ```markdown
-- [ ] 09:00 - 10:00 工作块：写实验分析 [[Tasks/Project]] [scheduled:: 2026-10-02] <!-- as-block id=b_analysis_1 task=analysis locked=false -->
+- [ ] 09:00 - 10:00 ⏫ 写实验分析 [[Tasks/Project]] [scheduled:: 2026-10-02] <!-- as-block id=b_analysis_1 task=analysis locked=false -->
 ```
 
 工作块日期放在 scheduled 中，源任务业务截止不复制到输出。该模式参考 Day Planner 0.35.1 的公开格式。若 Day Planner 启用了过滤器，请允许专用输出文件/工作块；时间拖动后保留完整注释并锁定。勾选的是工作块，不会勾选源任务。
@@ -103,7 +105,7 @@ AI 任务及未安排量的来源保存在插件 `data.json` 的 `aiTasks` 中�
 
 ```markdown
 # Day planner
-- [ ] 14:00 - 16:00 工作块：写实验分析 [[Tasks/Project]]
+- [ ] 14:00 - 16:00 ⏫ 写实验分析 [[Tasks/Project]]
 ```
 
 跟踪信息及锁定状态保存到插件 `data.json` 的 tracking 字段，与撤销备份一起先保存后写笔记。请保留/备份插件数据。支持勾选完成和编辑生成列表外的备注；改时间/标题导致无法核对时拒绝覆盖。需要修改生成列表时先撤销再重排。`Auto Scheduler: 清理每日排程格式` 会清理本周已有输出的管理字段，保留时间、完成状态及源链接，不重新排程。新建纯列表文件撤销后只保留标题。
@@ -122,7 +124,7 @@ ID 和预计用时是自动排程必需信息。普通任务没有这些信息�
 输出示例：
 
 ```markdown
-- [ ] 🎯 09:00 - 10:00 工作块：写实验分析 [[Tasks/Project]] %%[as-block:: id=b_analysis_1 task=analysis locked=false]%% [start:: 2026-10-02 09:00] [scheduled:: 2026-10-02 09:00] [due:: 2026-10-02 10:00]
+- [ ] 🎯 09:00 - 10:00 ⏫ 写实验分析 [[Tasks/Project]] %%[as-block:: id=b_analysis_1 task=analysis locked=false]%% [start:: 2026-10-02 09:00] [scheduled:: 2026-10-02 09:00] [due:: 2026-10-02 10:00]
 ```
 
 输出的 due 是工作块结束时间，业务截止只留在源任务。结构化元数据可由 Gantt Calendar 编辑器保留，旧 HTML 元数据仍可读取。上游解析器和序列化器已实测往返；尚未验证其完整界面。Gantt 拖动后需让时钟范围、start/scheduled/due 一致，跨日移动还需移到对应日期文件；不一致时预览拒绝应用。保留手动位置需 `locked=true`。循环任务不自动展开。

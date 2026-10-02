@@ -19,19 +19,8 @@ export class ChatView extends ItemView {
   private render(): void {
     if (this.closed) return;
     const root = this.contentEl; root.empty(); root.addClass('auto-scheduler-chat');
-    root.createEl('h3', { text: 'AI 任务助手' });
-    const config = this.plugin.state.llm;
-    root.createEl('p', { text: `${config.model} · ${config.protocol}` });
-    root.createEl('p', { text: '配置服务地址和模型：设置 → Auto Scheduler。只向所选服务发送对话及排程设置，不发送笔记内容。', cls: 'auto-scheduler-muted' });
-    let host = '地址未配置'; try { host = new URL(endpoint(config)).origin; } catch { /* settings are validated before requests */ }
-    const select = root.createEl('select', { attr: { 'aria-label': '选择服务商和模型' } }); select.disabled = this.busy;
-    for (const provider of this.plugin.byok.providers) for (const model of provider.models) {
-      const option = select.createEl('option', { text: `${provider.name} / ${model}`, value: JSON.stringify([provider.id, model]) });
-      option.selected = provider.id === this.plugin.byok.activeProviderId && model === this.plugin.byok.activeModel;
-    }
-    select.addEventListener('change', () => { const [id, model] = JSON.parse(select.value); void this.plugin.selectModel(id, model).catch(error => new Notice((error as Error).message)); });
-    root.createEl('p', { text: `请求发送至 ${host} · ${this.plugin.credentialMode}`, cls: 'auto-scheduler-muted' });
-    const configure = root.createEl('button', { text: '配置服务商 / API 令牌' }); configure.disabled = this.busy;
+    const header = root.createDiv({ cls: 'auto-scheduler-chat-header' });
+    const configure = header.createEl('button', { text: '配置服务商/API令牌' }); configure.disabled = this.busy;
     configure.addEventListener('click', () => this.plugin.openProvider(this.plugin.byok.providers.find(p => p.id === this.plugin.byok.activeProviderId)));
     const log = root.createDiv({ cls: 'auto-scheduler-chat-log', attr: { 'aria-live': 'polite' } });
     for (const message of this.messages) {
@@ -47,10 +36,11 @@ export class ChatView extends ItemView {
       }
     }
     if (this.busy) log.createEl('p', { text: '正在生成任务并安排时间…' });
-    const input = root.createEl('textarea', { attr: { placeholder: '我有两门课要复习，每门预计2小时，很重要，帮我安排一下', 'aria-label': '任务对话', rows: '4', maxlength: '12000' } });
+    const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
+    const input = composer.createEl('textarea', { attr: { placeholder: '描述任务、预计用时与重要性…', 'aria-label': '任务对话', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; });
     input.disabled = this.busy;
-    const actions = root.createDiv({ cls: 'auto-scheduler-actions' });
+    const actions = composer.createDiv({ cls: 'auto-scheduler-actions' });
     const send = actions.createEl('button', { text: '发送', cls: 'mod-cta' }); send.disabled = this.busy || !this.plugin.byok.providers.length;
     send.addEventListener('click', () => { void this.send(input.value); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); void this.send(input.value); } });

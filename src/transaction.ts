@@ -94,8 +94,8 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
         const output = frozen.outputLocation === 'daily' ? renderDaily(document, blocks, frozen.outputMode, frozen.ganttFilter) : renderOutput(document, blocks, frozen.outputMode, frozen.ganttFilter);
         parseOutput(output);
         if (frozen.outputLocation === 'daily') {
-          const before = cleanDaily(renderDaily(document, document.blocks, frozen.outputMode, frozen.ganttFilter), new Set(allAiTasks.map(t => t.id))).record;
-          const clean = cleanDaily(output, new Set(allAiTasks.map(t => t.id)));
+          const before = cleanDaily(renderDaily(document, document.blocks, frozen.outputMode, frozen.ganttFilter), new Set(allAiTasks.map(t => t.id)), new Map(), false).record;
+          const clean = cleanDaily(output, new Set(allAiTasks.map(t => t.id)), new Map(parsed.tasks.map(t => [t.id, t.priority])));
           preview.nextTracking[path] = { before, after: frozen.cleanDaily ? clean.record : null };
           preview.outputs[path] = frozen.cleanDaily ? clean.text : output;
         } else preview.outputs[path] = output;

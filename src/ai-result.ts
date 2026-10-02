@@ -12,7 +12,7 @@ export function describeAiSchedule(preview: Preview, warning?: string): AiSchedu
   const blocks = preview.result.blocks.filter(b => created.has(b.taskId)).sort((a, b) => a.start - b.start || a.taskId.localeCompare(b.taskId));
   const notes: ScheduledNote[] = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${preview.settings.dailyFolder}/${date}.md` }));
   const lines = ['已写入每日笔记：'];
-  for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}：${block.title}`);
+  for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}：${block.title}（重要性 ${block.priority ?? 3}/5）`);
   const pending = preview.result.unscheduled.filter(t => created.has(t.taskId));
   if (pending.length) {
     lines.push('', '尚未安排（任务已保存，可稍后重排）：');

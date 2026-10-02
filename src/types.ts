@@ -6,6 +6,7 @@ export interface Task {
   priority: number; due?: number; earliest?: number; split: boolean; min: number; completed: boolean;
 }
 export interface Block extends Interval {
+  priority?: number;
   id: string; taskId: string; date: string; title: string; path: string;
   locked: boolean; completed: boolean; raw?: string;
 }

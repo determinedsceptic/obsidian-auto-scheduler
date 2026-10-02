@@ -4,13 +4,20 @@
 .auto-scheduler-modal li { margin-block: 0.3em; }
 .auto-scheduler-warning { color: var(--text-warning); }
 .auto-scheduler-actions { display: flex; gap: 0.75em; justify-content: flex-end; margin-top: 1.5em; }
-.auto-scheduler-chat { padding: 16px; }
-.auto-scheduler-chat input, .auto-scheduler-chat textarea { width: 100%; margin: 8px 0; }
-.auto-scheduler-chat-log { max-height: 55vh; overflow-y: auto; margin: 12px 0; }
-.auto-scheduler-message { padding: 10px; margin: 8px 0; border-radius: 6px; background: var(--background-secondary); }
-.auto-scheduler-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
-.auto-scheduler-user { border-left: 3px solid var(--interactive-accent); }
+.auto-scheduler-chat { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 12px; overflow: hidden; gap: 12px; box-sizing: border-box; }
+.auto-scheduler-chat-header { flex: none; padding-bottom: 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.auto-scheduler-chat-header button { width: 100%; font-size: var(--font-small); box-shadow: none; }
+.auto-scheduler-chat-log { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
+.auto-scheduler-message { padding: 12px; margin-bottom: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
+.auto-scheduler-message strong { display: block; font-size: var(--font-smallest); font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+.auto-scheduler-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: var(--font-small); line-height: 1.65; }
+.auto-scheduler-user { background: var(--background-secondary); }
+.auto-scheduler-composer { flex: none; padding-top: 12px; border-top: 1px solid var(--background-modifier-border); }
+.auto-scheduler-composer textarea { display: block; width: 100%; min-height: 84px; max-height: 200px; resize: vertical; margin: 0; padding: 10px 12px; border-radius: 8px; box-shadow: none; background: var(--background-primary); font-size: var(--font-small); line-height: 1.5; }
+.auto-scheduler-composer textarea:focus { border-color: var(--interactive-accent); }
+.auto-scheduler-chat .auto-scheduler-actions { justify-content: space-between; flex-direction: row-reverse; margin-top: 10px; }
+.auto-scheduler-chat .auto-scheduler-actions button { font-size: var(--font-small); box-shadow: none; }
+.auto-scheduler-chat .auto-scheduler-actions button:not(.mod-cta) { background: transparent; color: var(--text-muted); }
 .auto-scheduler-muted { color: var(--text-muted); font-size: var(--font-smallest); }
-.auto-scheduler-chat select { width: 100%; margin: 8px 0; }
 .auto-scheduler-model-list { max-height: 250px; overflow-y: auto; }
-.auto-scheduler-note-links { display: flex; flex-wrap: wrap; gap: 0.5em 1em; }
+.auto-scheduler-note-links { display: flex; flex-wrap: wrap; gap: 0.5em 1em; padding-top: 10px; font-size: var(--font-small); }

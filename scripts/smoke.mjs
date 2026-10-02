@@ -142,6 +142,9 @@ const chatPlugin = new AutoScheduler(app); await chatPlugin.onload();
 await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
 await chatPlugin.updateSettings({ weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 60, fixedBuffer: 0, blockBuffer: 0 });
 const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen();
+const header = chatView.contentEl.children.find(node => node.options.cls === 'auto-scheduler-chat-header');
+assert.equal(header.children.length, 1); assert.equal(header.children[0].options.text, '配置服务商/API令牌');
+assert(!chatView.contentEl.all().some(node => node.tag === 'select' || node.tag === 'h3'));
 const draft = { ...aiDraft, minutes: 600 };
 mockResponse = { output: [
   { type: 'message', content: [{ type: 'output_text', text: '模型猜测：明天20点完成。' }] },

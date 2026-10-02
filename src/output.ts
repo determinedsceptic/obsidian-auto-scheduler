@@ -1,4 +1,4 @@
-import { calendarDate, normalizeMetadata } from './calendar-format';
+import { calendarDate, calendarPriority, normalizeMetadata } from './calendar-format';
 import { fields, idField } from './parser';
 import { clock, dateKey, atDate, localMinute } from './time';
 import type { Block, OutputDocument, Settings } from './types';
@@ -44,13 +44,13 @@ export function parseOutput(content: string | null): OutputDocument {
     const links = [...match[5].matchAll(/\[\[([^\[\]]+)\]\]/g)];
     const path = links[links.length - 1]?.[1] ?? '';
     if (!path) throw new Error(`块 ${id} 缺少源笔记链接`);
-    blocks.push({ id, taskId, date, start: startTime, end: endTime, title: match[5], path: path.endsWith('.md') ? path : `${path}.md`, locked: f.locked === 'true', completed: match[1] !== undefined && match[1] !== ' ', raw });
+    blocks.push({ id, taskId, date, start: startTime, end: endTime, title: match[5], priority: calendarPriority(match[5]), path: path.endsWith('.md') ? path : `${path}.md`, locked: f.locked === 'true', completed: match[1] !== undefined && match[1] !== ' ', raw });
   }
   return { prefix: content.slice(0, start), suffix: afterEnd, newline, blocks };
 }
 /** Strip scheduling display fields only; the source Markdown is never changed. */
 export function displayTitle(title: string): string {
-  return title.replace(/<!--.*?-->/g, '')
+  return title.replace(/^工作块：\s*/, '').replace(/<!--.*?-->/g, '')
     .replace(/%%.*?%%/g, '')
     .replace(/[🔺⏫🔼🔽⏬]/gu, '')
     .replace(/🔁.*$/gu, '')
@@ -66,7 +66,7 @@ export function blockLine(block: Block, mode: Settings['outputMode'], ganttFilte
   if (block.raw) return block.raw;
   const link = block.path.replace(/\.md$/, '');
   if (/[\[\]|\r\n]/.test(link)) throw new Error(`源笔记路径不能安全表示为 wikilink：${block.path}`);
-  const body = `工作块：${displayTitle(block.title)} [[${link}]]`;
+  const body = `${prioritySymbol(block.priority ?? 3)} ${displayTitle(block.title)} [[${link}]]`;
   const metadata = `<!-- as-block id=${block.id} task=${block.taskId} locked=${block.locked} -->`;
   if (mode === 'gantt') {
     const stamp = (minute: number): string => `${dateKey(atDate(minute))} ${clock(minute)}`;
@@ -78,13 +78,14 @@ export function blockLine(block: Block, mode: Settings['outputMode'], ganttFilte
 }
 export function renderOutput(document: OutputDocument, blocks: Block[], mode: Settings['outputMode'], ganttFilter = '🎯'): string {
   const lines = [START]; let previous = '';
-  for (const block of [...blocks].sort((a, b) => a.start - b.start || a.id.localeCompare(b.id))) {
+  for (const block of [...blocks].sort((a, b) => a.start - b.start || (b.priority ?? 3) - (a.priority ?? 3) || a.id.localeCompare(b.id))) {
     if (block.date !== previous) { lines.push('', `## ${block.date}`); previous = block.date; }
     lines.push(blockLine(block, mode, ganttFilter));
   }
   lines.push('', END);
   return document.prefix + lines.join(document.newline) + document.suffix;
 }
+export function prioritySymbol(priority: number): string { return ({ 1: '⏬', 2: '🔽', 3: '🔼', 4: '⏫', 5: '🔺' } as Record<number, string>)[priority] ?? '🔼'; }
 export function emptyManagedFile(): string { return `${START}\n\n${END}\n`; }
 export function diffBlocks(before: Block[], after: Block[]): { added: Block[]; removed: Block[]; retained: Block[] } {
   const key = (b: Block): string => JSON.stringify([b.id, b.start, b.end, b.locked, b.completed]);

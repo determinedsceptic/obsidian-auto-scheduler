@@ -6,6 +6,29 @@ import { block, config, MemoryVault, now } from './helpers';
 const settings = () => config({ outputLocation: 'daily', outputMode: 'day-planner', cleanDaily: true });
 const preview = (v: MemoryVault) => createPreview(v, settings(), now, v.tracking);
 describe('每日纯列表与插件跟踪', () => {
+  it('迁移旧前缀与重要性时保持完成状态、时间，撤销后旧跟踪仍有效', async () => {
+    const vault = new MemoryVault();
+    vault.files['Tasks/A.md'] = vault.files['Tasks/A.md'].replace('priority=3', 'priority=5');
+    const annotated = renderDaily(dailyDocument(null), [block({ locked: false })], 'day-planner')
+      .replace('🔼 分析', '工作块：分析').replace('- [ ]', '- [x]');
+    const original = cleanDaily(annotated, new Set(), new Map(), false);
+    vault.files['DailyNotes/2026-10-01.md'] = original.text;
+    vault.tracking['DailyNotes/2026-10-01.md'] = { before: null, after: original.record };
+    const p = await createPreview(vault, settings(), now, vault.tracking, true);
+    expect(p.result.errors).toEqual([]);
+    await applyPreview(vault, vault, p, settings(), now);
+    expect(vault.files['DailyNotes/2026-10-01.md']).toContain('- [x] 09:00 - 10:00 🔺 分析');
+    expect(vault.files['DailyNotes/2026-10-01.md']).not.toContain('工作块：');
+    expect((await preview(vault)).result.errors).toEqual([]);
+    await undoLast(vault, vault, vault.undo);
+    expect(vault.files['DailyNotes/2026-10-01.md']).toBe(original.text);
+    expect((await preview(vault)).result.errors).toEqual([]);
+  });
+  it('无前缀的生成任务被手动改名时仍拒绝覆盖', async () => {
+    const vault = new MemoryVault(); await applyPreview(vault, vault, await preview(vault), settings(), now);
+    vault.files['DailyNotes/2026-10-01.md'] = vault.files['DailyNotes/2026-10-01.md'].replace('分析', '手动改名');
+    expect((await preview(vault)).result.errors[0].message).toContain('拒绝覆盖');
+  });
   it('输出无管理注释、日期和工作块元数据，保留来源链接', async () => {
     const vault = new MemoryVault(), p = await preview(vault);
     expect(p.output).not.toContain('<!--'); expect(p.output).not.toContain('scheduled::'); expect(p.output).not.toContain('as-block');
