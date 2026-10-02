@@ -1,7 +1,7 @@
 import { calendarDate } from './calendar-format';
 import { END, START, parseOutput, renderOutput } from './output';
 import { visibleLines } from './parser';
-import { addDays, localMinute } from './time';
+import { addDays, localMinute, endAfter } from './time';
 import type { Block, Diagnostic, Interval, OutputDocument, Settings } from './types';
 export function dailyPaths(settings: Settings, today: string): string[] {
   return Array.from({ length: 7 }, (_, i) => `${settings.dailyFolder}/${addDays(today, i)}.md`);
@@ -41,7 +41,7 @@ export function renderDaily(document: OutputDocument, blocks: Block[], mode: Set
     .split(document.newline).filter(line => !/^## \d{4}-\d{2}-\d{2}$/.test(line)).join(document.newline);
   return document.prefix + rendered + document.suffix;
 }
-export function dailyInputs(path: string, content: string | null): { content: string; intervals: Interval[]; errors: Diagnostic[] } {
+export function dailyInputs(path: string, content: string | null, defaultDuration = 30): { content: string; intervals: Interval[]; errors: Diagnostic[] } {
   const text = content ?? '', part = section(text); const intervals: Interval[] = [], errors: Diagnostic[] = [];
   if (!part) return { content: '', intervals, errors };
   const date = path.split('/').pop()!.slice(0, -3);
@@ -55,10 +55,12 @@ export function dailyInputs(path: string, content: string | null): { content: st
     if (managed) continue;
     try {
       const time = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[.\]\s+)?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})(?:\s|$)/.exec(line);
+      const startOnly = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[.\]\s+)?(\d{2}:\d{2})(?:\s+[^-\s].*)?$/.exec(line);
       const calendarStart = calendarDate(line, 'start') ?? calendarDate(line, 'scheduled');
       const calendarEnd = calendarDate(line, 'due');
       let interval: Interval | undefined;
       if (time) interval = { start: localMinute(date, time[1]), end: localMinute(date, time[2]) };
+      else if (startOnly && !/<!--\s*as\s|%%\[as::/.test(line)) interval = { start: localMinute(date, startOnly[1]), end: localMinute(date, endAfter(startOnly[1], defaultDuration)) };
       else if (!/<!--\s*as\s|%%\[as::/.test(line) && calendarStart !== undefined && calendarEnd !== undefined && /(?:\[(?:start|scheduled)::|[🛫⏳])\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(line) && /(?:\[due::|📅)\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(line)) interval = { start: calendarStart, end: calendarEnd };
       if (interval) {
         if (interval.end <= interval.start) throw new Error('A handwritten daily event must end after it starts');

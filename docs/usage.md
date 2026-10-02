@@ -18,6 +18,7 @@ To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Sched
 | Working days | `1,2,3,4,5` | Monday through Friday; `0` means Sunday. |
 | Working hours | `09:00-12:00,14:00-18:00` | Local time, 15-minute grid. |
 | Daily capacity | 360 minutes | Occupied time and buffers inside working hours. |
+| Default event duration | 30 minutes | Used when an event or habit has only a start time; 15–1440 minutes, in multiples of 15. |
 | Event buffer | 15 minutes | Before and after fixed events. |
 | Block buffer | 15 minutes | After each task or habitual block. |
 
@@ -53,6 +54,23 @@ Tasks emoji and Dataview priority/due/start/scheduled fields are accepted. Expli
 
 Daily-note mode also reads handwritten time ranges under `# Day planner`, outside the generated region. Other daily-note sections are preserved. Full Gantt start/end fields can express busy time. There is no external calendar or ICS import.
 
+## Events with only a start time
+
+Ask **“Exercise tomorrow at 19:00.”** The AI calls `create_events` with an unspecified duration; the host uses **Default event duration**, initially 30 minutes. The reply reports the actual date, **19:00–19:30**, and the default-duration assumption, then opens the daily note. An explicit duration or end time takes precedence. An ambiguous date prompts a follow-up question.
+
+One-off events retain their exact start even outside working hours. Flexible work is replanned around them. A conflict with an existing event, habit, protected block, or event buffer rejects the operation before any note changes. Cross-midnight intervals are rejected; specify a shorter same-day duration. Chat-created one-off events must start within the next seven local dates and cannot be in the past. Times use the existing 15-minute grid.
+
+Start-only handwritten rows also reserve the configured default without rewriting their source:
+
+```markdown
+# Day planner
+- [ ] 11:30 Appointment
+```
+
+The fixed-events file accepts `- 2026-10-05 11:30 Appointment`. Habit templates accept `- 19:00 Exercise (Mon, Wed, Fri)`. Recurring AI habits may omit duration too: the host writes an explicit end time to their template and reports the default. Changing the setting changes how handwritten start-only rows are interpreted on the next replan; saved AI events and habits already have explicit end times.
+
+One-off event rows are ordinary fixed appointments; edit them directly in the daily note. They are not flexible AI tasks or generated habit occurrences. Unspecified duration in an ordinary flexible task still requires clarification.
+
 ## Habits
 
 Run **Create habits template**, or place plain lists in any Markdown file under the configured habits folder:
@@ -65,7 +83,7 @@ Run **Create habits template**, or place plain lists in any Markdown file under 
 
 Recurrence supports case-insensitive English weekday names/abbreviations, `daily`, `every day`, `weekdays`, and `weekends`. Existing Chinese suffixes and old explicit `habit` metadata remain supported. A missing suffix means every day. Fenced rows are examples and do not run. A checked checkbox in a template disables that source habit; checking an occurrence in a daily note completes only that day.
 
-The AI tool always appends to `Habits/AI-Habits.md` (or the configured folder). It asks for missing fixed times; ordinary tasks use flexible working slots. Same-title habits in the same file are rejected as duplicates. To edit an existing habit, edit its template and replan. Changing title or source path changes identity; changing time or recurrence does not. Completed occurrences and past records survive replan.
+The AI tool always appends to `Habits/AI-Habits.md` (or the configured folder). It asks for missing start times or recurrence; ordinary tasks use flexible working slots. Same-title habits in the same file are rejected as duplicates. To edit an existing habit, edit its template and replan. Changing title or source path changes identity; changing time or recurrence does not. Completed occurrences and past records survive replan.
 
 ## Applying and recovering
 

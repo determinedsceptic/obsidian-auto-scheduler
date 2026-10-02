@@ -11,3 +11,5 @@ Gantt Calendar output now uses Dataview priority fields consistently, preserving
 The DeepSeek preset now includes `deepseek-flash` and `deepseek-v4-pro`, the official API base URL, and the existing Chat Completions tool-calling path. Users bring their own DeepSeek API key.
 
 The assistant sidebar now has a model selector for every saved provider/model pair. Provider configuration lets users choose the model to use immediately after saving.
+
+Start-only appointments and habits use a configurable 30-minute default. AI replies report the assumption and open the corresponding date; explicit durations take precedence. One-off events keep their exact time, replan flexible tasks, reject conflicts and cross-midnight ranges, and support restart-safe undo. Handwritten start-only rows reserve time without source edits.

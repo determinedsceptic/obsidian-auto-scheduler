@@ -8,7 +8,7 @@ Describe what you need to do, give an estimated duration, and let the local sche
 
 ## What it does
 
-- **Chat to schedule.** Create tasks or fixed-time recurring habits. The reply lists actual saved times and opens the corresponding daily note.
+- **Chat to schedule.** Create tasks, exact one-off events, or fixed-time recurring habits. The reply lists actual saved times and opens the corresponding daily note.
 - **Plan locally.** Priority, deadlines, working hours, fixed events, buffers, and daily capacity determine the schedule. A model cannot choose file paths or overwrite arbitrary notes.
 - **Keep readable notes.** Time-based checkboxes appear under `# Day planner` in `YYYY-MM-DD.md`, without hidden management comments in clean daily mode.
 - **Reserve habits first.** Daily, weekday, weekend, or selected-day habits can also occur outside working hours.
@@ -51,6 +51,8 @@ For offline scheduling, configure **Output location → Daily notes: Day planner
 ```
 
 Run **Preview weekly schedule**, inspect the result, then select **Apply schedule**. Ordinary tasks without explicit IDs and estimates are left alone.
+
+A start-only request such as **“Exercise tomorrow at 19:00”** reserves **19:00–19:30** by default. Change **Default event duration (minutes)** in plugin settings. The answer reports that assumption; an explicit duration takes precedence. Handwritten start-only daily rows and habit templates use the same setting. Conflicts or cross-midnight ranges require a correction. See [usage](docs/usage.md#events-with-only-a-start-time).
 
 ## Examples
 

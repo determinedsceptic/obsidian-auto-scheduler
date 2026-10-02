@@ -1,0 +1,21 @@
+
+> obsidian-auto-scheduler@0.6.0 smoke
+> npm run build && node scripts/smoke.mjs
+
+
+> obsidian-auto-scheduler@0.6.0 build
+> node esbuild.config.mjs
+
+
+  main.js  133.2kb
+
+⚡ Done in 7ms
+PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo
+PASS: real bundle AI direct apply without modal, persistent task restart/undo, no durable API token
+PASS: BYOK legacy migration preserves AI tasks/undo, provider/model routing, session credential isolation, removal, no serialized tokens
+PASS: provider save failure restores prior credential and leaves model configuration unchanged
+PASS: chat direct scheduling, exact cross-day times/links, partial capacity, no invented model times, no link metadata sent, navigation failure, invalid inputs, partial write recovery
+PASS: habit template command opens note, never overwrites, and generates seven fixed occurrences without tasks or LLM
+PASS: actual bundle clean habit output, restart deduplication, and undo without changing template
+PASS: actual chat habit tool uses configured path, writes recurring template and dates, copies messages, and undo restores both after restart
+PASS: actual chat start-only fixed events, configurable default, clean note, navigation, no preview modal and restart undo

@@ -7,6 +7,8 @@
 - DeepSeek provider preset with current model choices and the official Chat Completions endpoint.
 - Model selector in the assistant sidebar and an initial model choice in provider configuration.
 - OpenAI preset offers both `gpt-6-luna` and `gpt-6-sol` under one provider key.
+- Exact one-off event tool and configurable default duration for start-only events and habits, with reported assumptions, conflict protection and persistent undo.
+- Start-only handwritten daily, fixed-event and habit rows reserve time without source edits.
 - MIT license, contributor/security guidance, release checks, workflow templates, and community-submission preparation.
 - Reproducible examples and screenshots captured in a separate Obsidian vault with a localhost fixture.
 - Gantt output uses Dataview priority fields to avoid mixed-format detection in the upstream parser.

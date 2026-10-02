@@ -85,8 +85,9 @@ export class ChatView extends ItemView {
       });
       if (this.closed) return;
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
-      if (reply.tasks.length || reply.habits.length) {
-        const result = reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
+      if (reply.tasks.length || reply.habits.length || reply.events.length) {
+        const result = reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
+        if (reply.defaultsUsed.length) result.text += `\nDefault duration (${settings.defaultEventDuration} min) used for: ${reply.defaultsUsed.join(', ')}.`;
         if (!this.closed) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
         if (!this.closed && result.notes.length) {
           try { await this.plugin.openScheduledNote(result.notes[0].path); }

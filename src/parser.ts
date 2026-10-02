@@ -1,5 +1,5 @@
 import { calendarDate, calendarPriority, normalizeMetadata } from './calendar-format';
-import { GRID, localMinute, parseBoundary } from './time';
+import { GRID, localMinute, parseBoundary, endAfter } from './time';
 import type { Diagnostic, Interval, Task } from './types';
 export interface Source { path: string; content: string }
 /** Ignore fenced examples, including fences nested under list indentation. */
@@ -61,14 +61,14 @@ export function parseTasks(sources: Source[]): { tasks: Task[]; errors: Diagnost
   }
   return { tasks, errors };
 }
-export function parseFixed(source: Source): { intervals: Interval[]; errors: Diagnostic[] } {
+export function parseFixed(source: Source, defaultDuration = 30): { intervals: Interval[]; errors: Diagnostic[] } {
   const intervals: Interval[] = [], errors: Diagnostic[] = [];
   for (const { text, line } of visibleLines(source.content)) {
     if (!text.trim() || /^\s*#/.test(text)) continue;
     try {
-      const match = /^\s*[-*+] (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})(?:\s+.*)?$/.exec(text);
-      if (!match) throw new Error('Fixed-event format: - YYYY-MM-DD HH:mm-HH:mm Title');
-      const start = localMinute(match[1], match[2]), end = localMinute(match[1], match[3]);
+      const match = /^\s*[-*+] (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})(?:\s*-\s*(\d{2}:\d{2}))?(?:\s+[^-\s].*)?$/.exec(text);
+      if (!match) throw new Error('Fixed-event format: - YYYY-MM-DD HH:mm[-HH:mm] Title');
+      const start = localMinute(match[1], match[2]), end = localMinute(match[1], match[3] ?? endAfter(match[2], defaultDuration));
       if (end <= start) throw new Error('Fixed events must end after they start');
       intervals.push({ start, end });
     } catch (error) { errors.push({ path: source.path, line, message: (error as Error).message }); }

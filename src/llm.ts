@@ -1,10 +1,12 @@
+import { eventTool, validateEvents } from './event-tool';
+import type { EventDraft } from './event-tool';
 import { habitInstructions, habitTool, validateHabitDrafts } from './habit-tool';
 import type { HabitDraft } from './habit-tool';
 import type { LlmSettings, Settings, Task } from './types';
 import { dateKey, parseBoundary, safeVaultPath } from './time';
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 export interface TaskDraft { title: string; minutes: number; priority: number; split: boolean; minMinutes: number; due: string | null; earliest: string | null }
-export interface LlmReply { text: string; tasks: TaskDraft[]; habits: HabitDraft[] }
+export interface LlmReply { text: string; tasks: TaskDraft[]; habits: HabitDraft[]; events: EventDraft[]; defaultsUsed: string[] }
 export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<{ status: number; json: unknown }>;
 const properties = {
   title: { type: 'string', description: 'Single-line task name without Markdown or management fields' },
@@ -77,9 +79,9 @@ export async function chat(config: LlmSettings, token: string, messages: ChatMes
   if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('Configure an API key in the sidebar');
   if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('Conversation too long. Clear the chat and try again.');
   const system = `You are an Obsidian scheduling assistant. Local date and time: ${dateKey(now)} ${now.toTimeString().slice(0, 5)}. Working days: ${settings.weekdays.join(',')} (0 is Sunday); hours: ${settings.periods.join(',')}; daily capacity: ${settings.dailyCapacity} minutes.
-Use create_tasks for explicitly requested one-off tasks and create_habits for fixed-time recurring habits. Reply in the user's language; use English by default. Ask for missing durations, unclear intent, or times that do not fit the 15-minute grid. Do not invent constraints. Important means priority 4; normal means 3. Unspecified dates are null. Tasks are splittable by default, with 30-minute minimum blocks (15 for shorter tasks). Unnamed courses can be Course 1 and Course 2. Do not create anything unless the user asks. Do not promise a time or claim files have been written: the host validates, schedules, and reports actual results. You cannot delete or modify existing tasks or choose output paths. The local scheduler chooses ordinary task times; habits use the user's confirmed fixed times, including outside working hours.
+Use create_tasks for flexible tasks, create_events for one-off events with an exact start, and create_habits for fixed-time recurring habits. For an exact start with no duration/end, use null minutes in create_events or null end in create_habits; the host applies ${settings.defaultEventDuration} minutes and reports this assumption. Resolve today/tomorrow relative to the supplied local date; ask when the event date is ambiguous. Never turn an exact event start into a flexible earliest-start constraint. Reply in the user's language; use English by default. Ask for missing durations only when no exact start is supplied, unclear intent, or times that do not fit the 15-minute grid. Do not invent constraints. Important means priority 4; normal means 3. Unspecified dates are null. Tasks are splittable by default, with 30-minute minimum blocks (15 for shorter tasks). Unnamed courses can be Course 1 and Course 2. Do not create anything unless the user asks. Do not promise a time or claim files have been written: the host validates, schedules, and reports actual results. You cannot delete or modify existing tasks or choose output paths. The local scheduler chooses ordinary task times; habits use the user's confirmed fixed times, including outside working hours.
 ${habitInstructions(settings)}`;
-  const tools = [taskTool, habitTool];
+  const tools = [taskTool, habitTool, eventTool];
   const body = config.protocol === 'responses' ? { model: config.model, instructions: system, input: messages, tools: tools.map(tool => ({ type: 'function', ...tool })), parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
     : config.protocol === 'anthropic' ? { model: config.model, system, messages, max_tokens: 4096,
       tools: tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) }
@@ -124,11 +126,12 @@ ${habitInstructions(settings)}`;
       for (const call of message.tool_calls) calls.push(object(call.function) as { name: string; arguments: string });
     }
   }
-  if (calls.length > 1 || calls.some(c => !['create_tasks', 'create_habits'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('The model requested an unsupported tool call');
-  let tasks: TaskDraft[] = []; let habits: HabitDraft[] = [];
-  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('Invalid tool argument JSON'); } if (calls[0].name === 'create_habits') habits = validateHabitDrafts(args); else tasks = validateDrafts(args); }
+  if (calls.length > 1 || calls.some(c => !['create_tasks', 'create_habits', 'create_events'].includes(c.name) || typeof c.arguments !== 'string')) throw new Error('The model requested an unsupported tool call');
+  let tasks: TaskDraft[] = []; let habits: HabitDraft[] = []; let events: EventDraft[] = []; const defaultsUsed: string[] = [];
+  if (calls.length) { let args: unknown; try { args = JSON.parse(calls[0].arguments); } catch { throw new Error('Invalid tool argument JSON'); } if (calls[0].name === 'create_events') events = validateEvents(args);
+    else if (calls[0].name === 'create_habits') { habits = validateHabitDrafts(args, settings.defaultEventDuration); const raw = args as { habits: {end:unknown}[] }; raw.habits.forEach((h,i) => { if (h.end === null) defaultsUsed.push(habits[i].title); }); } else tasks = validateDrafts(args); }
   const text = texts.join('\n').trim();
   if (text.length > 12000) throw new Error('Model reply too long. Retry with fewer tasks.');
-  if (!text && !tasks.length && !habits.length) throw new Error('The model returned no reply or action');
-  return { text: text || 'Parameters received; the local scheduler will choose actual times.', tasks, habits };
+  if (!text && !tasks.length && !habits.length && !events.length) throw new Error('The model returned no reply or action');
+  return { text: text || 'Parameters received; the local scheduler will choose actual times.', tasks, habits, events, defaultsUsed };
 }

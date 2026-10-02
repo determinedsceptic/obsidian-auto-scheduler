@@ -1,4 +1,6 @@
 import { appendHabits, habitPath } from './habit-tool';
+import { resolveEvents } from './event-tool';
+import type { EventDraft } from './event-tool';
 import type { HabitDraft } from './habit-tool';
 import { parseHabits, HABIT_TEMPLATE } from './habits';
 import { Credentials } from './credentials';
@@ -201,9 +203,9 @@ export default class AutoScheduler extends Plugin {
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const path = habitPath(settings), before = await this.vaultPort.read(path);
-      const after = appendHabits(before, drafts);
-      const previous = new Set(parseHabits([{ path, content: before ?? '' }]).habits.map(h => h.id));
-      const created = new Set(parseHabits([{ path, content: after }]).habits.filter(h => !previous.has(h.id)).map(h => h.id));
+      const after = appendHabits(before, drafts, settings.defaultEventDuration);
+      const previous = new Set(parseHabits([{ path, content: before ?? '' }], settings.defaultEventDuration).habits.map(h => h.id));
+      const created = new Set(parseHabits([{ path, content: after }], settings.defaultEventDuration).habits.filter(h => !previous.has(h.id)).map(h => h.id));
       const now = new Date();
       const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], { [path]: after });
       if (preview.snapshot[path] !== before) throw new Error('Habits template changed. Send your message again.');
@@ -228,6 +230,37 @@ export default class AutoScheduler extends Plugin {
         return { text: lines.join('\n'), notes };
       } catch (error) {
         if (backupSaved) throw new Error(`Habit creation did not finish; some files may have been written. Run Undo last schedule. ${(error as Error).message}`);
+        throw error;
+      }
+    });
+  }
+
+  async scheduleEvents(drafts: EventDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
+    return this.operations.run(async () => {
+      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+        outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      const now = new Date(), events = resolveEvents(drafts, settings, now);
+      const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], {}, events);
+      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
+      let backupSaved = false;
+      const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+        saveUndo: async (undo, tracking, aiTasks) => {
+          const next = { ...this.state, settings, undo, tracking: tracking ?? this.state.tracking, aiTasks: aiTasks ?? this.state.aiTasks };
+          await this.saveData(next); this.state = next; backupSaved = true;
+        } };
+      try {
+        const applied = await applyPreview(this.vaultPort, storage, preview, settings, new Date());
+        const lines = ['Fixed events saved to daily notes:'];
+        for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}`);
+        if (preview.diff.removed.length) lines.push('Existing flexible work was replanned around these events.');
+        if (preview.result.unscheduled.length) lines.push('Some ordinary tasks could not fit. Adjust capacity and replan later.');
+        if (applied.warning) lines.push(applied.warning);
+        lines.push('Run Undo last schedule to restore the previous notes.');
+        const notes = [...new Set(events.map(e => e.date))].sort().map(date => ({ date, path: `${settings.dailyFolder}/${date}.md` }));
+        return { text: lines.join('\n'), notes };
+      } catch (error) {
+        if (backupSaved) throw new Error(`Event creation did not finish; a recovery backup is saved. Inspect the notes and run Undo last schedule. ${(error as Error).message}`);
         throw error;
       }
     });
@@ -362,6 +395,7 @@ class SchedulerSettings extends PluginSettingTab {
       ['dailyCapacity', 'Daily capacity (minutes)', 'Includes events, time blocks, and buffers within working hours'],
       ['fixedBuffer', 'Buffer around fixed events', 'Minutes, in multiples of 15; 0 is allowed'],
       ['blockBuffer', 'Buffer after time blocks', 'Minutes, in multiples of 15; 0 is allowed'],
+      ['defaultEventDuration', 'Default event duration (minutes)', 'For events or habits with only a start time; 15–1440 minutes in multiples of 15'],
     ] as const) text(name, description, String(settings[field]), value => ({ [field]: value ? Number(value) : NaN }));
     new Setting(containerEl).setName('Output format').setDesc('Gantt uses full start/scheduled/due dates. Choose Day Planner or Gantt for daily notes.').addDropdown(input => input.addOption('plain', 'Plain Markdown list').addOption('day-planner', 'Day Planner').addOption('gantt', 'Gantt Calendar（Dataview）').setValue(settings.outputMode).onChange(value => { void this.plugin.updateSettings({ outputMode: value as Settings['outputMode'] }); }));
     containerEl.createEl('p', { text: 'Metadata mode requires complete as-block fields; use locked=true to preserve a position. Clean lists keep tracking in plugin data. Preview again after changing settings.' });

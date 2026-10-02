@@ -259,3 +259,22 @@ const habitSaved = new AutoScheduler(app); await habitSaved.onload();
 habitSaved.commands.find(c => c.id === 'undo-last').callback(); await habitSaved.operations.tail;
 assert.equal(files.get('Templates/Habits/AI-Habits.md'), ''); assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
 console.log('PASS: actual chat habit tool uses configured path, writes recurring template and dates, copies messages, and undo restores both after restart');
+
+// Start-only exact events use a host default, open the note and share persistent undo.
+saved = null; files.clear(); folders.clear();
+const eventChat = new AutoScheduler(app); await eventChat.onload();
+await eventChat.saveProvider({ id: 'event-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
+await eventChat.updateSettings({ defaultEventDuration: 45 });
+const eventView = eventChat.views.get('auto-scheduler-chat')({}); await eventView.onOpen();
+mockResponse = { output: [{ type: 'function_call', name: 'create_events', arguments: JSON.stringify({ events: [{ title: 'Evening exercise', date: '2026-10-01', start: '19:00', minutes: null }] }) }] };
+const eventModalBefore = latestModal;
+await eventView.send('Exercise today at 19:00');
+assert.equal(latestModal, eventModalBefore); assert.equal(saved.aiTasks.length, 0);
+assert(files.get('DailyNotes/2026-10-01.md').includes('- [ ] 19:00 - 19:45 Evening exercise'));
+assert(!files.get('DailyNotes/2026-10-01.md').includes('<!--'));
+assert(eventView.messages.at(-1).content.includes('default duration: 45 min'));
+assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
+const eventRestart = new AutoScheduler(app); await eventRestart.onload();
+eventRestart.commands.find(c => c.id === 'undo-last').callback(); await eventRestart.operations.tail;
+assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
+console.log('PASS: actual chat start-only fixed events, configurable default, clean note, navigation, no preview modal and restart undo');

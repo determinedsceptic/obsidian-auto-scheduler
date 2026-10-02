@@ -7,9 +7,10 @@ A TypeScript Obsidian plugin with an esbuild CommonJS bundle. Runtime imports on
 | `main.ts` | Lifecycle, commands, settings, native vault adapter, and serialized operations. |
 | `chat-view.ts`, `provider-modal.ts` | Sidebar conversation, copying, and BYOK setup. |
 | `providers.ts`, `credentials.ts` | Provider/model routing, discovery, isolated host Keychain or session credentials. |
-| `llm.ts` | Four transport schemas and strict task/habit tool dispatch. |
+| `llm.ts` | Four transport schemas and strict task/habit/event tool dispatch. |
 | `habit-tool.ts`, `skills/habits/SKILL.md` | Bundled model instructions, host-controlled paths, validated template creation. |
 | `parser.ts`, `calendar-format.ts` | Source estimates, event syntax, Tasks/Dataview compatibility. |
+| `event-tool.ts` | Exact one-off events, nullable duration defaults, local date/time validation. |
 | `habits.ts` | Readable recurring templates, stable occurrence identity, fixed-time expansion. |
 | `time.ts`, `scheduler.ts` | Local-time/grid constraints and deterministic capacity-aware scheduling. |
 | `daily.ts`, `output.ts`, `tracking.ts` | Daily sections, rendering, diffs, and clean-list tracking. |
@@ -28,7 +29,7 @@ flowchart LR
   H --> I[Saved times and daily-note links]
 ```
 
-Manual scheduling inserts a preview before snapshot verification; AI creation applies directly after validation. Habit creation stages the new template in memory and schedules from that staged content. The template is written alongside daily notes only after the original source snapshot is checked. Recovery covers both.
+Manual scheduling inserts a preview before snapshot verification; AI creation applies directly after validation. Habit creation stages the new template in memory and schedules from that staged content. The template is written alongside daily notes only after the original source snapshot is checked. Recovery covers both. One-off events are staged as plain fixed rows in the Day planner section; flexible work is scheduled around them in the same validated operation. Start-only durations are resolved by the host and reported in chat.
 
 The host has no multi-file transaction API. A partial write is visible and recoverable, rather than described as fully atomic. Clean daily output stores annotated representations in plugin data; matching allows completion-checkbox changes but refuses ambiguous title/time edits.
 

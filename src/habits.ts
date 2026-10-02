@@ -1,7 +1,7 @@
 import { calendarPriority } from './calendar-format';
 import { fields, idField, visibleLines } from './parser';
 import type { Source } from './parser';
-import { addDays, clockMinutes, dayDate, GRID, localMinute } from './time';
+import { addDays, clockMinutes, dayDate, GRID, localMinute, endAfter } from './time';
 import type { Block, Diagnostic, Task } from './types';
 
 export const HABIT_PREFIX = 'habit_';
@@ -16,6 +16,7 @@ Add time-based list items outside code fences to enable habits. Without a recurr
 Use (every day), (weekdays), (weekends), or a list such as (Mon, Wed, Fri).
 Priority symbols: 🔺 highest, ⏫ high, 🔼 normal, 🔽 low, ⏬ lowest. Omit for normal priority.
 Times must be within one day on a 15-minute grid. Habits reserve time before ordinary tasks.
+Start-only rows use the configured Default event duration (30 minutes initially).
 
 Examples below are inactive. Copy a line outside this code fence to enable it:
 
@@ -38,7 +39,7 @@ function plainId(path: string, title: string): string {
   for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
   return `template_${(hash >>> 0).toString(16)}`;
 }
-export function parseHabits(sources: Source[]): { habits: Habit[]; errors: Diagnostic[] } {
+export function parseHabits(sources: Source[], defaultDuration = 30): { habits: Habit[]; errors: Diagnostic[] } {
   const habits: Habit[] = [], errors: Diagnostic[] = [], ids = new Set<string>();
   for (const source of sources) for (const { text, line } of visibleLines(source.content)) {
     const legacy = /<!--\s*habit(?:\s|-->)/.test(text);
@@ -50,8 +51,12 @@ export function parseHabits(sources: Source[]): { habits: Habit[]; errors: Diagn
         if (!match) throw new Error('Invalid legacy habit template format');
         f = fields(match[4], ['id', 'days', 'priority', 'enabled', 'from', 'until']);
       } else {
-        const plain = /^- (?:\[([ xX])\] )?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*$/.exec(text);
-        if (!plain) throw new Error('Use - HH:mm-HH:mm Title (weekdays)');
+        let plain: string[] | null = /^- (?:\[([ xX])\] )?(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2}) (.+?)\s*$/.exec(text);
+        if (!plain) {
+          const single = /^- (?:\[([ xX])\] )?(\d{2}:\d{2}) (?!-)(.+?)\s*$/.exec(text);
+          if (single) plain = [single[0], single[1], single[2], endAfter(single[2], defaultDuration), single[3]];
+        }
+        if (!plain) throw new Error('Use - HH:mm[-HH:mm] Title (weekdays)');
         let title = plain[4].trim();
         const repeat = /[（(]([^（）()]+)[）)]$/.exec(title);
         let days = weekdays['every day'];

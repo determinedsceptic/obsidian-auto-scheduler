@@ -74,6 +74,7 @@ export function safeVaultPath(value: unknown): value is string {
 }
 export function validateSettings(settings: Settings): string[] {
   const errors: string[] = [];
+  if (!Number.isInteger(settings.defaultEventDuration) || settings.defaultEventDuration < 15 || settings.defaultEventDuration > 1440 || settings.defaultEventDuration % GRID) errors.push('Default event duration must be 15–1440 minutes in multiples of 15');
   for (const field of ['taskFolder', 'habitFolder', 'fixedFile', 'outputFile'] as const) {
     const value = settings[field];
     if (!safeVaultPath(value)) {
@@ -114,4 +115,11 @@ export function assertStableWeek(startKey: string): void {
       if (check.getTimezoneOffset() !== first) throw new Error('This week has a time-zone or DST transition, which is not supported yet');
     }
   }
+}
+
+/** Same-day end time; never silently truncate a default duration at midnight. */
+export function endAfter(start: string, duration: number): string {
+  const minute = clockMinutes(start) + duration;
+  if (!Number.isInteger(duration) || duration < 15 || duration > 1440 || duration % GRID || minute > 1440) throw new Error("Duration must use the 15-minute grid and end within the same day; specify a shorter duration");
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
 }
