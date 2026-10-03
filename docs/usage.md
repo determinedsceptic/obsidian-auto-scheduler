@@ -20,9 +20,9 @@ To use DeepSeek in AI chat, open **Settings → Community plugins → Auto Sched
 | Daily capacity | 360 minutes | Occupied time and buffers inside working hours. |
 | Default duration | 30 minutes | Used when a task, event or habit has no explicit duration; 15–1440 minutes, in multiples of 15. |
 | Event buffer | 15 minutes | Before and after fixed events. |
-| Block buffer | 15 minutes | After each task or habitual block. |
+| Block buffer | 15 minutes | After tasks and habits when reserving flexible work; adjacent habits may follow each other directly. |
 
-Habits are fixed blocks; events and their buffers cannot overlap them. Habits outside work windows remain visible without consuming work-window capacity.
+Habits are fixed blocks with minute precision; events and their buffers cannot overlap them. Habit titles may contain ordinary parentheses. Adjacent habits can form a confirmed sequence, while actual overlaps are rejected. Habits outside work windows remain visible without consuming work-window capacity.
 
 ## Automatic model discovery
 

@@ -5,8 +5,8 @@ import { safeVaultPath, endAfter } from './time';
 import type { Settings } from './types';
 export interface HabitDraft { title: string; start: string; end: string; days: number[]; priority: number }
 const properties = {
-  title: { type: 'string', description: 'Habit name explicitly requested by the user; plain text on one line' },
-  start: { type: 'string', description: 'User-specified local start time in HH:mm, on a 15-minute grid' },
+  title: { type: 'string', description: 'Habit name explicitly requested by the user; plain text on one line; parentheses are allowed; no Markdown links, HTML, or priority symbols' },
+  start: { type: 'string', description: 'Confirmed local start time in HH:mm, minute precision; preserve meal end + rest offsets' },
   end: { type: ['string', 'null'], description: 'Null if duration is unspecified; otherwise same-day end time in HH:mm; 24:00 is allowed' },
   days: { type: 'array', items: { type: 'integer', enum: [0, 1, 2, 3, 4, 5, 6] }, description: 'Weekdays: 0 is Sunday; every day means 0–6' },
   priority: { type: 'integer', enum: [1, 2, 3, 4, 5] },
@@ -27,7 +27,7 @@ export function validateHabitDrafts(value: unknown, defaultDuration = 30): Habit
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 5 || Object.keys(input).some(k => !(k in properties))) throw new Error('Invalid habit fields');
     const original = input as HabitDraft;
     const h = { ...original, end: original.end === null ? endAfter(original.start, defaultDuration) : original.end };
-    if (typeof h.title !== 'string' || !h.title.trim() || h.title.length > 200 || /[\r\n\x00-\x1f<>\[\]%（）()🔺⏫🔼🔽⏬]/u.test(h.title)) throw new Error('Habit titles must be plain text on one line');
+    if (typeof h.title !== 'string' || !h.title.trim() || h.title.length > 200 || /[\r\n\x00-\x1f<>\[\]%🔺⏫🔼🔽⏬]/u.test(h.title)) throw new Error('Habit titles must be plain text on one line; parentheses are allowed; no Markdown links, HTML, or priority symbols');
     if (typeof h.start !== 'string' || typeof h.end !== 'string' || !Array.isArray(h.days) || !h.days.length || h.days.some(d => !Number.isInteger(d) || d < 0 || d > 6) || new Set(h.days).size !== h.days.length || !Number.isInteger(h.priority) || h.priority < 1 || h.priority > 5) throw new Error('Invalid habit time, weekdays, or priority');
     const parsed = parseHabits([{ path: 'Habits/AI-Habits.md', content: habitLine(h) }]);
     if (parsed.errors.length) throw new Error(parsed.errors[0].message);

@@ -1,7 +1,7 @@
 import { calendarPriority } from './calendar-format';
 import { fields, idField, visibleLines } from './parser';
 import type { Source } from './parser';
-import { addDays, clockMinutes, dayDate, GRID, localMinute, endAfter } from './time';
+import { addDays, clockMinutes, dayDate, localMinute, endAfter } from './time';
 import type { Block, Diagnostic, Task } from './types';
 
 export const HABIT_PREFIX = 'habit_';
@@ -15,7 +15,7 @@ export const HABIT_TEMPLATE = `# Habits
 Add time-based list items outside code fences to enable habits. Without a recurrence suffix, a habit repeats every day.
 Use (every day), (weekdays), (weekends), or a list such as (Mon, Wed, Fri).
 Priority symbols: 🔺 highest, ⏫ high, 🔼 normal, 🔽 low, ⏬ lowest. Omit for normal priority.
-Times must be within one day on a 15-minute grid. Habits reserve time before ordinary tasks.
+Times must increase within one day; exact minutes such as 12:40 are supported. Habits reserve time before ordinary tasks.
 Start-only rows use the configured Default duration (30 minutes initially).
 
 Examples below are inactive. Copy a line outside this code fence to enable it:
@@ -76,7 +76,7 @@ export function parseHabits(sources: Source[], defaultDuration = 30): { habits: 
       const id = idField(f.id);
       if (ids.has(id)) throw new Error(`Duplicate habit ID: ${id}`);
       const start = clockMinutes(match[1]), end = clockMinutes(match[2], true);
-      if (end <= start || start % GRID || end % GRID) throw new Error('Habit times must increase within one day on a 15-minute grid');
+      if (end <= start) throw new Error('Habit times must increase within one day');
       if (!f.days || !/^[0-6](?:,[0-6])*$/.test(f.days)) throw new Error('days must be comma-separated values 0–6');
       const days = f.days.split(',').map(Number);
       if (new Set(days).size !== days.length) throw new Error('days cannot contain duplicates');

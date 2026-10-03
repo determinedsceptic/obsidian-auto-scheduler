@@ -116,7 +116,7 @@ Read [privacy and recovery](docs/privacy.md) before using AI with private text.
 ## Scheduling rules and limits
 
 - The plan covers the current local day plus six days. New ordinary work starts in the future; habits record their confirmed fixed time, including an elapsed time today.
-- All durations and endpoints use a **15-minute grid**. Habits must fit within one day; an end at `24:00` is supported.
+- Flexible tasks, working hours and one-off events use a **15-minute grid**. Recurring habits support exact minutes (for example, 12:40 after a 10-minute rest), ordinary parentheses in titles, and adjacent activity sequences. Habits must fit within one day; an end at `24:00` is supported.
 - Ordinary tasks are allocated by priority, then deadline, earliest start, and stable ID. The greedy schedule is deterministic, not globally optimal; some work may remain unscheduled.
 - Events and habits reserve time before ordinary work. Buffers count toward capacity within working hours. Habit conflicts reject the write rather than move a fixed activity.
 - No monthly/yearly habits, overnight intervals, external calendar sync, ICS import, or background monitoring of other plugins' newly created notes.

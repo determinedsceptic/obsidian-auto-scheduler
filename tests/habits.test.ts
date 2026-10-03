@@ -36,7 +36,7 @@ describe('周期习惯模板', () => {
     row('id=x days=7'), row('id=x days=1,1'), row('id=x days=1 priority=6'),
     row('id=x days=1 enabled=yes'), row('id=x days=1 from=2026-02-30'),
     row('id=x days=1 from=2026-10-03 until=2026-10-01'), row('id=x days=1 unknown=1'),
-    row('id=x days=1', '09:01-09:30'), row('id=x days=1', '23:00-01:00'),
+    row('id=x days=1', '25:01-09:30'), row('id=x days=1', '23:00-01:00'),
     row() + '\n' + row(), row().replace('锻炼', '[[链接]]'),
   ])('非法模板报错：%s', content => expect(parse(content).errors.length).toBeGreaterThan(0));
   it('无普通任务也创建每天计划，纯列表无标记，并重复生成不重复写', async () => {
@@ -60,12 +60,12 @@ describe('周期习惯模板', () => {
     expect(p.result.errors).toEqual([]); expect(p.result.blocks).toHaveLength(7);
     expect(p.result.days.every(d => d.occupied === 0)).toBe(true);
   });
-  it('固定日程或习惯缓冲冲突阻止整批写入', async () => {
+  it('固定日程或习惯重叠冲突阻止整批写入', async () => {
     const v = new MemoryVault(); v.files['Habits/Template.md'] = row();
     v.files['Scheduler/Fixed.md'] = '- 2026-10-01 09:15-10:00 会议';
     let p = await preview(v); expect(p.result.errors.some(e => e.message.toLowerCase().includes('conflict'))).toBe(true);
     await expect(applyPreview(v, v, p, settings, now)).rejects.toThrow('errors'); expect(v.writes).toBe(0);
-    delete v.files['Scheduler/Fixed.md']; v.files['Habits/Template.md'] += '\n' + row('id=other days=4', '09:30-10:00');
+    delete v.files['Scheduler/Fixed.md']; v.files['Habits/Template.md'] += '\n' + row('id=other days=4', '09:20-10:00');
     p = await createPreview(v, { ...settings, blockBuffer: 15 }, now);
     expect(p.result.errors.some(e => e.message.toLowerCase().includes('conflict'))).toBe(true);
   });

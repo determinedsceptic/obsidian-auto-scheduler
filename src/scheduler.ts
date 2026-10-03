@@ -1,3 +1,4 @@
+import { isHabit } from './habits';
 import { addDays, assertStableWeek, atDate, dateKey, epochMinute, gaps, GRID, localMinute, merge, overlap, clipped, total, validateSettings, workWindows } from './time';
 import type { Block, Diagnostic, Interval, ScheduleResult, Settings, Task } from './types';
 const compareText = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
@@ -15,7 +16,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
   for (const block of protectedBlocks) {
     const fail = (message: string): void => { errors.push({ path: settings.outputFile, line: 0, message: `Block ${block.id}: ${message}` }); };
     if (!taskMap.has(block.taskId)) fail('References an unknown task ID');
-    if (block.start % GRID || block.end % GRID) fail('Locked blocks must use the 15-minute grid');
+    if (!isHabit(block.taskId) && (block.start % GRID || block.end % GRID)) fail('Locked blocks must use the 15-minute grid');
     if (bufferedFixed.some(i => overlap(block, i))) fail('Conflicts with a fixed event or its buffer');
     const task = taskMap.get(block.taskId);
     if (task && !task.completed && !block.completed && ((task.earliest !== undefined && block.start < task.earliest) || (task.due !== undefined && block.end > task.due))) fail('Violates the task earliest/due constraints');
@@ -23,7 +24,9 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
   }
   for (let i = 0; i < protectedBlocks.length; i++) for (let j = i + 1; j < protectedBlocks.length; j++) {
     const a = protectedBlocks[i], b = protectedBlocks[j];
-    if (overlap({ start: a.start, end: a.end + settings.blockBuffer }, { start: b.start, end: b.end + settings.blockBuffer })) errors.push({ path: settings.outputFile, line: 0, message: `Locked block or buffer conflict: ${a.id} / ${b.id}` });
+    // Adjacent recurring activities can form a confirmed sequence (rest → walk → strength).
+    const buffer = isHabit(a.taskId) && isHabit(b.taskId) ? 0 : settings.blockBuffer;
+    if (overlap({ start: a.start, end: a.end + buffer }, { start: b.start, end: b.end + buffer })) errors.push({ path: settings.outputFile, line: 0, message: `Locked block or buffer conflict: ${a.id} / ${b.id}` });
   }
   for (const task of tasks) {
     const minutes = lockedMinutes.get(task.id) ?? 0;
