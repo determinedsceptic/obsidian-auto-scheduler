@@ -1,3 +1,4 @@
+import { deadlineLabel } from './calendar-format';
 import type { Preview } from './transaction';
 import { clock } from './time';
 import { endClock } from './output';
@@ -12,7 +13,7 @@ export function describeAiSchedule(preview: Preview, warning?: string): AiSchedu
   const blocks = preview.result.blocks.filter(b => created.has(b.taskId)).sort((a, b) => a.start - b.start || a.taskId.localeCompare(b.taskId));
   const notes: ScheduledNote[] = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${preview.settings.dailyFolder}/${date}.md` }));
   const lines = ['Saved to daily notes:'];
-  for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}: ${block.title} (priority ${block.priority ?? 3}/5)`);
+  for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}: ${block.title} (priority ${block.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===block.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===block.taskId)!.due!)}`}`);
   const pending = preview.result.unscheduled.filter(t => created.has(t.taskId));
   if (pending.length) {
     lines.push('', 'Not yet scheduled (saved for a later replan):');

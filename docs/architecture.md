@@ -12,6 +12,7 @@ A TypeScript Obsidian plugin with an esbuild CommonJS bundle. Runtime imports on
 | `parser.ts`, `calendar-format.ts` | Source estimates, event syntax, Tasks/Dataview compatibility. |
 | `daily-edit.ts` | Bounded daily-plan summaries, read references, staged task revisions and carry-over. |
 | `event-tool.ts` | Exact one-off events, nullable duration defaults, local date/time validation. |
+| `habit-guidelines.ts` | Bounded natural-language habit context, validated template rules and daily-note inclusion. |
 | `habits.ts` | Readable recurring templates, stable occurrence identity, fixed-time expansion. |
 | `time.ts`, `scheduler.ts` | Local-time/grid constraints and deterministic capacity-aware scheduling. |
 | `daily.ts`, `output.ts`, `tracking.ts` | Daily sections, rendering, diffs, and clean-list tracking. |
@@ -36,4 +37,6 @@ The host has no multi-file transaction API. A partial write is visible and recov
 
 Tests cover pure logic and transaction boundaries; `scripts/smoke.mjs` loads the actual built bundle into an isolated host simulation. Screenshots exercise a real Obsidian vault and deterministic localhost provider. No upstream calendar source is bundled.
 
-AI revision adds a read-tool round trip before host validation. Only Day planner checkbox summaries leave the vault. A per-send snapshot retains source bytes, tracking and AI task state locally. Revision accepts only unfinished editable references from that read, stages row removal and persistent task changes, and checks the source again. Original AI IDs and completed history survive carry-over; original snapshots and tracking remain available for restart undo. The transaction renders past source notes as well as the active seven-day destinations.
+AI revision adds a read-tool round trip before host validation. Only Day planner checkbox summaries and the explicitly named habit guidelines section leave the vault during a daily read. A per-send snapshot retains source bytes, tracking and AI task state locally. Revision accepts only unfinished editable references from that read, stages row removal and persistent task changes, and checks the source again. Original AI IDs and completed history survive carry-over; original snapshots and tracking remain available for restart undo. The transaction renders past source notes as well as the active seven-day destinations.
+
+Task deadlines remain independent of scheduled block ends. Clean output uses a map of task deadlines to add visible Tasks date fields; provider reads expose deadline labels. Before-write tracking preserves the prior display instead of rebuilding it with new formatting assumptions, allowing undo across deadline-renderer changes. Natural-language habit guidelines are template data; they never create time reservations until anchors are confirmed. Recognized habit context is explicitly disclosed as provider-visible input.

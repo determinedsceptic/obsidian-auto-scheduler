@@ -1,0 +1,23 @@
+
+> obsidian-auto-scheduler@0.6.0 smoke
+> npm run build && node scripts/smoke.mjs
+
+
+> obsidian-auto-scheduler@0.6.0 build
+> node esbuild.config.mjs
+
+PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo
+PASS: real bundle AI direct apply without modal, persistent task restart/undo, no durable API token
+PASS: BYOK legacy migration preserves AI tasks/undo, provider/model routing, session credential isolation, removal, no serialized tokens
+PASS: provider save failure restores prior credential and leaves model configuration unchanged
+PASS: chat direct scheduling, exact cross-day times/links, partial capacity, no invented model times, no link metadata sent, navigation failure, invalid inputs, partial write recovery
+PASS: habit template command opens note, never overwrites, and generates seven fixed occurrences without tasks or LLM
+PASS: actual bundle clean habit output, restart deduplication, and undo without changing template
+PASS: actual chat habit tool uses configured path, writes recurring template and dates, copies messages, and undo restores both after restart
+PASS: actual chat start-only fixed events, configurable default, clean note, navigation, no preview modal and restart undo
+PASS: flexible-task default reported, discovered-model dropdown save, collapsed manual fallback, legacy provider preset selection
+PASS: mixed plan preserves exact gym time, defaults phone task/habit durations and event date, writes all kinds together and undoes after restart
+PASS: automatic GET catalog discovery, persistence of 127 choices, selecting beyond 100, sidebar refresh and failure preserves cached list/model
+PASS: queued sidebar opening releases the operation before automatic catalog persistence
+PASS: actual chat read/edit loop, section privacy, carry-over, default duration, deadline display, natural habit inheritance, destination navigation and restart undo
+PASS: guideline-only host action commits without fabricated blocks and supports restart undo

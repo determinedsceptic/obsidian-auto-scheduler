@@ -1,4 +1,4 @@
-import { parseBoundary } from './time';
+import { parseBoundary, atDate, dateKey, clock } from './time';
 /** Independent reader for the public Tasks/Dataview Markdown schema. */
 export function calendarDate(body: string, field: 'due' | 'start' | 'scheduled'): number | undefined {
   const symbol = { due: '📅', start: '🛫', scheduled: '⏳' }[field];
@@ -24,4 +24,9 @@ export function calendarPriority(body: string): number {
 }
 export function normalizeMetadata(text: string, key: 'as' | 'as-block'): string {
   return text.replace(new RegExp(`%%\\[${key}::\\s*([^\\]]+)\\]%%`, 'g'), `<!-- ${key} $1 -->`);
+}
+
+/** Date-only deadlines use the following midnight internally. */
+export function deadlineLabel(minute: number): string {
+  return clock(minute) === '00:00' ? dateKey(atDate(minute - 1)) : `${dateKey(atDate(minute))} ${clock(minute)}`;
 }

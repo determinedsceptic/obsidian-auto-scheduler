@@ -1,14 +1,17 @@
+import { deadlineLabel } from './calendar-format';
 import { START, END, parseOutput, prioritySymbol } from './output';
 import type { DailyTracking, Tracking, TrackingPair } from './types';
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Record only the generated span, so outside edits and original bytes survive. */
-export function cleanDaily(text: string, aiIds: Set<string> = new Set(), priorities: Map<string, number> = new Map(), format = true): { text: string; record: DailyTracking | null } {
+export function cleanDaily(text: string, aiIds: Set<string> = new Set(), priorities: Map<string, number> = new Map(), format = true, deadlines: Map<string, number> = new Map()): { text: string; record: DailyTracking | null } {
   const parsed = parseOutput(text), newline = parsed.newline;
   const annotated = text.slice(text.indexOf(START), text.indexOf(END) + END.length);
   const lines = parsed.blocks.map(b => {
     const line = (b.raw ?? '').replace(/<!-- as-block .+? -->/g, '')
       .replace(/%%\[as-block::[^\]]+\]%%/g, '').replace(/\[(?:start|scheduled|due)::[^\]]+\]/gi, '').replace(aiIds.has(b.taskId) ? / \[\[[^\]]+\]\]/g : /$^/, '');
-    return (format ? line.replace(/(\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\s+)(?:工作块：\s*)?(?:[🔺⏫🔼🔽⏬]\s*)?/u, `$1${prioritySymbol(priorities.get(b.taskId) ?? b.priority ?? 3)} `) : line).trimEnd();
+    const deadline = deadlines.get(b.taskId);
+    const suffix = format && deadline !== undefined ? ` 📅 ${deadlineLabel(deadline)}` : '';
+    return (format ? line.replace(/(\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\s+)(?:工作块：\s*)?(?:[🔺⏫🔼🔽⏬]\s*)?/u, `$1${prioritySymbol(priorities.get(b.taskId) ?? b.priority ?? 3)} `) : line).trimEnd() + suffix;
   });
   const visible = lines.join(newline);
   return { text: parsed.prefix + visible + parsed.suffix,
