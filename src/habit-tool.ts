@@ -41,7 +41,11 @@ export function habitLine(h: HabitDraft): string {
 export function appendHabits(before: string | null, drafts: HabitDraft[], defaultDuration = 30): string {
   const checked = validateHabitDrafts({ habits: drafts });
   const text = before ?? '# AI habits\n';
-  const result = text + (text.endsWith('\n') ? '\n' : '\n\n') + checked.map(habitLine).join('\n') + '\n';
+  // Insert timed list rows before guideline sections so descriptive bullets never become fixed blocks.
+  const guidelineHeading=/^#{1,6}\s+(?:Habits and guidelines|Habit guidelines|Habits and plans|习惯与计划)\s*#*\s*$/im.exec(text);
+  const offset=guidelineHeading?.index ?? text.length;
+  const prefix=text.slice(0,offset), suffix=text.slice(offset);
+  const result = prefix + (prefix.endsWith('\n') ? '\n' : '\n\n') + checked.map(habitLine).join('\n') + '\n' + (suffix ? '\n'+suffix : '');
   const parsed = parseHabits([{ path: 'Habits/AI-Habits.md', content: result }], defaultDuration);
   if (parsed.errors.length) throw new Error(parsed.errors.map(e => e.message).join('\n'));
   if (parsed.habits.length !== parseHabits([{ path: 'Habits/AI-Habits.md', content: text }], defaultDuration).habits.length + checked.length) throw new Error('An unclosed code fence at the end of the habits template would hide new habits. Close it first.');

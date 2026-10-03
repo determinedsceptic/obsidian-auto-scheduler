@@ -52,7 +52,7 @@ describe('natural-language habit guidelines',()=>{
     const tagged=[`ACTION: ${rules[0]}`,...rules.slice(1).map(x=>`RULE: ${x}`)];
     const {preview}=await previewDailyEdits(v,settings,{},[],r,[{ref:r.read.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:null}],now,'combo',tagged);
     expect(preview.result.errors).toEqual([]);await applyPreview(v,v,preview,settings,now);
-    expect(v.files[path]).toContain('> Existing original');expect(v.files['DailyNotes/2026-10-02.md']).not.toContain(rules[0]);expect(v.files['Habits/AI-Habits.md']).toContain(`ACTION: ${rules[0]}`);
+    expect(v.files[path]).toContain('> Existing original');expect(v.files['DailyNotes/2026-10-02.md']).not.toContain(rules[0]);expect(v.files['Habits/AI-Habits.md']).toContain(`- ${rules[0]}`);
     await undoLast(v,v,v.undo);expect(v.files[path]).toBe(original);expect(v.aiTasks).toEqual([]);expect(v.files['Habits/AI-Habits.md']).toBe('');
   });
   it('refuses hidden rules, injected multiline headings and oversized input',()=>{
@@ -70,4 +70,20 @@ it.each(['responses','chat-completions','anthropic','gemini'] as const)('combine
   const response=(name:string,args:unknown)=>protocol==='responses'?{status:'completed',output:[{type:'function_call',name,call_id:'read',arguments:JSON.stringify(args)}]}:protocol==='anthropic'?{stop_reason:'tool_use',content:[{type:'tool_use',id:'read',name,input:args}]}:protocol==='gemini'?{candidates:[{finishReason:'STOP',content:{role:'model',parts:[{functionCall:{name,args}}]}}]}:{choices:[{finish_reason:'tool_calls',message:{role:'assistant',tool_calls:[{id:'read',type:'function',function:{name,arguments:JSON.stringify(args)}}]}}]};
   const reply=await chat({...DEFAULT_LLM,protocol},'fixture',[{role:'user',content:'Inherit the whole plan, including habits'}],settings,now,async()=>({status:200,json:round++===0?response('read_daily_plan',{date:'2026-10-01'}):response('revise_daily_tasks',{date:'2026-10-01',guidelines:[`ACTION: ${rules[0]}`,...rules.slice(1).map(r=>`RULE: ${r}`)],edits:[{ref:'row_2',targetDate:'2026-10-02',title:null,minutes:null,priority:null}]})}),1000,async date=>({date,items:[{ref:'row_2',title:'Short task',completed:false,minutes:30,priority:3,editable:true,kind:'task',defaulted:true,deadline:'2026-10-05'}],habitContext:rules.join('\n')}));
   expect(reply.revision?.edits[0].ref).toBe('row_2');expect(reply.guidelines).toEqual([`ACTION: ${rules[0]}`,...rules.slice(1).map(r=>`RULE: ${r}`)]);expect(reply.tasks).toEqual([]);
+});
+
+it('renders grouped bullet lists, migrates legacy quotes, deduplicates and preserves surrounding notes and fenced examples',()=>{
+  const tagged=['ACTION: Walk after lunch','RULE: Water only'];
+  const before='# AI habits\n- 12:40-13:10 Walk (every day)\n\n## Habit guidelines\n> ACTION: Walk after lunch\n> RULE: Water only\nPersonal explanation\n```md\n> keep example\n```\n## Other\nKeep me\n';
+  const result=appendGuidelines(before,tagged);
+  expect(result).toContain('### Schedule actions\n- Walk after lunch');
+  expect(result).toContain('### Rules / conditions\n- Water only');
+  expect(result).not.toContain('> ACTION:');expect(result).not.toContain('> RULE:');
+  expect(result).toContain('Personal explanation');expect(result).toContain('```md\n> keep example\n```');
+  expect(result).toContain('## Other\nKeep me');expect(result).toContain('- 12:40-13:10 Walk (every day)');
+  expect(readGuidelines(result)).toEqual(tagged);expect(appendGuidelines(result,tagged)).toBe(result);
+});
+it('accepts action-only or condition-only lists',()=>{
+  expect(validateGuidelinePlan({actions:['Walk'],conditions:[]})).toEqual(['ACTION: Walk']);
+  expect(validateGuidelinePlan({actions:[],conditions:['Water']})).toEqual(['RULE: Water']);
 });

@@ -400,7 +400,8 @@ assert(files.get('DailyNotes/2026-10-01.md').includes('PRIVATE BODY MUST STAY LO
 assert.equal(saved.aiTasks.length,1); assert(saved.aiTasks[0].due);
 assert(files.get('DailyNotes/2026-10-02.md').includes('📅 2026-10-05'));
 assert(!files.get('DailyNotes/2026-10-02.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
-assert(files.get('Habits/AI-Habits.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
+assert(files.get('Habits/AI-Habits.md').includes('- Walk 30 minutes after lunch and dinner'));
+assert(!files.get('Habits/AI-Habits.md').includes('> ACTION:'));
 assert(files.get('Habits/AI-Habits.md').includes('Strength training Mon, Wed, Fri'));
 const editRestart = new AutoScheduler(app); await editRestart.onload();
 editRestart.commands.find(c=>c.id==='undo-last').callback(); await editRestart.operations.tail;

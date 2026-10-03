@@ -115,3 +115,13 @@ describe('meal-relative habit regression', () => {
     expect(result.defaultsUsed).toContain(routine[4].title);
   });
 });
+
+it('keeps timed-looking guideline bullets descriptive when adding fixed habits',()=>{
+  const before='# AI habits\n## Habit guidelines\n### Schedule actions\n- 12:30-12:40 Rest after lunch (every day)\n### Rules / conditions\n- Water only\n';
+  const updated=appendHabits(before,[draft]);
+  expect(updated.indexOf('19:00-19:30')).toBeLessThan(updated.indexOf('## Habit guidelines'));
+  return createPreview(Object.assign(new MemoryVault(),{files:{}}),settings,now,{},false,[],[],{[habitPath(settings)]:updated}).then(p=>{
+    expect(p.result.errors).toEqual([]);expect(p.result.blocks).toHaveLength(7);
+    expect(p.result.blocks.every(b=>b.title===draft.title)).toBe(true);
+  });
+});

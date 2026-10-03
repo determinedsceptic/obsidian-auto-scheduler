@@ -7,7 +7,7 @@ export const guidelineTool = { name:'save_habit_guidelines', description:'Save a
 export function validateGuidelinePlan(value: unknown): string[] {
   const args=value as {actions:string[]; conditions:string[]};
   if(!args || typeof args!=='object' || Array.isArray(args) || Object.keys(args).sort().join(',')!=='actions,conditions' || !Array.isArray(args.actions) || !Array.isArray(args.conditions) || args.actions.length+args.conditions.length<1 || args.actions.length+args.conditions.length>20) throw new Error('Save 1–20 habit actions or conditions');
-  const actions=validateGuidelines({rules:args.actions}); const conditions=validateGuidelines({rules:args.conditions});
+  const actions=args.actions.length ? validateGuidelines({rules:args.actions}) : []; const conditions=args.conditions.length ? validateGuidelines({rules:args.conditions}) : [];
   return [...actions.map(item=>`ACTION: ${item}`),...conditions.map(item=>`RULE: ${item}`)];
 }
 export function validateGuidelines(value: unknown): string[] {
@@ -27,21 +27,45 @@ export function habitContext(text: string): string {
   return result;
 }
 export function readGuidelines(text: string): string[] {
-  return habitContext(text).split(/\r?\n/).filter(l=>/^> /.test(l)).map(l=>l.slice(2).trim()).filter(Boolean);
+  let category = '';
+  return habitContext(text).split(/\r?\n/).flatMap(line => {
+    if (/^#{1,6}\s+Schedule actions\s*$/i.test(line)) { category='ACTION: '; return []; }
+    if (/^#{1,6}\s+Rules \/ conditions\s*$/i.test(line)) { category='RULE: '; return []; }
+    if (/^#{1,6}\s/.test(line)) { category=''; return []; }
+    const item=/^(?:> |[-*] )(.*)$/.exec(line)?.[1].trim();
+    if (!item) return [];
+    return [/^(ACTION|RULE): /.test(item) ? item : category+item];
+  });
 }
 export function appendGuidelines(before: string | null, rules: string[]): string {
-  const checked=validateGuidelines({rules}), text=before??'# AI habits\n', existing=readGuidelines(text);
-  const additions=checked.filter(r=>!existing.includes(r)); if(!additions.length) return text;
+  const checked=validateGuidelines({rules}), text=before??'# AI habits\n';
+  const items=[...new Set([...readGuidelines(text),...checked])];
   const newline=text.includes('\r\n')?'\r\n':'\n';
-  // Append within a dedicated section. Reject an existing differently shaped section.
   const rows=visibleLines(text), h=rows.find(r=>heading.test(r.text));
+  const level=h ? /^#+/.exec(h.text)![0].length : 2;
+  const subheading='#'.repeat(Math.min(level+1,6));
+  const actions=items.filter(r=>r.startsWith('ACTION: ')).map(r=>r.slice(8));
+  const conditions=items.filter(r=>r.startsWith('RULE: ')).map(r=>r.slice(6));
+  const other=items.filter(r=>!r.startsWith('ACTION: ')&&!r.startsWith('RULE: '));
+  const list=[...other.map(r=>`- ${r}`),
+    ...(actions.length ? [`${subheading} Schedule actions`,...actions.map(r=>`- ${r}`)] : []),
+    ...(conditions.length ? [`${subheading} Rules / conditions`,...conditions.map(r=>`- ${r}`)] : [])];
+  let result:string;
   if(h) {
-    const lines=text.split(/\r?\n/), level=/^#+/.exec(h.text)![0].length;
+    if(level===6 && (actions.length||conditions.length)) throw new Error('Habit guidelines heading must allow subheadings (levels 1–5)');
+    const lines=text.split(/\r?\n/);
     const next=rows.find(r=>r.line>h.line && new RegExp(`^#{1,${level}}\\s+`).test(r.text));
-    lines.splice(next?next.line-1:lines.length,0,...additions.map(r=>`> ${r}`));
-    const result=lines.join(newline); if(!additions.every(r=>readGuidelines(result).includes(r))) throw new Error('A code fence would hide new guidelines');return result;
+    const end=next ? next.line-1 : lines.length;
+    // Preserve unrelated prose and fenced examples while converting only recognized list/quote rows.
+    const managed=new Set(rows.filter(r=>r.line>h.line && r.line<=end && (/^(?:> |[-*] )/.test(r.text)||/^#{1,6}\s+(?:Schedule actions|Rules \/ conditions)\s*$/i.test(r.text))).map(r=>r.line-1));
+    const retained=lines.slice(h.line,end).filter((_,i)=>!managed.has(h.line+i));
+    while(retained.length && !retained[retained.length-1].trim()) retained.pop();
+    lines.splice(h.line,end-h.line,...retained,...list,'');
+    result=lines.join(newline);
+  } else {
+    result=text+(text.endsWith('\n')?newline:newline+newline)+`## Habit guidelines${newline}`+list.join(newline)+newline;
   }
-  const result=text+(text.endsWith('\n')?newline:newline+newline)+`## Habit guidelines${newline}`+additions.map(r=>`> ${r}`).join(newline)+newline;
-  if(!additions.every(r=>readGuidelines(result).includes(r))) throw new Error('A code fence would hide new guidelines');return result;
+  if(!items.every(r=>readGuidelines(result).includes(r))) throw new Error('A code fence would hide new guidelines');
+  return result;
 }
 export const guidelinePath = (settings: Settings): string => habitPath(settings);

@@ -39,9 +39,21 @@ function plainId(path: string, title: string): string {
   for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
   return `template_${(hash >>> 0).toString(16)}`;
 }
+/** Guideline bullets are descriptive data, even when an item starts with a clock time. */
+function timedHabitLines(content: string): ReturnType<typeof visibleLines> {
+  let guidelineLevel=0;
+  return visibleLines(content).filter(row=>{
+    const section=/^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(row.text);
+    if(section) {
+      if(guidelineLevel && section[1].length<=guidelineLevel) guidelineLevel=0;
+      if(/^(?:Habits and guidelines|Habit guidelines|Habits and plans|习惯与计划)$/i.test(section[2])) guidelineLevel=section[1].length;
+    }
+    return !guidelineLevel;
+  });
+}
 export function parseHabits(sources: Source[], defaultDuration = 30): { habits: Habit[]; errors: Diagnostic[] } {
   const habits: Habit[] = [], errors: Diagnostic[] = [], ids = new Set<string>();
-  for (const source of sources) for (const { text, line } of visibleLines(source.content)) {
+  for (const source of sources) for (const { text, line } of timedHabitLines(source.content)) {
     const legacy = /<!--\s*habit(?:\s|-->)/.test(text);
     if (!legacy && !/^- (?:\[[ xX]\] )?\d{2}:/.test(text)) continue;
     try {
