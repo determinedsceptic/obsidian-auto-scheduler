@@ -1,9 +1,21 @@
+import type { GuidelineDocument } from './habit-files';
 import { visibleLines } from './parser';
 import { habitPath } from './habit-tool';
 import type { Settings } from './types';
 const heading = /^#{1,6}\s+(?:Habits and guidelines|Habit guidelines|Habits and plans|\u4e60\u60ef\u4e0e\u8ba1\u5212)\s*#*\s*$/i;
 export const guidelineTool = { name:'save_habit_guidelines', description:'Save an analyzed habit plan to the configured template. Split every executable routine step into actions, and every dietary/conditional rule into conditions. Never copy a source paragraph verbatim. Preserve relative anchors, durations, ranges, recurrence and conditions. These entries stay in the template and are never copied into daily schedules. If clock times are missing, list actions in the assistant answer and ask for meal/anchor times; do not claim they are scheduled. Can accompany task carry-over.', strict:true,
-  parameters:{type:'object',properties:{actions:{type:'array',items:{type:'string',description:'One concise actionable activity or sequence, with recurrence and relative anchor preserved'}},conditions:{type:'array',items:{type:'string',description:'One dietary limit or conditional rule, not a time block'}}},required:['actions','conditions'],additionalProperties:false} };
+  parameters:{type:'object',properties:{habits:{type:'array',items:{type:'object',properties:{title:{type:'string',description:'Specific short habit/file title in the user language, e.g. Lunch walk, Dinner walk, Strength training. Separate unrelated habits into separate items; never Habits or Guidelines.'},actions:{type:'array',items:{type:'string'}},conditions:{type:'array',items:{type:'string'}}},required:['title','actions','conditions'],additionalProperties:false}}},required:['habits'],additionalProperties:false} };
+export function validateGuidelineDocuments(value:unknown):GuidelineDocument[]{
+  const args=value as {habits?:{title:string;actions:string[];conditions:string[]}[]};
+  if(!args||typeof args!=='object'||Array.isArray(args))throw Error('Invalid habit documents');
+  // Read older provider/tool fixtures during upgrade; new schemas always supply specific titles.
+  if(!('habits' in args))return validateGuidelinePlan(value).map(rule=>({title:rule.replace(/^(ACTION|RULE): /,'').split(/[。；;]/)[0].trim(),rules:[rule]}));
+  if(Object.keys(args).join(',')!=='habits'||!Array.isArray(args.habits)||!args.habits.length||args.habits.length>20)throw Error('Save 1–20 named habit documents');
+  return args.habits.map(h=>{
+    if(!h||typeof h!=='object'||Array.isArray(h)||Object.keys(h).sort().join(',')!=='actions,conditions,title'||typeof h.title!=='string'||!h.title.trim()||h.title.length>200||/[\r\n\x00-\x1f<>]/.test(h.title))throw Error('Use a specific single-line habit title');
+    return {title:h.title.trim(),rules:validateGuidelinePlan({actions:h.actions,conditions:h.conditions})};
+  });
+}
 export function validateGuidelinePlan(value: unknown): string[] {
   const args=value as {actions:string[]; conditions:string[]};
   if(!args || typeof args!=='object' || Array.isArray(args) || Object.keys(args).sort().join(',')!=='actions,conditions' || !Array.isArray(args.actions) || !Array.isArray(args.conditions) || args.actions.length+args.conditions.length<1 || args.actions.length+args.conditions.length>20) throw new Error('Save 1–20 habit actions or conditions');

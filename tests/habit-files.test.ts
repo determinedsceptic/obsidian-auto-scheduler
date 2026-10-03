@@ -1,0 +1,36 @@
+import {expect,it} from 'vitest';
+import {stageHabitFiles} from '../src/habit-files';
+import {habitPath} from '../src/habit-tool';
+import {validateGuidelineDocuments} from '../src/habit-guidelines';
+import {readHabitIndex} from '../src/habit-index';
+import {applyPreview,createPreview,undoLast} from '../src/transaction';
+import {config,MemoryVault,now} from './helpers';
+const settings=config({outputLocation:'daily',outputMode:'day-planner',cleanDaily:true,blockBuffer:15});
+it('saves separate titled habits and rules, indexes them, writes dated blocks and undoes all files together',async()=>{
+  const v=new MemoryVault();v.files={};
+  const habits=[{title:'午餐后快走',start:'12:40',end:'13:10',days:[0,1,2,3,4,5,6],priority:3},{title:'晚餐后快走',start:'18:40',end:'19:10',days:[0,1,2,3,4,5,6],priority:3},{title:'力量训练',start:'19:10',end:'19:40',days:[1,3,5],priority:4}];
+  const docs=validateGuidelineDocuments({habits:[{title:'饮食规则',actions:[],conditions:['白水不限']}]});
+  const staged=await stageHabitFiles(v,settings,habits,docs.flatMap(d=>d.rules),docs);
+  expect(Object.keys(staged.updates)).toEqual(['Habits/午餐后快走.md','Habits/晚餐后快走.md','Habits/力量训练.md','Habits/饮食规则.md']);
+  for(const [path,text] of Object.entries(staged.updates))expect(text.startsWith('# '+path.slice(7,-3)+'\n')).toBe(true);
+  expect(v.writes).toBe(0);
+  const p=await createPreview(v,settings,now,{},false,[],[],staged.updates);expect(p.result.errors).toEqual([]);
+  await applyPreview(v,v,p,settings,now);
+  const index=await readHabitIndex(v,settings);expect(index.index.files).toHaveLength(4);expect(index.index.files.flatMap(f=>f.habits)).toHaveLength(3);
+  expect(v.files['DailyNotes/2026-10-02.md']).toContain('19:10 - 19:40');
+  expect(v.files['DailyNotes/2026-10-02.md']).not.toContain('白水不限');
+  await undoLast(v,v,v.undo);for(const path of Object.keys(staged.updates))expect(v.files[path]).toBe('');
+});
+it('names relative routines separately and deduplicates repeated rules within their own file',async()=>{
+  const v=new MemoryVault();v.files={};
+  const docs=validateGuidelineDocuments({habits:[{title:'午餐后快走',actions:['午餐后休息10分钟再快走30分钟'],conditions:[]},{title:'晚餐后快走',actions:['晚餐后休息10分钟再快走30分钟'],conditions:[]}]});
+  const first=await stageHabitFiles(v,settings,[],docs.flatMap(d=>d.rules),docs);v.files={...first.updates};
+  const second=await stageHabitFiles(v,settings,[],docs.flatMap(d=>d.rules),docs);expect(second.updates).toEqual(first.updates);
+  expect(Object.keys(first.updates)).toHaveLength(2);
+});
+it('rejects generic titles and filename collisions without writing',async()=>{
+  expect(()=>habitPath(settings,'Habits')).toThrow('specific');
+  const v=new MemoryVault();v.files={'Habits/A B.md':'# Another habit\n'};
+  await expect(stageHabitFiles(v,settings,[],[],[{title:'A/B',rules:['ACTION: Test']}])).rejects.toThrow('different habit');
+  expect(v.writes).toBe(0);
+});

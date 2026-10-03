@@ -52,8 +52,8 @@ describe('natural-language habit guidelines',()=>{
     const tagged=[`ACTION: ${rules[0]}`,...rules.slice(1).map(x=>`RULE: ${x}`)];
     const {preview}=await previewDailyEdits(v,settings,{},[],r,[{ref:r.read.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:null}],now,'combo',tagged);
     expect(preview.result.errors).toEqual([]);await applyPreview(v,v,preview,settings,now);
-    expect(v.files[path]).toContain('> Existing original');expect(v.files['DailyNotes/2026-10-02.md']).not.toContain(rules[0]);expect(v.files['Habits/Habits.md']).toContain(`- ${rules[0]}`);
-    await undoLast(v,v,v.undo);expect(v.files[path]).toBe(original);expect(v.aiTasks).toEqual([]);expect(v.files['Habits/Habits.md']).toBe('');
+    expect(v.files[path]).toContain('> Existing original');expect(v.files['DailyNotes/2026-10-02.md']).not.toContain(rules[0]);expect(Object.entries(v.files).filter(([p])=>p.startsWith('Habits/')).map(([,text])=>text).join('\n')).toContain(`- ${rules[0]}`);
+    await undoLast(v,v,v.undo);expect(v.files[path]).toBe(original);expect(v.aiTasks).toEqual([]);expect(Object.entries(v.files).filter(([p])=>p.startsWith('Habits/')).every(([,text])=>text==='')).toBe(true);
   });
   it('refuses hidden rules, injected multiline headings and oversized input',()=>{
     expect(()=>appendGuidelines('```md\nunclosed\n',rules)).toThrow('hide');

@@ -13,12 +13,19 @@ const properties = {
 };
 export const habitTool = { name: 'create_habits', description: 'Save an explicitly requested fixed-time recurring habit to the host-controlled template and schedule the next seven days. Ask for missing start time or recurrence first; use null end if duration is unspecified.', strict: true,
   parameters: { type: 'object', properties: { habits: { type: 'array', items: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false } } }, required: ['habits'], additionalProperties: false } };
-export function habitPath(settings: Settings): string {
+export function habitPath(settings: Settings, title?:string): string {
   if (!safeVaultPath(settings.habitFolder)) throw new Error('Invalid habits folder');
-  return `${settings.habitFolder}/Habits.md`;
+  if(title===undefined)return `${settings.habitFolder}/Habit template.md`;
+  if(typeof title!=='string'||!title.trim()||/[\r\n\x00-\x1f]/.test(title))throw Error('A specific single-line habit title is required');
+  if(/^(?:habits?|ai[- ]habits?|guidelines?|habit guidelines)$/i.test(title.trim()))throw Error('Use a specific habit title, such as Lunch walk or Strength training');
+  const name=Array.from(title.trim().replace(/[<>:"/\\|?*]/g,' ').replace(/\s+/g,' ').replace(/^\.+|[ .]+$/g,'')).slice(0,80).join('');
+  if(!name||/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name))throw Error('Use a specific habit title suitable for a filename');
+  const path=`${settings.habitFolder}/${name}.md`;
+  if(!safeVaultPath(path))throw Error('Invalid habit filename');
+  return path;
 }
 export function habitInstructions(settings: Settings): string {
-  return `${skill}\nHabits folder: ${JSON.stringify(settings.habitFolder)}; template destination: ${JSON.stringify(habitPath(settings))}; daily notes: ${JSON.stringify(settings.dailyFolder + '/YYYY-MM-DD.md')}。`;
+  return `${skill}\nHabits folder: ${JSON.stringify(settings.habitFolder)}; each habit is stored as <specific habit title>.md; example template: ${JSON.stringify(habitPath(settings))}; daily notes: ${JSON.stringify(settings.dailyFolder + '/YYYY-MM-DD.md')}。`;
 }
 export function validateHabitDrafts(value: unknown, defaultDuration = 30): HabitDraft[] {
   const args = value as { habits?: unknown };

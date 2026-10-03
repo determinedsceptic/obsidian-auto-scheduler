@@ -1,3 +1,5 @@
+import { stageHabitFiles } from './habit-files';
+import type { GuidelineDocument } from './habit-files';
 import { readHabitIndex } from './habit-index';
 import type { HabitIndexSnapshot } from './habit-index';
 import { appendGuidelines } from './habit-guidelines';
@@ -234,12 +236,12 @@ export default class AutoScheduler extends Plugin {
       return {text:lines.join('\n'),notes};
     });
   }
-  async revisePlan(read: DailySnapshot, edits: DailyEdit[], expectedSettingsKey: string, guidelines: string[] = []): Promise<AiScheduleReply> {
+  async revisePlan(read: DailySnapshot, edits: DailyEdit[], expectedSettingsKey: string, guidelines: string[] = [], guidelineFiles:GuidelineDocument[]=[]): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
       if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
-      const { preview, ids, defaults } = await previewDailyEdits(this.vaultPort, settings, this.state.tracking, this.state.aiTasks, read, edits, new Date(), crypto.randomUUID().replace(/-/g, ''), guidelines);
+      const { preview, ids, defaults } = await previewDailyEdits(this.vaultPort, settings, this.state.tracking, this.state.aiTasks, read, edits, new Date(), crypto.randomUUID().replace(/-/g, ''), guidelines, guidelineFiles);
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
       let backupSaved = false;
       const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
@@ -253,7 +255,7 @@ export default class AutoScheduler extends Plugin {
         const lines = [`Updated ${edits.length} unfinished tasks from ${read.read.date}. Completed records and recurring habits were preserved.`, 'Saved to daily notes:'];
         for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
         for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
-        if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${habitPath(settings)}. It is a template, not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); lines.push(habitAnchorQuestion(guidelines)); }
+        if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${settings.habitFolder}. It is a template, not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); lines.push(habitAnchorQuestion(guidelines)); }
         if (defaults.length) lines.push(`Default duration (${settings.defaultEventDuration} min) used for: ${defaults.join(', ')}.`);
         if (applied.warning) lines.push(applied.warning);
         lines.push('Run Undo last schedule to restore the source and destination plans.');
@@ -296,45 +298,11 @@ export default class AutoScheduler extends Plugin {
     });
   }
 
-  async scheduleHabits(drafts: HabitDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
-    return this.operations.run(async () => {
-      if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
-      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
-        outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
-      const path = habitPath(settings), before = await this.vaultPort.read(path);
-      const after = appendHabits(before, drafts, settings.defaultEventDuration);
-      const previous = new Set(parseHabits([{ path, content: before ?? '' }], settings.defaultEventDuration).habits.map(h => h.id));
-      const created = new Set(parseHabits([{ path, content: after }], settings.defaultEventDuration).habits.filter(h => !previous.has(h.id)).map(h => h.id));
-      const now = new Date();
-      const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], { [path]: after });
-      if (preview.snapshot[path] !== before) throw new Error('Habits template changed. Send your message again.');
-      if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}:${e.line}: ${e.message}`).join('\n'));
-      let backupSaved = false;
-      const storage: StatePort = {
-        getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
-        saveUndo: async (undo, tracking, aiTasks) => {
-          const next = { ...this.state, settings, undo, tracking: tracking ?? this.state.tracking, aiTasks: aiTasks ?? this.state.aiTasks };
-          await this.saveData(next); this.state = next; backupSaved = true;
-        },
-      };
-      try {
-        const applied = await applyPreview(this.vaultPort, storage, preview, settings, now);
-        const blocks = preview.result.blocks.filter(b => [...created].some(id => b.taskId === `habit_${id}_${b.date.replace(/-/g, '')}`));
-        const notes = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${settings.dailyFolder}/${date}.md` }));
-        const lines = [`Recurring habits saved to ${path}. Future schedules read this template first.`, 'Saved to daily notes:'];
-        for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
-        if (preview.result.unscheduled.length) lines.push('Some ordinary tasks could not fit. Adjust capacity and replan later.');
-        if (applied.warning) lines.push(applied.warning);
-        lines.push('Run Undo last schedule to restore both the template and daily plans.');
-        return { text: lines.join('\n'), notes };
-      } catch (error) {
-        if (backupSaved) throw new Error(`Habit creation did not finish; some files may have been written. Run Undo last schedule. ${(error as Error).message}`);
-        throw error;
-      }
-    });
+  async scheduleHabits(drafts:HabitDraft[],expectedSettingsKey?:string):Promise<AiScheduleReply>{
+    return this.schedulePlan([],drafts,[],expectedSettingsKey);
   }
 
-  async schedulePlan(tasks: TaskDraft[], habits: HabitDraft[], drafts: EventDraft[], expectedSettingsKey?: string, guidelines: string[] = []): Promise<AiScheduleReply> {
+  async schedulePlan(tasks: TaskDraft[], habits: HabitDraft[], drafts: EventDraft[], expectedSettingsKey?: string, guidelines: string[] = [], guidelineFiles:GuidelineDocument[]=[]): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       if (this.state.aiTasks.length + tasks.length > 10000) throw new Error('AI task limit reached');
@@ -342,17 +310,10 @@ export default class AutoScheduler extends Plugin {
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const now = new Date(), events = drafts.length ? resolveEvents(drafts, settings, now) : [];
       const added = tasks.length ? materializeTasks(tasks, settings, now, crypto.randomUUID().replace(/-/g, '')) : [];
-      const updates: Record<string,string> = {}, createdHabits = new Set<string>();
-      let originalHabit: string | null = null;
-      if (habits.length || guidelines.length) {
-        const path = habitPath(settings); originalHabit = await this.vaultPort.read(path);
-        updates[path] = habits.length ? appendHabits(originalHabit, habits, settings.defaultEventDuration) : originalHabit ?? '# AI habits\n';
-        if (guidelines.length) updates[path] = appendGuidelines(updates[path], guidelines);
-        const previous = new Set(parseHabits([{path,content:originalHabit ?? ''}], settings.defaultEventDuration).habits.map(h => h.id));
-        for (const h of parseHabits([{path,content:updates[path]}],settings.defaultEventDuration).habits) if (!previous.has(h.id)) createdHabits.add(h.id);
-      }
+      const staged=await stageHabitFiles(this.vaultPort,settings,habits,guidelines,guidelineFiles);
+      const updates=staged.updates,createdHabits=staged.created;
       const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, added, updates, events);
-      if ((habits.length || guidelines.length) && preview.snapshot[habitPath(settings)] !== originalHabit) throw new Error('Habits template changed. Send your message again.');
+      for(const [path,original] of Object.entries(staged.originals))if(preview.snapshot[path]!==original)throw Error('Habits template changed. Send your message again.');
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
       let backupSaved = false;
       const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
@@ -367,8 +328,8 @@ export default class AutoScheduler extends Plugin {
         const lines = ['Saved to daily notes:'];
         for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}${e.dateDefaulted ? ' (default date: next occurrence of this time)' : ''}`);
         for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
-        if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${habitPath(settings)}. It is not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); lines.push(habitAnchorQuestion(guidelines)); }
-        if (habits.length) lines.push(`Recurring habits saved to ${habitPath(settings)}.`);
+        if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${Object.keys(updates).join(', ')}. It is not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); lines.push(habitAnchorQuestion(guidelines)); }
+        if (habits.length) lines.push(`Recurring habits saved to ${Object.keys(updates).join(', ')}.`);
         for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
         if (applied.warning) lines.push(applied.warning);
         lines.push('Run Undo last schedule to restore the entire operation.');

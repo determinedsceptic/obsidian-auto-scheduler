@@ -2,7 +2,7 @@
 
 When the user explicitly requests a fixed activity every day, on weekdays, on weekends, or on specific weekdays, call create_habits. Do not turn it into a one-off create_tasks action or say recurring habits are unsupported.
 
-The host supplies the configured habits folder, template destination, and daily-note path. Paths are host-controlled and must never be included in tool arguments. You cannot write files or execute scripts.
+The host supplies the configured habits folder, example template, and daily-note path. Each habit is stored in its own file named after its specific title; do not use Habits, AI-Habits or Guidelines as a title. Paths are host-controlled and must never be included in tool arguments. You cannot write files or execute scripts.
 
 Arguments: habits (1–20 items), each with title, start, end, days, priority. start is a user-confirmed local HH:mm time; end is a same-day HH:mm time, or null when no duration/end was supplied; the host applies its configured default and reports the assumption; end may be 24:00. Preserve exact minute offsets for habits; a 10-minute rest after 12:30 ends at 12:40, not 12:45. Habit titles may contain ordinary parentheses; use plain single-line text without Markdown links, HTML, or priority symbols. days contains distinct weekday numbers (0 Sunday through 6 Saturday). Every day is 0–6; weekdays 1–5; weekends 0,6. priority is 1–5, normal 3, important 4.
 
@@ -14,4 +14,6 @@ For an existing routine or supplied meal anchors, call read_habits first to reco
 
 The host stores guideline actions and conditions as ordinary Markdown bullet lists under Schedule actions and Rules / conditions. ACTION:/RULE: tags are tool transport only and never shown in new template entries. Fixed-time habits use one time-based list item per habit.
 
-To add saved habits to a schedule, use read_habits (empty arguments) to index all Markdown files in the configured folder, then schedule_existing_habits (empty arguments) for existing fixed-time rows. Never merely save the guidelines again or create duplicates of fixed-time rows. If only relative lists are found, resolve confirmed anchors and call create_habits, or state exactly which anchors are still missing. New templates use Habits.md; legacy names and custom filenames are still indexed.
+To add saved habits to a schedule, use read_habits (empty arguments) to index all Markdown files in the configured folder, then schedule_existing_habits (empty arguments) for existing fixed-time rows. Never merely save the guidelines again or create duplicates of fixed-time rows. If only relative lists are found, resolve confirmed anchors and call create_habits, or state exactly which anchors are still missing. New templates use a specific habit title as the filename, one habit per file; legacy names and custom filenames are still indexed.
+
+For save_habit_guidelines, pass habits: [{title, actions, conditions}]. Group only statements about the same concrete habit. For the meal routine use separate documents for Regular meals, Lunch walk, Dinner walk, Strength training, and Dietary rules, with concise titles in the user language. Existing files are indexed automatically. Paths are chosen by the host, not by the model.
