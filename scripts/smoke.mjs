@@ -230,12 +230,12 @@ console.log('PASS: chat direct scheduling, exact cross-day times/links, partial 
 saved = null; files.clear();
 const habitPlugin = new AutoScheduler(app); await habitPlugin.onload();
 habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
-assert(!files.get('Habits/Template.md').includes('<!--'));
-assert(files.get('Habits/Template.md').includes('```markdown'));
-assert.equal(openedNotes.at(-1), 'Habits/Template.md');
-files.set('Habits/Template.md', '- 19:00-19:30 ⏫ 晚间习惯（每天）');
+assert(!files.get('Habits/Habits.md').includes('<!--'));
+assert(files.get('Habits/Habits.md').includes('```markdown'));
+assert.equal(openedNotes.at(-1), 'Habits/Habits.md');
+files.set('Habits/Habits.md', '- 19:00-19:30 ⏫ 晚间习惯（每天）');
 habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
-assert(files.get('Habits/Template.md').includes('晚间习惯'));
+assert(files.get('Habits/Habits.md').includes('晚间习惯'));
 habitPlugin.state.settings = { ...habitPlugin.state.settings, outputLocation: 'daily', outputMode: 'day-planner', cleanDaily: true };
 habitPlugin.commands.find(c => c.id === 'preview-week').callback(); await habitPlugin.operations.tail;
 assert.equal(latestModal.preview.result.errors.length, 0);
@@ -251,7 +251,7 @@ assert.equal(latestModal.preview.diff.added.length, 0);
 assert.equal(latestModal.preview.diff.removed.length, 0);
 habitRestart.commands.find(c => c.id === 'undo-last').callback(); await habitRestart.operations.tail;
 assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
-assert(files.get('Habits/Template.md').includes('晚间习惯'));
+assert(files.get('Habits/Habits.md').includes('晚间习惯'));
 console.log('PASS: actual bundle clean habit output, restart deduplication, and undo without changing template');
 // Full chat -> skill/tool -> host -> template and schedule, without a real LLM.
 saved = null; files.clear(); folders.clear();
@@ -264,16 +264,16 @@ mockResponse = { output: [{ type: 'function_call', name: 'create_habits', argume
 const oldModal = latestModal;
 await habitView.send('每天19点饭后慢走半小时');
 assert.equal(latestModal, oldModal); assert.equal(saved.aiTasks.length, 0);
-assert(files.get('Templates/Habits/AI-Habits.md').includes('19:00-19:30 🔼 饭后慢走 (Sun, Mon, Tue, Wed, Thu, Fri, Sat)'));
+assert(files.get('Templates/Habits/Habits.md').includes('19:00-19:30 🔼 饭后慢走 (Sun, Mon, Tue, Wed, Thu, Fri, Sat)'));
 assert(habitView.messages.at(-1).content.includes('2026-10-01 19:00–19:30: 饭后慢走'));
 assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
-assert(JSON.parse(requests.at(-1).body).instructions.includes('Templates/Habits/AI-Habits.md'));
+assert(JSON.parse(requests.at(-1).body).instructions.includes('Templates/Habits/Habits.md'));
 const copyButton = habitView.contentEl.all().find(n => n.options.attr?.['aria-label'] === 'Copy message');
 copyButton.events.click(); await Promise.resolve(); assert.equal(clipboardCopies.at(-1), '每天19点饭后慢走半小时');
 const css = await readFile('styles.css', 'utf8'); assert(css.includes('-webkit-user-select: text')); assert(css.includes('user-select: text'));
 const habitSaved = new AutoScheduler(app); await habitSaved.onload();
 habitSaved.commands.find(c => c.id === 'undo-last').callback(); await habitSaved.operations.tail;
-assert.equal(files.get('Templates/Habits/AI-Habits.md'), ''); assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
+assert.equal(files.get('Templates/Habits/Habits.md'), ''); assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
 console.log('PASS: actual chat habit tool uses configured path, writes recurring template and dates, copies messages, and undo restores both after restart');
 
 // Start-only exact events use a host default, open the note and share persistent undo.
@@ -336,11 +336,11 @@ assert(mixedView.messages.at(-1).content.includes('default date: next occurrence
 assert(mixedView.messages.at(-1).content.includes('Default duration (30 min) used for: Phone number, Read'));
 assert(files.get('DailyNotes/2026-10-01.md').includes('11:30 - 12:30 Gym'));
 assert(files.get('DailyNotes/2026-10-01.md').includes('Phone number'));
-assert(files.get('Habits/AI-Habits.md').includes('19:00-19:30'));
+assert(files.get('Habits/Habits.md').includes('19:00-19:30'));
 assert.equal(saved.aiTasks[0].remaining,30);
 const mixedRestart = new AutoScheduler(app); await mixedRestart.onload();
 mixedRestart.commands.find(c => c.id === 'undo-last').callback(); await mixedRestart.operations.tail;
-assert.equal(saved.aiTasks.length,0);assert.equal(files.get('Habits/AI-Habits.md'),'');
+assert.equal(saved.aiTasks.length,0);assert.equal(files.get('Habits/Habits.md'),'');
 assert.equal(files.get('DailyNotes/2026-10-01.md'),'# Day planner\n');
 console.log('PASS: mixed plan preserves exact gym time, defaults phone task/habit durations and event date, writes all kinds together and undoes after restart');
 
@@ -400,20 +400,48 @@ assert(files.get('DailyNotes/2026-10-01.md').includes('PRIVATE BODY MUST STAY LO
 assert.equal(saved.aiTasks.length,1); assert(saved.aiTasks[0].due);
 assert(files.get('DailyNotes/2026-10-02.md').includes('📅 2026-10-05'));
 assert(!files.get('DailyNotes/2026-10-02.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
-assert(files.get('Habits/AI-Habits.md').includes('- Walk 30 minutes after lunch and dinner'));
-assert(!files.get('Habits/AI-Habits.md').includes('> ACTION:'));
-assert(files.get('Habits/AI-Habits.md').includes('Strength training Mon, Wed, Fri'));
+assert(files.get('Habits/Habits.md').includes('- Walk 30 minutes after lunch and dinner'));
+assert(!files.get('Habits/Habits.md').includes('> ACTION:'));
+assert(files.get('Habits/Habits.md').includes('Strength training Mon, Wed, Fri'));
 const editRestart = new AutoScheduler(app); await editRestart.onload();
 editRestart.commands.find(c=>c.id==='undo-last').callback(); await editRestart.operations.tail;
 assert.equal(files.get('DailyNotes/2026-10-01.md'),editSource); assert.equal(saved.aiTasks.length,0);
-assert.equal(saved.undo,null); assert.equal(files.get('Habits/AI-Habits.md'),'');
+assert.equal(saved.undo,null); assert.equal(files.get('Habits/Habits.md'),'');
 console.log('PASS: actual chat read/edit loop, section privacy, carry-over, default duration, deadline display, natural habit inheritance, destination navigation and restart undo');
 
 // Guideline-only requests must commit despite producing no scheduled blocks.
 const guidelineOnly = await editRestart.schedulePlan([],[],[],undefined,['Keep a regular three-meal routine']);
 assert.equal(guidelineOnly.notes.length,0); assert(guidelineOnly.text.includes('Decomposed habit/action list saved'));
-assert(!guidelineOnly.text.includes('09:00')); assert(files.get('Habits/AI-Habits.md').includes('regular three-meal routine')); assert.equal(Object.keys(files).filter(p=>p.startsWith('DailyNotes/')).length,0);
+assert(!guidelineOnly.text.includes('09:00')); assert(files.get('Habits/Habits.md').includes('regular three-meal routine')); assert.equal(Object.keys(files).filter(p=>p.startsWith('DailyNotes/')).length,0);
 const guidelineRestart=new AutoScheduler(app); await guidelineRestart.onload();
 guidelineRestart.commands.find(c=>c.id==='undo-last').callback(); await guidelineRestart.operations.tail;
-assert.equal(files.get('Habits/AI-Habits.md'),'');assert.equal(saved.undo,null);
+assert.equal(files.get('Habits/Habits.md'),'');assert.equal(saved.undo,null);
 console.log('PASS: guideline-only host action commits without fabricated blocks and supports restart undo');
+
+// Existing templates: fresh index -> apply -> dated navigation -> no duplicate template writes -> restart undo.
+saved=null;files.clear();folders.clear();folders.add('Templates');folders.add('Templates/Routines');
+const indexedPlugin=new AutoScheduler(app);await indexedPlugin.onload();
+await indexedPlugin.saveProvider({id:'habit-index-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
+await indexedPlugin.updateSettings({habitFolder:'Templates/Routines',weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00'],dailyCapacity:180,fixedBuffer:0,blockBuffer:15});
+const customHabitSource='- 12:40-13:10 Lunch walk (every day)\n- 18:40-19:10 Dinner walk (every day)\n- 19:10-19:40 Strength (Mon, Wed, Fri)\n';
+files.set('Templates/Routines/My routine.md',customHabitSource);
+files.set('Journal/Private.md','PRIVATE DO NOT SEND');
+mockResponse={data:[{id:'fixture'}]};const indexedView=indexedPlugin.views.get('auto-scheduler-chat')({});await indexedView.onOpen();await indexedView.modelLoad;
+let indexedRounds=0;mockResponse=request=>{
+  const body=JSON.parse(request.body);assert(!request.body.includes('PRIVATE DO NOT SEND'));
+  if(indexedRounds++===0)return {status:'completed',output:[{type:'function_call',name:'read_habits',call_id:'index',arguments:'{}'}]};
+  const output=body.input.at(-1).output; const result=JSON.parse(output);assert.equal(result.files[0].path,'Templates/Routines/My routine.md');assert.equal(result.files[0].habits.length,3);
+  return {status:'completed',output:[{type:'function_call',name:'schedule_existing_habits',call_id:'apply-index',arguments:'{}'}]};
+};
+await indexedView.send('Add the existing habits to my schedule');
+assert(!indexedView.messages.at(-1).content.includes('Request failed'),indexedView.messages.at(-1).content);
+assert(indexedView.messages.at(-1).content.includes('2026-10-01 12:40–13:10'));
+assert(files.get('DailyNotes/2026-10-02.md').includes('19:10 - 19:40'));
+assert.equal(openedNotes.at(-1),'DailyNotes/2026-10-01.md');assert.equal(files.get('Templates/Routines/My routine.md'),customHabitSource);
+assert(!files.has('Templates/Routines/Habits.md'));
+const staleIndex=await indexedPlugin.readHabits(JSON.stringify(indexedPlugin.state.settings));files.set('Templates/Routines/My routine.md',customHabitSource+'\n');
+await assert.rejects(indexedPlugin.scheduleExistingHabits(staleIndex,JSON.stringify(indexedPlugin.state.settings)),/Habit templates changed/);
+files.set('Templates/Routines/My routine.md',customHabitSource);
+const indexedRestart=new AutoScheduler(app);await indexedRestart.onload();indexedRestart.commands.find(c=>c.id==='undo-last').callback();await indexedRestart.operations.tail;
+assert(!files.get('DailyNotes/2026-10-01.md').includes('Lunch walk'));assert.equal(files.get('Templates/Routines/My routine.md'),customHabitSource);
+console.log('PASS: all-file habit index, read/apply chat tools, exact times, adjacent sequences, dated navigation, unchanged templates, stale-read rejection and restart undo');

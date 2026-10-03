@@ -34,7 +34,8 @@ const weekdays: Record<string, number[]> = {
 };
 /** Stable without showing technical IDs in a user's template. */
 function plainId(path: string, title: string): string {
-  const value = path + '\n' + title;
+  // Keep existing occurrence IDs stable when the old default template is renamed.
+  const value = path.replace(/\/Habits\.md$/, '/AI-Habits.md') + '\n' + title;
   let hash = 2166136261;
   for (let i = 0; i < value.length; i++) hash = Math.imul(hash ^ value.charCodeAt(i), 16777619);
   return `template_${(hash >>> 0).toString(16)}`;

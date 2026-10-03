@@ -9,8 +9,8 @@ const settings = config({ habitFolder: 'Templates/Habits', outputLocation: 'dail
 const messages = [{ role: 'user' as const, content: '每天19点饭后慢走半小时' }];
 describe('habit skill and model tools', () => {
   it('使用当前设置中的路径，生成普通模板行', () => {
-    expect(habitPath(settings)).toBe('Templates/Habits/AI-Habits.md');
-    expect(habitInstructions(settings)).toContain('Templates/Habits/AI-Habits.md');
+    expect(habitPath(settings)).toBe('Templates/Habits/Habits.md');
+    expect(habitInstructions(settings)).toContain('Templates/Habits/Habits.md');
     expect(habitInstructions(settings)).toContain('ask for an exact start time');
     const text = appendHabits(null, [draft]); expect(text).toContain('19:00-19:30 🔼 饭后慢走'); expect(text).not.toContain('<!--');
     expect(() => appendHabits(text, [draft])).toThrow('Duplicate habit');
@@ -24,7 +24,7 @@ describe('habit skill and model tools', () => {
   it.each(['responses','chat-completions','anthropic','gemini'] as const)('协议 %s 注册和解析习惯调用', async protocol => {
     const args = { habits: [draft] };
     const reply = await chat({ ...DEFAULT_LLM, protocol }, 'fixture', messages, settings, now, async (_, __, body) => {
-      const data = JSON.parse(body); expect(body).toContain('create_habits'); expect(body).toContain('Templates/Habits/AI-Habits.md');
+      const data = JSON.parse(body); expect(body).toContain('create_habits'); expect(body).toContain('Templates/Habits/Habits.md');
       const json = protocol === 'responses' ? { output: [{ type: 'function_call', name: 'create_habits', arguments: JSON.stringify(args) }] }
         : protocol === 'chat-completions' ? { choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function', function: { name: 'create_habits', arguments: JSON.stringify(args) } }] } }] }
         : protocol === 'anthropic' ? { stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'create_habits', input: args }] }

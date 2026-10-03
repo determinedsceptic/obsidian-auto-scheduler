@@ -38,7 +38,7 @@ export function readGuidelines(text: string): string[] {
   });
 }
 export function appendGuidelines(before: string | null, rules: string[]): string {
-  const checked=validateGuidelines({rules}), text=before??'# AI habits\n';
+  const checked=validateGuidelines({rules}), text=before??'# Habits\n';
   const items=[...new Set([...readGuidelines(text),...checked])];
   const newline=text.includes('\r\n')?'\r\n':'\n';
   const rows=visibleLines(text), h=rows.find(r=>heading.test(r.text));

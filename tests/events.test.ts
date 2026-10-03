@@ -76,7 +76,7 @@ it('rejects new event overlaps and buffers, and changed source snapshots before 
 });
 it('preserves a valid late start-only habit when appending with a 15-minute default',()=>{
   const text=appendHabits('- 23:45 Read (every day)\n',[{title:'Walk',start:'19:00',end:'19:30',days:[1],priority:3}],15);
-  const parsed=parseHabits([{path:'Habits/AI-Habits.md',content:text}],15);
+  const parsed=parseHabits([{path:'Habits/Habits.md',content:text}],15);
   expect(parsed.errors).toEqual([]);expect(parsed.habits[0].end).toBe('24:00');expect(parsed.habits).toHaveLength(2);
 });
 

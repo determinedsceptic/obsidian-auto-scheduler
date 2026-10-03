@@ -41,10 +41,10 @@ describe('natural-language habit guidelines',()=>{
   });
   it('stores/de-duplicates action items once without copying them into daily notes or inventing time blocks',async()=>{
     const v=new Vault();v.files={};const template=appendGuidelines(null,rules);expect(readGuidelines(template)).toEqual(rules);expect(appendGuidelines(template,rules)).toBe(template);
-    const p=await createPreview(v,settings,now,{},false,[],[],{'Habits/AI-Habits.md':template});expect(p.result.errors).toEqual([]);expect(p.result.blocks).toEqual([]);
+    const p=await createPreview(v,settings,now,{},false,[],[],{'Habits/Habits.md':template});expect(p.result.errors).toEqual([]);expect(p.result.blocks).toEqual([]);
     await applyPreview(v,v,p,settings,now);expect(Object.keys(v.files).filter(p=>p.startsWith('DailyNotes/'))).toHaveLength(0);
     for(const [p,text] of Object.entries(v.files).filter(([p])=>p.startsWith('DailyNotes/'))) {expect(text).not.toContain(rules[0]);expect(text).not.toMatch(/as-block|auto-scheduler:/);}
-    await undoLast(v,v,v.undo);expect(v.files['Habits/AI-Habits.md']).toBe('');
+    await undoLast(v,v,v.undo);expect(v.files['Habits/Habits.md']).toBe('');
   });
   it('preserves an existing habit section and applies source revision plus guideline saving in one undo',async()=>{
     const v=new Vault();const original=`# Habits and guidelines\n> Existing original\n# Day planner\n- [ ] Review 📅 2026-10-05\n`;
@@ -52,8 +52,8 @@ describe('natural-language habit guidelines',()=>{
     const tagged=[`ACTION: ${rules[0]}`,...rules.slice(1).map(x=>`RULE: ${x}`)];
     const {preview}=await previewDailyEdits(v,settings,{},[],r,[{ref:r.read.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:null}],now,'combo',tagged);
     expect(preview.result.errors).toEqual([]);await applyPreview(v,v,preview,settings,now);
-    expect(v.files[path]).toContain('> Existing original');expect(v.files['DailyNotes/2026-10-02.md']).not.toContain(rules[0]);expect(v.files['Habits/AI-Habits.md']).toContain(`- ${rules[0]}`);
-    await undoLast(v,v,v.undo);expect(v.files[path]).toBe(original);expect(v.aiTasks).toEqual([]);expect(v.files['Habits/AI-Habits.md']).toBe('');
+    expect(v.files[path]).toContain('> Existing original');expect(v.files['DailyNotes/2026-10-02.md']).not.toContain(rules[0]);expect(v.files['Habits/Habits.md']).toContain(`- ${rules[0]}`);
+    await undoLast(v,v,v.undo);expect(v.files[path]).toBe(original);expect(v.aiTasks).toEqual([]);expect(v.files['Habits/Habits.md']).toBe('');
   });
   it('refuses hidden rules, injected multiline headings and oversized input',()=>{
     expect(()=>appendGuidelines('```md\nunclosed\n',rules)).toThrow('hide');

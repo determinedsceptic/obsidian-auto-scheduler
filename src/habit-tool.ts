@@ -15,7 +15,7 @@ export const habitTool = { name: 'create_habits', description: 'Save an explicit
   parameters: { type: 'object', properties: { habits: { type: 'array', items: { type: 'object', properties, required: Object.keys(properties), additionalProperties: false } } }, required: ['habits'], additionalProperties: false } };
 export function habitPath(settings: Settings): string {
   if (!safeVaultPath(settings.habitFolder)) throw new Error('Invalid habits folder');
-  return `${settings.habitFolder}/AI-Habits.md`;
+  return `${settings.habitFolder}/Habits.md`;
 }
 export function habitInstructions(settings: Settings): string {
   return `${skill}\nHabits folder: ${JSON.stringify(settings.habitFolder)}; template destination: ${JSON.stringify(habitPath(settings))}; daily notes: ${JSON.stringify(settings.dailyFolder + '/YYYY-MM-DD.md')}。`;
@@ -29,7 +29,7 @@ export function validateHabitDrafts(value: unknown, defaultDuration = 30): Habit
     const h = { ...original, end: original.end === null ? endAfter(original.start, defaultDuration) : original.end };
     if (typeof h.title !== 'string' || !h.title.trim() || h.title.length > 200 || /[\r\n\x00-\x1f<>\[\]%🔺⏫🔼🔽⏬]/u.test(h.title)) throw new Error('Habit titles must be plain text on one line; parentheses are allowed; no Markdown links, HTML, or priority symbols');
     if (typeof h.start !== 'string' || typeof h.end !== 'string' || !Array.isArray(h.days) || !h.days.length || h.days.some(d => !Number.isInteger(d) || d < 0 || d > 6) || new Set(h.days).size !== h.days.length || !Number.isInteger(h.priority) || h.priority < 1 || h.priority > 5) throw new Error('Invalid habit time, weekdays, or priority');
-    const parsed = parseHabits([{ path: 'Habits/AI-Habits.md', content: habitLine(h) }]);
+    const parsed = parseHabits([{ path: 'Habits/Habits.md', content: habitLine(h) }]);
     if (parsed.errors.length) throw new Error(parsed.errors[0].message);
     return { title: h.title.trim(), start: h.start, end: h.end, days: [...h.days].sort((a, b) => a - b), priority: h.priority };
   });
@@ -40,14 +40,14 @@ export function habitLine(h: HabitDraft): string {
 }
 export function appendHabits(before: string | null, drafts: HabitDraft[], defaultDuration = 30): string {
   const checked = validateHabitDrafts({ habits: drafts });
-  const text = before ?? '# AI habits\n';
+  const text = before ?? '# Habits\n';
   // Insert timed list rows before guideline sections so descriptive bullets never become fixed blocks.
   const guidelineHeading=/^#{1,6}\s+(?:Habits and guidelines|Habit guidelines|Habits and plans|习惯与计划)\s*#*\s*$/im.exec(text);
   const offset=guidelineHeading?.index ?? text.length;
   const prefix=text.slice(0,offset), suffix=text.slice(offset);
   const result = prefix + (prefix.endsWith('\n') ? '\n' : '\n\n') + checked.map(habitLine).join('\n') + '\n' + (suffix ? '\n'+suffix : '');
-  const parsed = parseHabits([{ path: 'Habits/AI-Habits.md', content: result }], defaultDuration);
+  const parsed = parseHabits([{ path: 'Habits/Habits.md', content: result }], defaultDuration);
   if (parsed.errors.length) throw new Error(parsed.errors.map(e => e.message).join('\n'));
-  if (parsed.habits.length !== parseHabits([{ path: 'Habits/AI-Habits.md', content: text }], defaultDuration).habits.length + checked.length) throw new Error('An unclosed code fence at the end of the habits template would hide new habits. Close it first.');
+  if (parsed.habits.length !== parseHabits([{ path: 'Habits/Habits.md', content: text }], defaultDuration).habits.length + checked.length) throw new Error('An unclosed code fence at the end of the habits template would hide new habits. Close it first.');
   return result;
 }

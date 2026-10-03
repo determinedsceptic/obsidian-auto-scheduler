@@ -1,3 +1,5 @@
+import { readHabitIndex } from './habit-index';
+import type { HabitIndexSnapshot } from './habit-index';
 import { appendGuidelines } from './habit-guidelines';
 import { deadlineLabel } from './calendar-format';
 import { readDailyPlan, previewDailyEdits } from './daily-edit';
@@ -6,7 +8,7 @@ import { appendHabits, habitPath } from './habit-tool';
 import { resolveEvents } from './event-tool';
 import type { EventDraft } from './event-tool';
 import type { HabitDraft } from './habit-tool';
-import { parseHabits, HABIT_TEMPLATE } from './habits';
+import { parseHabits, HABIT_TEMPLATE, isHabit } from './habits';
 import { Credentials } from './credentials';
 import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
@@ -22,7 +24,7 @@ import { applyPreview, createPreview, timezone, undoLast } from './transaction';
 import type { Preview, VaultPort, StatePort } from './transaction';
 import { DEFAULT_SETTINGS, DEFAULT_LLM } from './types';
 import type { ByokSettings, ProviderConfig, PluginState, Settings, UndoRecord } from './types';
-import { clock, safeVaultPath } from './time';
+import { dateKey, addDays, clock, safeVaultPath } from './time';
 import { OperationQueue } from './queue';
 import { endClock } from './output';
 
@@ -116,7 +118,7 @@ export default class AutoScheduler extends Plugin {
     this.addSettingTab(new SchedulerSettings(this.app, this));
     this.addCommand({ id: 'create-habit-template', name: 'Create habits template', callback: () => { void this.action(async () => {
       if (!safeVaultPath(this.state.settings.habitFolder)) throw new Error('Configure a safe habits folder');
-      const path = `${this.state.settings.habitFolder}/Template.md`;
+      const path = habitPath(this.state.settings);
       if (await this.vaultPort.read(path) === null) await this.vaultPort.writeChecked(path, null, HABIT_TEMPLATE);
       const file = this.app.vault.getAbstractFileByPath(path);
       if (file instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(file);
@@ -202,6 +204,34 @@ export default class AutoScheduler extends Plugin {
     return this.operations.run(async () => {
       if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       return readDailyPlan(this.vaultPort, this.state.settings, this.state.tracking, this.state.aiTasks, date, new Date());
+    });
+  }
+  async readHabits(expectedSettingsKey:string):Promise<HabitIndexSnapshot>{
+    return this.operations.run(async()=>{
+      if(JSON.stringify(this.state.settings)!==expectedSettingsKey)throw Error('Scheduling settings changed. Send your message again.');
+      return readHabitIndex(this.vaultPort,this.state.settings);
+    });
+  }
+  async scheduleExistingHabits(read:HabitIndexSnapshot,expectedSettingsKey:string):Promise<AiScheduleReply>{
+    return this.operations.run(async()=>{
+      if(JSON.stringify(this.state.settings)!==expectedSettingsKey)throw Error('Scheduling settings changed. Send your message again.');
+      const current=await readHabitIndex(this.vaultPort,this.state.settings);
+      if(JSON.stringify(current.contents)!==JSON.stringify(read.contents))throw Error('Habit templates changed. Read them again.');
+      if(!current.index.files.some(f=>f.habits.some(h=>h.enabled)))throw Error('No enabled fixed-time habits found. Read the action list and confirm its start times before scheduling.');
+      const settings={...this.state.settings,outputLocation:'daily' as const,cleanDaily:true,outputMode:this.state.settings.outputMode==='plain'?'day-planner' as const:this.state.settings.outputMode};
+      const now=new Date();const preview=await createPreview(this.vaultPort,settings,now,this.state.tracking,false,this.state.aiTasks);
+      for(const [path,content] of Object.entries(read.contents))if(preview.snapshot[path]!==content)throw Error('Habit templates changed. Read them again.');
+      if(JSON.stringify(Object.keys(preview.snapshot).filter(p=>p.startsWith(settings.habitFolder+'/')).sort())!==JSON.stringify(Object.keys(read.contents).sort()))throw Error('Habit templates changed. Read them again.');
+      if(preview.result.errors.length)throw Error(preview.result.errors.map(e=>`${e.path}:${e.line}: ${e.message}`).join('\n'));
+      const storage:StatePort={getTracking:this.storage.getTracking,getAiTasks:this.storage.getAiTasks,saveUndo:async(undo,tracking,aiTasks)=>{const next={...this.state,settings,undo,tracking:tracking??this.state.tracking,aiTasks:aiTasks??this.state.aiTasks};await this.saveData(next);this.state=next;}};
+      const applied=await applyPreview(this.vaultPort,storage,preview,settings,now);
+      const today=dateKey(now),blocks=preview.result.blocks.filter(b=>isHabit(b.taskId)&&b.date>=today&&b.date<addDays(today,7));
+      const notes=[...new Set(blocks.map(b=>b.date))].sort().map(date=>({date,path:`${settings.dailyFolder}/${date}.md`}));
+      const lines=[applied.changed?'Existing habits saved to daily notes:':'Existing habits are already present in daily notes:'];
+      for(const b of blocks)lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority??3}/5)`);
+      if(!blocks.length)lines.push('No occurrences fall within the next seven days. Check recurrence, enabled status and effective dates.');
+      if(applied.warning)lines.push(applied.warning);
+      return {text:lines.join('\n'),notes};
     });
   }
   async revisePlan(read: DailySnapshot, edits: DailyEdit[], expectedSettingsKey: string, guidelines: string[] = []): Promise<AiScheduleReply> {
