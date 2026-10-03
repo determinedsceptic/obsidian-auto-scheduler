@@ -385,7 +385,7 @@ mockResponse = request => {
   editRounds++;
   if (editRounds === 1) return {status:'completed',output:[{type:'function_call',name:'read_daily_plan',call_id:'read-plan',arguments:JSON.stringify({date:'2026-10-01'})}]};
   const result = JSON.parse(body.input.at(-1).output); assert.equal(result.items[0].title,'Phone number'); assert.equal(result.items[1].completed,true); assert.equal(result.items[0].deadline,'2026-10-05'); assert(result.habitContext.includes('after lunch'));
-  return {status:'completed',output:[{type:'function_call',name:'revise_daily_tasks',call_id:'edit-plan',arguments:JSON.stringify({date:'2026-10-01',guidelines:['Walk 30 minutes after lunch and dinner','Strength training Mon, Wed, Fri after the evening walk'],edits:[{ref:result.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:4}]})}]};
+  return {status:'completed',output:[{type:'function_call',name:'revise_daily_tasks',call_id:'edit-plan',arguments:JSON.stringify({date:'2026-10-01',guidelines:['ACTION: Walk 30 minutes after lunch and dinner','ACTION: Strength training Mon, Wed, Fri after the evening walk'],edits:[{ref:result.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:4}]})}]};
 };
 const modalBeforeEdit = latestModal;
 await editView.send('Move today’s unfinished tasks to tomorrow');
@@ -399,7 +399,8 @@ assert(files.get('DailyNotes/2026-10-01.md').includes('- [x] Finished'));
 assert(files.get('DailyNotes/2026-10-01.md').includes('PRIVATE BODY MUST STAY LOCAL'));
 assert.equal(saved.aiTasks.length,1); assert(saved.aiTasks[0].due);
 assert(files.get('DailyNotes/2026-10-02.md').includes('📅 2026-10-05'));
-assert(files.get('DailyNotes/2026-10-02.md').includes('Walk 30 minutes after lunch and dinner'));
+assert(!files.get('DailyNotes/2026-10-02.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
+assert(files.get('Habits/AI-Habits.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
 assert(files.get('Habits/AI-Habits.md').includes('Strength training Mon, Wed, Fri'));
 const editRestart = new AutoScheduler(app); await editRestart.onload();
 editRestart.commands.find(c=>c.id==='undo-last').callback(); await editRestart.operations.tail;
@@ -409,8 +410,8 @@ console.log('PASS: actual chat read/edit loop, section privacy, carry-over, defa
 
 // Guideline-only requests must commit despite producing no scheduled blocks.
 const guidelineOnly = await editRestart.schedulePlan([],[],[],undefined,['Keep a regular three-meal routine']);
-assert.equal(guidelineOnly.notes.length,7); assert(guidelineOnly.text.includes('Habit guidelines saved'));
-assert(!guidelineOnly.text.includes('09:00')); assert(files.get('Habits/AI-Habits.md').includes('regular three-meal routine'));
+assert.equal(guidelineOnly.notes.length,0); assert(guidelineOnly.text.includes('Decomposed habit/action list saved'));
+assert(!guidelineOnly.text.includes('09:00')); assert(files.get('Habits/AI-Habits.md').includes('regular three-meal routine')); assert.equal(Object.keys(files).filter(p=>p.startsWith('DailyNotes/')).length,0);
 const guidelineRestart=new AutoScheduler(app); await guidelineRestart.onload();
 guidelineRestart.commands.find(c=>c.id==='undo-last').callback(); await guidelineRestart.operations.tail;
 assert.equal(files.get('Habits/AI-Habits.md'),'');assert.equal(saved.undo,null);

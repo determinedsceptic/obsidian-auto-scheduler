@@ -1,4 +1,3 @@
-import { readGuidelines, carryGuidelines } from './habit-guidelines';
 import { cleanDaily, rehydrate } from './tracking';
 import { dailyDocument, dailyInputs, dailyPaths, renderDaily } from './daily';
 import { parseFixed, parseTasks } from './parser';
@@ -102,7 +101,6 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     return { ...t, remaining, min: Math.min(t.min, remaining), completed: t.completed || remaining === 0 };
   }));
   if (parsed.tasks.some(t => isHabit(t.id))) parsed.errors.push({ path: frozen.taskFolder, line: 0, message: 'habit_ is a reserved ID prefix for habit occurrences' });
-  const guidelineRules = [...new Set(Object.entries({ ...inputs, ...habitUpdates }).filter(([path]) => path.startsWith(frozen.habitFolder + '/')).flatMap(([,content]) => readGuidelines(content ?? '')))];
   const habits = parseHabits(Object.entries({ ...inputs, ...habitUpdates }).filter(([path]) => path.startsWith(frozen.habitFolder + '/')).map(([path, content]) => ({ path, content: content ?? '' })), frozen.defaultEventDuration);
   parsed.errors.push(...habits.errors, ...dailyErrors, ...[...daily.values()].flatMap(d => d.errors));
   const fixed = parseFixed({ path: frozen.fixedFile, content: inputs[frozen.fixedFile] ?? '' }, frozen.defaultEventDuration);
@@ -130,7 +128,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
       for (const [path, document] of Object.entries(documents)) {
         const blocks = frozen.outputLocation === 'daily' ? result.blocks.filter(b => path.endsWith(`/${b.date}.md`)) : result.blocks;
         // Avoid creating empty future notes. Existing notes with blocks still get cleaned.
-        if (frozen.outputLocation === 'daily' && !blocks.length && !document.blocks.length && !eventRows[path] && !(path in dailyUpdates) && !guidelineRules.length) continue;
+        if (frozen.outputLocation === 'daily' && !blocks.length && !document.blocks.length && !eventRows[path] && !(path in dailyUpdates)) continue;
         const output = frozen.outputLocation === 'daily' ? renderDaily(document, blocks, frozen.outputMode, frozen.ganttFilter) : renderOutput(document, blocks, frozen.outputMode, frozen.ganttFilter);
         parseOutput(output);
         if (frozen.outputLocation === 'daily') {
@@ -150,7 +148,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
           }
           const clean = cleanDaily(output, plainSourceIds, new Map(parsed.tasks.map(t => [t.id, t.priority])), true, new Map(parsed.tasks.filter(t => t.due !== undefined).map(t => [t.id, t.due!])));
           preview.nextTracking[path] = { before, after: frozen.cleanDaily ? clean.record : null };
-          preview.outputs[path] = carryGuidelines(frozen.cleanDaily ? clean.text : output, guidelineRules);
+          preview.outputs[path] = frozen.cleanDaily ? clean.text : output;
         } else preview.outputs[path] = output;
       }
       preview.output = frozen.outputLocation === 'daily' ? Object.entries(preview.outputs).map(([path, output]) => `--- ${path} ---\n${output}`).join('\n') : preview.outputs[frozen.outputFile];

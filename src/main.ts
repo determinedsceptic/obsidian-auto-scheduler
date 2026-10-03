@@ -62,6 +62,12 @@ class ObsidianVault implements VaultPort {
     }
   }
 }
+
+function habitAnchorQuestion(items: string[]): string {
+  const text=items.join(' ').toLowerCase();
+  if (/(?:after )?(?:lunch|dinner)|午饭|午餐|晚饭|晚餐/.test(text)) return 'Relative-time items are not scheduled until their anchor times are confirmed. What time do lunch and dinner usually end, and which duration in the 10–20 minute rest range should I use?';
+  return 'Relative-time items are not scheduled until their clock anchors are confirmed. What start times should I use for the listed actions?';
+}
 function validUndo(value: unknown): value is UndoRecord {
   if (!value || typeof value !== 'object') return false;
   const record = value as UndoRecord;
@@ -217,7 +223,7 @@ export default class AutoScheduler extends Plugin {
         const lines = [`Updated ${edits.length} unfinished tasks from ${read.read.date}. Completed records and recurring habits were preserved.`, 'Saved to daily notes:'];
         for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
         for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
-        if (guidelines.length) lines.push(`Habit guidelines saved to ${habitPath(settings)} and carried into daily notes. Relative-time activities need confirmed anchor times before time blocks can be created. What are the usual end times of their meals or other anchor activities?`);
+        if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${habitPath(settings)}. It is a template, not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); lines.push(habitAnchorQuestion(guidelines)); }
         if (defaults.length) lines.push(`Default duration (${settings.defaultEventDuration} min) used for: ${defaults.join(', ')}.`);
         if (applied.warning) lines.push(applied.warning);
         lines.push('Run Undo last schedule to restore the source and destination plans.');
@@ -331,12 +337,12 @@ export default class AutoScheduler extends Plugin {
         const lines = ['Saved to daily notes:'];
         for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}${e.dateDefaulted ? ' (default date: next occurrence of this time)' : ''}`);
         for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
-        if (guidelines.length) lines.push(`Habit guidelines saved to ${habitPath(settings)} and carried into daily notes. To schedule relative-time activities, provide meal/anchor times first. What are the usual end times of the meals or activities these habits follow?`);
+        if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${habitPath(settings)}. It is not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); lines.push(habitAnchorQuestion(guidelines)); }
         if (habits.length) lines.push(`Recurring habits saved to ${habitPath(settings)}.`);
         for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
         if (applied.warning) lines.push(applied.warning);
         lines.push('Run Undo last schedule to restore the entire operation.');
-        const notes = [...new Set([...events.map(e => e.date), ...blocks.map(b => b.date), ...(guidelines.length ? Object.keys(preview.outputs ?? {}).filter(p=>p.startsWith(settings.dailyFolder+'/')).map(p=>p.slice(-13,-3)) : [])])].sort().map(date => ({date,path:`${settings.dailyFolder}/${date}.md`}));
+        const notes = [...new Set([...events.map(e => e.date), ...blocks.map(b => b.date), ])].sort().map(date => ({date,path:`${settings.dailyFolder}/${date}.md`}));
         return {text:lines.join('\n'),notes};
       } catch (error) {
         if (backupSaved) throw new Error(`Plan creation did not finish; a recovery backup is saved. Inspect the notes and run Undo last schedule. ${(error as Error).message}`);

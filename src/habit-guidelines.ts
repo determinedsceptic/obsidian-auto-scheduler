@@ -2,12 +2,18 @@ import { visibleLines } from './parser';
 import { habitPath } from './habit-tool';
 import type { Settings } from './types';
 const heading = /^#{1,6}\s+(?:Habits and guidelines|Habit guidelines|Habits and plans|\u4e60\u60ef\u4e0e\u8ba1\u5212)\s*#*\s*$/i;
-export const guidelineTool = { name:'save_habit_guidelines', description:'Save explicitly requested natural-language recurring habits and lifestyle rules, including relative-time activities without confirmed clock times. These are carried into daily notes as guidelines, not scheduled time blocks. Preserve recurrence, durations, rest offsets and conditional wording. Ask for meal/anchor times before creating fixed habits. Can accompany a daily-task revision in the same operation.', strict:true,
-  parameters:{type:'object',properties:{rules:{type:'array',items:{type:'string',description:'One plain-text recurring habit or rule; no Markdown heading, newline or management markup'}}},required:['rules'],additionalProperties:false} };
+export const guidelineTool = { name:'save_habit_guidelines', description:'Save an analyzed habit plan to the configured template. Split every executable routine step into actions, and every dietary/conditional rule into conditions. Never copy a source paragraph verbatim. Preserve relative anchors, durations, ranges, recurrence and conditions. These entries stay in the template and are never copied into daily schedules. If clock times are missing, list actions in the assistant answer and ask for meal/anchor times; do not claim they are scheduled. Can accompany task carry-over.', strict:true,
+  parameters:{type:'object',properties:{actions:{type:'array',items:{type:'string',description:'One concise actionable activity or sequence, with recurrence and relative anchor preserved'}},conditions:{type:'array',items:{type:'string',description:'One dietary limit or conditional rule, not a time block'}}},required:['actions','conditions'],additionalProperties:false} };
+export function validateGuidelinePlan(value: unknown): string[] {
+  const args=value as {actions:string[]; conditions:string[]};
+  if(!args || typeof args!=='object' || Array.isArray(args) || Object.keys(args).sort().join(',')!=='actions,conditions' || !Array.isArray(args.actions) || !Array.isArray(args.conditions) || args.actions.length+args.conditions.length<1 || args.actions.length+args.conditions.length>20) throw new Error('Save 1–20 habit actions or conditions');
+  const actions=validateGuidelines({rules:args.actions}); const conditions=validateGuidelines({rules:args.conditions});
+  return [...actions.map(item=>`ACTION: ${item}`),...conditions.map(item=>`RULE: ${item}`)];
+}
 export function validateGuidelines(value: unknown): string[] {
   const args=value as {rules:string[]};
   if(!args || typeof args!=='object' || Array.isArray(args) || Object.keys(args).join(',')!=='rules' || !Array.isArray(args.rules) || !args.rules.length || args.rules.length>20) throw new Error('Save 1–20 habit guidelines');
-  return [...new Set(args.rules.map(r=>{if(typeof r!=='string' || !r.trim() || r.length>1000 || /[\r\n\x00-\x1f<>`]|<!--|%%/.test(r)) throw new Error('Habit guidelines must be single-line plain text');return r.trim();}))];
+  return [...new Set(args.rules.map(r=>{if(typeof r!=='string' || !r.trim() || r.length>1000 || /[\r\n\x00-\x1f<>`]|<!--|%%/.test(r)) throw new Error('Habit items must be single-line plain text');return r.trim();}))];
 }
 /** Read only the named habits section, never the surrounding journal. */
 export function habitContext(text: string): string {
@@ -37,10 +43,5 @@ export function appendGuidelines(before: string | null, rules: string[]): string
   }
   const result=text+(text.endsWith('\n')?newline:newline+newline)+`## Habit guidelines${newline}`+additions.map(r=>`> ${r}`).join(newline)+newline;
   if(!additions.every(r=>readGuidelines(result).includes(r))) throw new Error('A code fence would hide new guidelines');return result;
-}
-export function carryGuidelines(text: string, rules: string[]): string {
-  if(!rules.length || visibleLines(text).some(r=>heading.test(r.text))) return text;
-  const newline=text.includes('\r\n')?'\r\n':'\n';
-  return text+(text.endsWith('\n')?newline:newline+newline)+`# Habits and guidelines${newline}`+rules.map(r=>`> ${r}`).join(newline)+newline;
 }
 export const guidelinePath = (settings: Settings): string => habitPath(settings);
