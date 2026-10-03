@@ -34,3 +34,29 @@ it('rejects generic titles and filename collisions without writing',async()=>{
   await expect(stageHabitFiles(v,settings,[],[],[{title:'A/B',rules:['ACTION: Test']}])).rejects.toThrow('different habit');
   expect(v.writes).toBe(0);
 });
+
+it('persists confirmed anchors in guideline documents as authoritative timed rows across restart and repeat saves',async()=>{
+  const v=new MemoryVault();v.files={};
+  const docs=validateGuidelineDocuments({habits:[
+    {title:'午餐后快走',actions:['午餐12:30结束，休息10分钟，再快走30分钟'],conditions:[],schedule:{start:'12:40',end:'13:10',days:[0,1,2,3,4,5,6],priority:3}},
+    {title:'晚餐后快走',actions:['晚餐18:30结束，休息10分钟，再快走30分钟'],conditions:[],schedule:{start:'18:40',end:'19:10',days:[0,1,2,3,4,5,6],priority:3}},
+    {title:'力量训练',actions:['每周一三五在晚间快走后训练'],conditions:[],schedule:{start:'19:10',end:null,days:[1,3,5],priority:3}},
+    {title:'饮食规则',actions:[],conditions:['白水不限'],schedule:null},
+  ]},45);
+  expect(docs[2].schedule?.end).toBe('19:55');
+  const staged=await stageHabitFiles(v,settings,[],docs.flatMap(d=>d.rules),docs);
+  expect(staged.unresolvedRules).toEqual([]);
+  const p=await createPreview(v,settings,now,{},false,[],[],staged.updates);expect(p.result.errors).toEqual([]);
+  await applyPreview(v,v,p,settings,now);
+  const index=await readHabitIndex(v,settings);
+  expect(index.index.files.flatMap(f=>f.habits).map(h=>[h.start,h.end])).toEqual([['19:10','19:55'],['12:40','13:10'],['18:40','19:10']]);
+  expect(v.files['Habits/午餐后快走.md']).toContain('12:40-13:10');
+  const repeated=await stageHabitFiles(v,settings,[],docs.flatMap(d=>d.rules),docs);expect(repeated.updates).toEqual(staged.updates);
+  const again=await createPreview(v,settings,now,v.tracking);expect(again.diff.added).toEqual([]);expect(again.result.errors).toEqual([]);
+});
+it('marks only genuinely unresolved actions as missing anchors',async()=>{
+  const v=new MemoryVault();v.files={};
+  const docs=validateGuidelineDocuments({habits:[{title:'午餐后快走',actions:['午餐后走30分钟'],conditions:[],schedule:null},{title:'饮食规则',actions:[],conditions:['白水不限'],schedule:null}]});
+  const staged=await stageHabitFiles(v,settings,[],docs.flatMap(d=>d.rules),docs);
+  expect(staged.unresolvedRules).toEqual(['ACTION: 午餐后走30分钟']);
+});

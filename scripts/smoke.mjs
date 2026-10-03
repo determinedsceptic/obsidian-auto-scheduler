@@ -460,3 +460,24 @@ assert([...files.keys()].filter(p=>p.startsWith('DailyNotes/')).length===0);
 const splitRestart=new AutoScheduler(app);await splitRestart.onload();splitRestart.commands.find(c=>c.id==='undo-last').callback();await splitRestart.operations.tail;
 for(const title of ['午餐后快走','晚餐后快走','饮食规则'])assert.equal(files.get(`Habits/${title}.md`),'');
 console.log('PASS: named habit guideline documents through actual chat, per-habit filenames/headings, no aggregate/daily prose and restart undo');
+
+// Confirmed anchors saved through guideline tools must become actual timed habits, survive restart, and not prompt again.
+await splitRestart.updateSettings({defaultEventDuration:45,fixedBuffer:0,blockBuffer:15});
+mockResponse={data:[{id:'fixture'}]};const timedView=splitRestart.views.get('auto-scheduler-chat')({});await timedView.onOpen();await timedView.modelLoad;
+mockResponse={output:[{type:'function_call',name:'save_habit_guidelines',arguments:JSON.stringify({habits:[
+  {title:'午餐后快走',actions:['午餐12:30结束，休息10分钟，再快走30分钟'],conditions:[],schedule:{start:'12:40',end:'13:10',days:[0,1,2,3,4,5,6],priority:3}},
+  {title:'晚餐后快走',actions:['晚餐18:30结束，休息10分钟，再快走30分钟'],conditions:[],schedule:{start:'18:40',end:'19:10',days:[0,1,2,3,4,5,6],priority:3}},
+  {title:'力量训练',actions:['每周一三五在晚间快走后训练'],conditions:[],schedule:{start:'19:10',end:null,days:[1,3,5],priority:3}}
+]})}]};
+await timedView.send('Lunch ends 12:30, dinner 18:30, rest 10 minutes. Save the exact times.');
+assert(!timedView.messages.at(-1).content.includes('Request failed'),timedView.messages.at(-1).content);
+assert(timedView.messages.at(-1).content.includes('2026-10-01 12:40–13:10'));
+assert(timedView.messages.at(-1).content.includes('Default duration (45 min) used for: 力量训练'));
+assert(!timedView.messages.at(-1).content.includes('What time do lunch'));
+assert(files.get('Habits/力量训练.md').includes('19:10-19:55'));
+const timedRestart=new AutoScheduler(app);await timedRestart.onload();
+const timedIndex=await timedRestart.readHabits(JSON.stringify(timedRestart.state.settings));
+assert.equal(timedIndex.index.files.flatMap(f=>f.habits).length,3);
+const reapplied=await timedRestart.scheduleExistingHabits(timedIndex,JSON.stringify(timedRestart.state.settings));
+assert(reapplied.text.includes('already present'));assert(files.get('DailyNotes/2026-10-02.md').includes('19:10 - 19:55'));
+console.log('PASS: guideline schedules persist exact meal anchors, report configured default, produce actual dated blocks, and survive restart without asking again');

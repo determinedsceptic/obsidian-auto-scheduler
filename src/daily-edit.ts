@@ -80,7 +80,7 @@ export async function readDailyPlan(vault: VaultPort, settings: Settings, tracki
   return { read: { date, items, ...([habitContext(original ?? ''), indexedContext].filter(Boolean).length ? {habitContext:[habitContext(original ?? ''), indexedContext].filter(Boolean).join('\n')} : {}) }, path, original, annotated, aiTasks: structuredClone(aiTasks), tracking: structuredClone(tracking), constraints, habitSourcePath, habitSource, habitSources:indexed.contents };
 }
 
-export async function previewDailyEdits(vault: VaultPort, settings: Settings, tracking: Tracking, aiTasks: Task[], read: DailySnapshot, edits: DailyEdit[], now: Date, batchId: string, guidelines: string[] = [], guidelineFiles:GuidelineDocument[]=[]): Promise<{ preview: Preview; ids: Set<string>; defaults: string[] }> {
+export async function previewDailyEdits(vault: VaultPort, settings: Settings, tracking: Tracking, aiTasks: Task[], read: DailySnapshot, edits: DailyEdit[], now: Date, batchId: string, guidelines: string[] = [], guidelineFiles:GuidelineDocument[]=[]): Promise<{ preview: Preview; ids: Set<string>; defaults: string[]; unresolvedRules:string[] }> {
   validateDailyEdits({date:read.read.date, edits}); checkReadDate(read.read.date, now);
   if (JSON.stringify(read.aiTasks) !== JSON.stringify(aiTasks) || JSON.stringify(read.tracking) !== JSON.stringify(tracking)) throw new Error('Task state changed since reading. Read the plan again.');
   if (await vault.read(read.path) !== read.original) throw new Error('Daily note changed since reading. Read the plan again.');
@@ -126,5 +126,5 @@ export async function previewDailyEdits(vault: VaultPort, settings: Settings, tr
   const preview = await createPreview(vault, settings, now, tracking, false, aiTasks, [], staged.updates, [], { dailyUpdates: { [read.path]: updated }, aiTasksAfter: next });
   for(const [path,original] of Object.entries(staged.originals))if(preview.snapshot[path]!==original)throw Error('Habit guidelines changed. Read again.');
   if (preview.snapshot[read.path] !== read.original) throw new Error('Daily note changed since reading. Read the plan again.');
-  return { preview, ids, defaults };
+  return { preview, ids, defaults, unresolvedRules:staged.unresolvedRules };
 }
