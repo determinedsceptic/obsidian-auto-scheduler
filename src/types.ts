@@ -14,7 +14,7 @@ export interface Settings {
   taskFolder: string; habitFolder: string; fixedFile: string; outputFile: string; weekdays: number[];
   periods: string[]; defaultEventDuration: number; dailyCapacity: number; fixedBuffer: number; blockBuffer: number;
   outputMode: 'plain' | 'day-planner' | 'gantt';
-  outputLocation: 'single' | 'daily'; dailyFolder: string; ganttFilter: string; cleanDaily: boolean;
+  outputLocation: 'single' | 'daily'; dailyFolder: string; ganttFilter: string; cleanDaily: boolean; balanceLoad?: boolean;
 }
 export const DEFAULT_SETTINGS: Settings = {
   taskFolder: 'Tasks', habitFolder: 'Habits', fixedFile: 'Scheduler/Fixed.md', outputFile: 'Scheduler/Schedule.md',

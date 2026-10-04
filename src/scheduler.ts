@@ -51,6 +51,39 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
     else if (task.earliest !== undefined && task.earliest >= localMinute(until, '00:00')) reason = 'Earliest start is outside the scheduling range';
     else {
       let largestGap = 0;
+      if(settings.balanceLoad){
+        // Choose one feasible session at a time, then recompute all seven days.
+        // Include existing commitments and buffers; dates break equal-load ties.
+        while(remaining){
+          let best:{day:typeof days[number];start:number;length:number;load:number}|undefined;
+          for(const day of days){
+            const used=result.blocks.filter(b=>b.taskId===task.id&&b.date===day.date).reduce((n,b)=>n+b.end-b.start,0);
+            const budget=(task.dailyMinutes??Infinity)-used;
+            for(const window of day.windows){
+              const available={start:Math.max(window.start,nowMinute,task.earliest??-Infinity),end:Math.min(window.end,task.due??Infinity)};
+              for(const gap of gaps(available,day.occupied)){
+                const local=atDate(gap.start);const minute=local.getHours()*60+local.getMinutes()+local.getSeconds()/60+local.getMilliseconds()/60000;
+                const start=gap.start+Math.ceil(minute/GRID)*GRID-minute;
+                const max=Math.floor((gap.end-start)/GRID)*GRID;largestGap=Math.max(largestGap,max);
+                const lower=task.split?task.min:remaining;
+                let length=Math.min(remaining,max,budget,task.split?Math.max(60,task.min):remaining);
+                for(;length>=lower;length-=GRID){
+                  const tail=remaining-length;const occupancy={start,end:start+length+settings.blockBuffer};
+                  const load=total(clipped([...day.occupied,occupancy],day.windows));
+                  if((!task.split||!tail||tail>=task.min)&&occupancy.end<=gap.end&&load<=settings.dailyCapacity){
+                    if((task.split||length===remaining)&&(!best||load<best.load||(load===best.load&&start<best.start)))best={day,start,length,load};
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          if(!best)break;
+          const {day,start,length}=best,end=start+length;
+          result.blocks.push({id:`b_${task.id}_${day.date.replace(/-/g,'')}_${Math.round(start)}_${length}`,taskId:task.id,date:day.date,start,end,title:task.title,priority:task.priority,path:task.path,locked:false,completed:false});
+          day.occupied=merge([...day.occupied,{start,end:end+settings.blockBuffer}]);remaining-=length;
+        }
+      }else {
       for (const day of days) {
         if (!remaining) break;
         let dayBudget=(task.dailyMinutes??Infinity)-previous.filter(b=>b.taskId===task.id&&b.date===day.date&&(b.completed||b.locked)).reduce((n,b)=>n+b.end-b.start,0);
@@ -80,6 +113,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
             result.blocks.push(block); day.occupied = merge([...day.occupied, { start, end: end + settings.blockBuffer }]); remaining -= length; dayBudget -= length;
           }
         }
+      }
       }
       if (remaining && !task.split) reason = 'No continuous interval satisfies capacity and buffers';
       else if (remaining && largestGap < task.min) reason = 'Available gaps are shorter than the minimum block including buffers';

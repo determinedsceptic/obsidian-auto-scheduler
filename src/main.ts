@@ -220,7 +220,7 @@ export default class AutoScheduler extends Plugin {
       const current=await readHabitIndex(this.vaultPort,this.state.settings);
       if(JSON.stringify(current.contents)!==JSON.stringify(read.contents))throw Error('Habit templates changed. Read them again.');
       if(!current.index.files.some(f=>f.habits.some(h=>h.enabled)))throw Error('No enabled fixed-time habits found. Read the action list and confirm its start times before scheduling.');
-      const settings={...this.state.settings,outputLocation:'daily' as const,cleanDaily:true,outputMode:this.state.settings.outputMode==='plain'?'day-planner' as const:this.state.settings.outputMode};
+      const settings={...this.state.settings,outputLocation:'daily' as const,cleanDaily:true,balanceLoad:true,outputMode:this.state.settings.outputMode==='plain'?'day-planner' as const:this.state.settings.outputMode};
       const now=new Date();const preview=await createPreview(this.vaultPort,settings,now,this.state.tracking,false,this.state.aiTasks);
       for(const [path,content] of Object.entries(read.contents))if(preview.snapshot[path]!==content)throw Error('Habit templates changed. Read them again.');
       if(JSON.stringify(Object.keys(preview.snapshot).filter(p=>p.startsWith(settings.habitFolder+'/')).sort())!==JSON.stringify(Object.keys(read.contents).sort()))throw Error('Habit templates changed. Read them again.');
@@ -239,7 +239,7 @@ export default class AutoScheduler extends Plugin {
   async revisePlan(read: DailySnapshot, edits: DailyEdit[], expectedSettingsKey: string, guidelines: string[] = [], guidelineFiles:GuidelineDocument[]=[]): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
       if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
-      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const { preview, ids, defaults, unresolvedRules } = await previewDailyEdits(this.vaultPort, settings, this.state.tracking, this.state.aiTasks, read, edits, new Date(), crypto.randomUUID().replace(/-/g, ''), guidelines, guidelineFiles);
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
@@ -272,7 +272,7 @@ export default class AutoScheduler extends Plugin {
     return this.operations.run(async () => {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       if (this.state.aiTasks.length + drafts.length > 10000) throw new Error('AI task limit reached');
-      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const added = materializeTasks(drafts, settings, new Date(), crypto.randomUUID().replace(/-/g, ''));
       const preview = await createPreview(this.vaultPort, settings, new Date(), this.state.tracking, false, this.state.aiTasks, added);
@@ -306,7 +306,7 @@ export default class AutoScheduler extends Plugin {
     return this.operations.run(async () => {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       if (this.state.aiTasks.length + tasks.length > 10000) throw new Error('AI task limit reached');
-      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const now = new Date(), events = drafts.length ? resolveEvents(drafts, settings, now) : [];
       const added = tasks.length ? materializeTasks(tasks, settings, now, crypto.randomUUID().replace(/-/g, '')) : [];
@@ -345,7 +345,7 @@ export default class AutoScheduler extends Plugin {
   async scheduleEvents(drafts: EventDraft[], expectedSettingsKey?: string): Promise<AiScheduleReply> {
     return this.operations.run(async () => {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
-      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true,
+      const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
       const now = new Date(), events = resolveEvents(drafts, settings, now);
       const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], {}, events);

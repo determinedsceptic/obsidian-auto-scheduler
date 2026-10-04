@@ -335,7 +335,8 @@ await mixedView.send('Gym at 11:30 for an hour, get a phone number, and read eve
 assert(mixedView.messages.at(-1).content.includes('default date: next occurrence'));
 assert(mixedView.messages.at(-1).content.includes('Default duration (30 min) used for: Phone number, Read'));
 assert(files.get('DailyNotes/2026-10-01.md').includes('11:30 - 12:30 Gym'));
-assert(files.get('DailyNotes/2026-10-01.md').includes('Phone number'));
+assert(files.get('DailyNotes/2026-10-02.md').includes('Phone number'));
+assert(!files.get('DailyNotes/2026-10-01.md').includes('Phone number')); // Avoid the day occupied by the exact gym event.
 assert(files.get('Habits/Read.md').includes('19:00-19:30'));
 assert.equal(saved.aiTasks[0].remaining,30);
 const mixedRestart = new AutoScheduler(app); await mixedRestart.onload();
@@ -510,3 +511,13 @@ assert.equal(bookRead.read.items[0].totalMinutes,600);assert.equal(bookRead.read
 bookRestart.commands.find(c=>c.id==='undo-last').callback();await bookRestart.operations.tail;
 assert.equal(files.get('DailyNotes/2026-10-01.md'),bookSource);assert.equal(saved.aiTasks.length,0);
 console.log('PASS: whole-book estimate, today-first read/revise, per-day pace, durable total vs session duration, restart and undo');
+
+// Actual bundle enforces balanced dates, independent of proposed model clock times.
+saved=null;files.clear();folders.clear();
+const balancedPlugin=new AutoScheduler(app);await balancedPlugin.onload();
+await balancedPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00'],dailyCapacity:180,fixedBuffer:0,blockBuffer:0});
+const balancedReply=await balancedPlugin.scheduleAi(Array.from({length:7},(_,i)=>({title:`Balanced task ${i+1}`,minutes:30,priority:3,split:true,minMinutes:30,due:null,earliest:null})));
+assert.equal(balancedReply.notes.length,7);assert(saved.settings.balanceLoad);
+for(const note of balancedReply.notes)assert.equal((files.get(note.path).match(/Balanced task/g)||[]).length,1);
+const balancedRestart=new AutoScheduler(app);await balancedRestart.onload();assert(balancedRestart.state.settings.balanceLoad);
+console.log('PASS: seven AI tasks distributed over seven free dates, balanced policy persists after restart');

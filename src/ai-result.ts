@@ -15,7 +15,7 @@ export function planningDetails(preview:Preview,ids:Set<string>,now=new Date()):
   const today=dateKey(now);
   if(preview.result.blocks.some(b=>ids.has(b.taskId)&&!b.completed)&&!preview.result.blocks.some(b=>ids.has(b.taskId)&&!b.completed&&b.date===today)&&preview.aiTasksAfter.some(t=>ids.has(t.id)&&(t.earliest===undefined||t.earliest<(new Date(`${today}T23:59:59`).getTime()/60000)))){
     const windows=workWindows(today,preview.settings);
-    lines.push(!windows.length?'No session today: today is outside the configured working days.':windows.every(w=>w.end<=now.getTime()/60000)?'No session today: the configured working hours have ended.':'No feasible session remains today within the working hours, existing commitments, capacity, minimum block and buffer constraints.');
+    lines.push(!windows.length?'No session today: today is outside the configured working days.':windows.every(w=>w.end<=now.getTime()/60000)?'No session today: the configured working hours have ended.':preview.settings.balanceLoad?'Seven-day load balancing assigned later feasible slots after comparing today’s remaining gaps, existing commitments and task constraints.':'No feasible session remains today within the working hours, existing commitments, capacity, minimum block and buffer constraints.');
   }
   return lines;
 }

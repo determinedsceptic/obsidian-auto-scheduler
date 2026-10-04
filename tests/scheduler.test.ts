@@ -110,3 +110,37 @@ it('counts completed sessions against the project daily pace while preserving an
   const later=schedule([task({remaining:180,dailyMinutes:60,earliest:interval('09:00','10:00','2026-10-02').start})],[],[],s,now);
   expect(later.blocks[0].date).toBe('2026-10-02');
 });
+
+it('balances seven equal short tasks across seven days rather than packing the first day',()=>{
+  const tasks=Array.from({length:7},(_,i)=>task({id:`t${i}`,remaining:30,min:30}));
+  const result=schedule(tasks,[],[],config({balanceLoad:true}),now);
+  expect(result.errors).toEqual([]);expect(result.unscheduled).toEqual([]);
+  expect(result.days.map(d=>d.occupied)).toEqual([30,30,30,30,30,30,30]);
+});
+it('avoids a heavily occupied day and balances long splittable work across the remaining free dates',()=>{
+  const fixed=[interval('09:00','12:00','2026-10-02')];
+  const result=schedule([task({remaining:360})],fixed,[],config({balanceLoad:true}),now);
+  expect(result.errors).toEqual([]);expect(result.unscheduled).toEqual([]);
+  expect(result.blocks).toHaveLength(6);
+  expect(result.blocks.some(b=>b.date==='2026-10-02')).toBe(false);
+  expect(result.days.filter(d=>d.date!=='2026-10-02').map(d=>d.occupied)).toEqual([60,60,60,60,60,60]);
+});
+it('balances while preserving deadlines, daily project pace, buffers and unsplittable tasks',()=>{
+  const s=config({balanceLoad:true,periods:['09:00-12:00'],dailyCapacity:180,blockBuffer:15});
+  const result=schedule([task({id:'urgent',remaining:60,due:localMinute('2026-10-01','12:00'),priority:5}),task({id:'book',remaining:600,dailyMinutes:60}),task({id:'call',remaining:90,split:false,priority:4})],[],[],s,now);
+  expect(result.errors).toEqual([]);
+  expect(result.blocks.filter(b=>b.taskId==='urgent').every(b=>b.date==='2026-10-01')).toBe(true);
+  const calls=result.blocks.filter(b=>b.taskId==='call');expect(calls).toHaveLength(1);expect(calls[0].end-calls[0].start).toBe(90);
+  for(const d of result.days){
+    expect(d.occupied).toBeLessThanOrEqual(180);
+    expect(result.blocks.filter(b=>b.taskId==='book'&&b.date===d.date).reduce((n,b)=>n+b.end-b.start,0)).toBeLessThanOrEqual(60);
+  }
+  expect(result.blocks.filter(b=>b.taskId==='book').reduce((n,b)=>n+b.end-b.start,0)+result.unscheduled.find(t=>t.taskId==='book')!.remaining).toBe(600);
+});
+it('uses only future gaps today and deterministically breaks equal-load ties by date',()=>{
+  const current=new Date('2026-10-01T10:05:00+08:00');
+  const tasks=[task({remaining:60})];const s=config({balanceLoad:true});
+  const result=schedule(tasks,[],[],s,current);
+  expect(result.blocks[0].date).toBe('2026-10-01');expect(clock(result.blocks[0].start)).toBe('10:15');
+  expect(schedule(tasks,[],[],s,current)).toEqual(result);
+});

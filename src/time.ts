@@ -86,6 +86,7 @@ export function validateSettings(settings: Settings): string[] {
   if (settings.fixedFile === settings.outputFile) errors.push('Fixed-event and output files cannot be the same');
   if (settings.taskFolder === settings.outputFile || settings.taskFolder === settings.fixedFile) errors.push('The task folder cannot be an input/output file');
   if (!Array.isArray(settings.weekdays) || !settings.weekdays.length || new Set(settings.weekdays).size !== settings.weekdays.length || settings.weekdays.some(n => !Number.isInteger(n) || n < 0 || n > 6)) errors.push('Working days must be distinct values 0–6 (0 is Sunday)');
+  if(settings.balanceLoad!==undefined&&typeof settings.balanceLoad!=='boolean')errors.push('Load balancing must be a boolean');
   if (!['plain', 'day-planner', 'gantt'].includes(settings.outputMode)) errors.push('Unknown output format');
   if (!['single', 'daily'].includes(settings.outputLocation)) errors.push('Unknown output location');
   if (typeof settings.ganttFilter !== 'string' || settings.ganttFilter.length > 100 || /[\r\n<>\[\]%]/.test(settings.ganttFilter)) errors.push('Gantt prefix must be plain text on one line');

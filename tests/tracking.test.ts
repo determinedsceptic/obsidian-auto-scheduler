@@ -116,3 +116,30 @@ it('does not display the scheduling end constraint of a habit as a deadline',asy
   expect(note).toContain('- [ ] 12:40 - 13:10 🔼 Lunch walk');
   expect(note).not.toMatch(/[📅🛫⏳]/u);
 });
+
+it('accepts Tasks-plugin completion dates while protecting the task text and preserving the marker on replan',async()=>{
+  const vault=new MemoryVault();const p=await preview(vault);await applyPreview(vault,vault,p,settings(),now);
+  const path='DailyNotes/2026-10-01.md';
+  vault.files[path]=vault.files[path].replace(/^- \[ \] (.*)$/m,'- [x] $1 ✅ 2026-10-01');
+  const replanned=await preview(vault);expect(replanned.result.errors).toEqual([]);
+  expect(replanned.outputs?.[path]).toContain('✅ 2026-10-01');
+  vault.files[path]=vault.files[path].replace('分析','Changed title');
+  expect((await preview(vault)).result.errors[0].message).toContain('refusing to overwrite');
+});
+it('refuses a completion date on an unchecked row',()=>{
+  const clean=cleanDaily(renderDaily(dailyDocument(null),[block()],'day-planner'));
+  const changed=clean.text.replace(/^- \[ \] (.*)$/m,'- [ ] $1 ✅ 2026-10-01');
+  expect(()=>rehydrate(changed,{before:null,after:clean.record})).toThrow('refusing to overwrite');
+});
+
+it('keeps genuine deadlines and completion dates across repeated replans and reopening a completed row',()=>{
+  const text=renderDaily(dailyDocument(null),[block({locked:false})],'day-planner');
+  const plain=cleanDaily(text,new Set(),new Map(),true,new Map([['a',now.getTime()/60000+1440]]));
+  const marked=plain.text.replace(/^- \[ \] (.*)$/m,'- [x] $1 ✅ 2026-10-01');
+  const annotated=rehydrate(marked,{before:null,after:plain.record})!;
+  const reformatted=cleanDaily(annotated,new Set(),new Map(),true,new Map([['a',now.getTime()/60000+1440]]));
+  expect(reformatted.text).toMatch(/📅 2026-10-02 08:00 ✅ 2026-10-01/);
+  expect(rehydrate(reformatted.text,{before:null,after:reformatted.record})).toContain('- [x]');
+  const reopened=reformatted.text.replace('- [x]','- [ ]').replace(' ✅ 2026-10-01','');
+  expect(rehydrate(reopened,{before:null,after:reformatted.record})).toContain('- [ ]');
+});
