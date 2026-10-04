@@ -115,6 +115,9 @@ export default class AutoScheduler extends Plugin {
     if (saved?.aiTasks) { if (!validAiTasks(saved.aiTasks)) throw new Error('Invalid AI task data. Keep a backup of data.json.'); this.state.aiTasks = saved.aiTasks; }
     if (!saved?.byok) await this.saveData(this.state);
     this.registerView(CHAT_VIEW, leaf => new ChatView(leaf, this));
+    this.addCommand({ id: 'clear-chat', name: 'Clear AI conversation', callback: () => {
+      for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.clearChat();
+    } });
     this.addCommand({ id: 'open-chat', name: 'Open AI assistant', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));

@@ -1,5 +1,13 @@
 # Usage
 
+## Clear and rate limits
+
+Use **Clear** below the chat input, or **Auto Scheduler: Clear AI conversation** in the command palette. It clears conversation history and the draft, cancels local waiting/retries, and ignores late model replies. It preserves daily notes, habit templates, credentials and provider/model choices. If a schedule save has already started, that transaction finishes safely before another request can start; clearing a chat is not undo. The host's request API cannot necessarily cancel generation already running on the provider.
+
+A correct key and available balance do not guarantee that the selected model/project has spare request or token capacity. For HTTP 429, the sidebar now shows recognized limit categories and numeric counters when available; OpenAI errors offer **Open API limits**. HTTP-date waits use the server's `Date` header to avoid local clock skew. Numeric `Retry-After` is seconds, even when long; valid service waits are not silently shortened. Clear old conversation context or select another authorized model when appropriate. If a third-party key was issued for a gateway, configure that gateway's endpoint rather than the OpenAI official endpoint.
+
+Responses requests reserve at most 2048 output tokens; the confirmed GPT-6 Luna alias also uses `reasoning.effort=none` for this scheduling workflow. Incomplete tool output still fails validation before any write. These changes reduce avoidable token pressure but cannot change provider-side limits. See [OpenAI's rate-limit guide](https://developers.openai.com/api/docs/guides/rate-limits).
+
 ## Settings
 
 All paths are relative to the vault. Hidden folders and `..` are rejected.

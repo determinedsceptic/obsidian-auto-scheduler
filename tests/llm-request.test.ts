@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { requestLlm, retryDelay } from '../src/llm-request';
+import { requestLlm, retryDelay, rateLimitDetails } from '../src/llm-request';
 const url = 'https://example.test/v1/responses';
 afterEach(() => vi.useRealTimers());
 describe('provider rate limits', () => {
@@ -28,6 +28,11 @@ describe('provider rate limits', () => {
     const checked = expect(result).rejects.toThrow('after 3 attempts');
     await vi.advanceTimersByTimeAsync(2000); await checked; expect(transport).toHaveBeenCalledTimes(3);
   });
+  it('does not misclassify a daily request cap as exhausted credit', async () => {
+    const transport=vi.fn().mockResolvedValue({status:429,headers:{'Retry-After':'15475'},json:{error:{code:'rate_limit_exceeded',message:'Daily limit exceeded for requests per day (RPD): Limit: 100'}}});
+    const failure=await requestLlm(url,{},'{}',transport,60000).catch(e=>e.message);
+    expect(failure).toContain('requests/day');expect(failure).toContain('15475 seconds');expect(failure).not.toContain('credit balance exhausted');
+  });
   it('never retries earlier than a long provider wait or exceeds the time budget', async () => {
     const transport = vi.fn().mockResolvedValue({status:429,json:{},headers:{'Retry-After':'120'}});
     await expect(requestLlm(url,{},'{}',transport,60000)).rejects.toThrow('120 seconds'); expect(transport).toHaveBeenCalledTimes(1);
@@ -52,5 +57,29 @@ describe('provider rate limits', () => {
     await expect(requestLlm(url,{},'{}',transport,60000)).rejects.toThrow('Authentication rejected'); expect(transport).toHaveBeenCalledTimes(1);
     transport.mockRejectedValue(new Error('private-token'));
     await expect(requestLlm(url,{},'{}',transport,60000)).rejects.toThrow('network'); expect(transport).toHaveBeenCalledTimes(2);
+  });
+  it('uses the server clock for HTTP-date Retry-After instead of creating a four-hour wait', () => {
+    expect(retryDelay({status:429,json:{},headers:{Date:'Sun, 04 Oct 2026 08:00:00 GMT','Retry-After':'Sun, 04 Oct 2026 08:00:02 GMT'}},1,Date.UTC(2026,9,4,3,42,5))).toBe(2000);
+    // Numeric Retry-After is seconds, even when large: never silently reinterpret as ms.
+    expect(retryDelay({status:429,json:{},headers:{'Retry-After':'15475'}},1)).toBe(15475000);
+  });
+  it('reports request/token limits without exposing org IDs, credentials or raw error prose', () => {
+    const details=rateLimitDetails({status:429,headers:{'x-ratelimit-remaining-tokens':'0','x-ratelimit-limit-tokens':'5000'},json:{error:{code:'rate_limit_exceeded',message:'private-token org-private reached tokens per min (TPM): Limit: 5000, Requested: 7000'}}});
+    expect(details).toContain('tokens/minute');expect(details).toContain('remaining=0/5000');expect(details).toContain('requested=7000');expect(details).not.toContain('private');
+  });
+  it('cancels a retry wait immediately and clears all timers', async () => {
+    vi.useFakeTimers();const controller=new AbortController();
+    const transport=vi.fn().mockResolvedValue({status:429,json:{},headers:{'Retry-After':'30'}});
+    const result=requestLlm(url,{},'{}',transport,60000,{signal:controller.signal});
+    const checked=expect(result).rejects.toThrow('cleared');
+    await vi.advanceTimersByTimeAsync(1);controller.abort();await checked;
+    expect(transport).toHaveBeenCalledTimes(1);expect(vi.getTimerCount()).toBe(0);
+  });
+  it('cancels an in-flight host request even when the transport cannot abort', async () => {
+    vi.useFakeTimers();const controller=new AbortController();
+    const transport=vi.fn().mockImplementation(()=>new Promise(()=>{}));
+    const result=requestLlm(url,{},'{}',transport,60000,{signal:controller.signal});
+    const checked=expect(result).rejects.toThrow('cleared');controller.abort();await checked;
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

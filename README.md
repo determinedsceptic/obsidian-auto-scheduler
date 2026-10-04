@@ -98,6 +98,7 @@ Use hosted APIs or a compatible local service. Changing the endpoint or protocol
 | Command | Purpose |
 | --- | --- |
 | Open AI assistant | Open the chat sidebar. |
+| Clear AI conversation | Clear messages/draft and cancel a pending model request; preserve saved schedules and provider settings. |
 | Create habits template | Create and open an example template without replacing an existing one. |
 | Preview weekly schedule | Preview today plus six days, then apply manually. |
 | Clean daily schedule format | Remove legacy display metadata from existing tracked daily output without replanning. |

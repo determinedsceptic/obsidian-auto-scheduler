@@ -13,6 +13,7 @@ describe('LLM adapters and host validation', () => {
     const reply = await chat(DEFAULT_LLM, 'test-only', messages, config(), now, async (url, headers, body) => {
       expect(url).toBe('https://api.openai.com/v1/responses'); expect(headers.Authorization).toBe('Bearer test-only');
       const data = JSON.parse(body); expect(data.model).toBe('gpt-6-luna'); expect(data.store).toBe(false);
+      expect(data.max_output_tokens).toBe(2048); expect(data.reasoning.effort).toBe('none');
       expect(data.tools[0].name).toBe('create_tasks'); expect(data.tools[0].parameters.additionalProperties).toBe(false);
       expect(body).not.toContain('Tasks/A.md'); return { status: 200, json: response };
     });

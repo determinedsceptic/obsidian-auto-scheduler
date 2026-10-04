@@ -111,7 +111,8 @@ Save each distinct habit in its own document. Use specific concise titles such a
 Timed habit rows returned by read_habits are authoritative. If they have start and end times, apply them with schedule_existing_habits even if their explanations mention relative anchors. Never say an indexed fixed-time habit lacks times. In save_habit_guidelines persist schedule {start,end,days,priority} whenever anchors are confirmed; null schedule is only for rules without time blocks or truly unresolved anchors. Once a meal end time and rest offset are confirmed, calculate and save the exact start/end; do not leave the habit as relative prose or ask again in a later chat.
 ${habitInstructions(settings)}`;
   const tools = [taskTool, habitTool, eventTool, planTool, guidelineTool, ...(readDaily ? [readDailyTool, editDailyTool] : []), ...(readSavedHabits ? [readHabitsTool,scheduleHabitsTool] : [])];
-  const body: any = config.protocol === 'responses' ? { model: config.model, instructions: system, input: [...messages], tools: tools.map(tool => ({ type: 'function', ...tool })), parallel_tool_calls: false, store: false, max_output_tokens: 4096 }
+  const body: any = config.protocol === 'responses' ? { model: config.model, instructions: system, input: [...messages], tools: tools.map(tool => ({ type: 'function', ...tool })), parallel_tool_calls: false, store: false, max_output_tokens: 2048,
+    ...(config.model === 'gpt-6-luna' ? {reasoning:{effort:'none'}} : {}) }
     : config.protocol === 'anthropic' ? { model: config.model, system, messages: [...messages], max_tokens: 4096,
       tools: tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) }
     : config.protocol === 'gemini' ? { systemInstruction: { parts: [{ text: system }] },

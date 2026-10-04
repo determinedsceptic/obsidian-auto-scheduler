@@ -57,7 +57,7 @@ const clipboardCopies = [];
 const module = { exports: {} };
 vm.runInNewContext(await readFile('main.js', 'utf8'), {
   navigator: { clipboard: { writeText: async text => { clipboardCopies.push(text); } } },
-  module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, setTimeout, clearTimeout,
+  module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, AbortController, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
     return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting,
@@ -79,7 +79,7 @@ const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => 
   process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
 } };
 const plugin = new AutoScheduler(app); await plugin.onload();
-assert.equal(plugin.commands.length, 5);
+assert.equal(plugin.commands.length, 6);
 plugin.commands.find(command => command.id === 'preview-week').callback();
 await plugin.operations.tail;
 assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
@@ -563,3 +563,24 @@ assert.equal(saved.aiTasks.length,1);assert(!rateView.messages.at(-1).content.in
 assert.equal([...files.values()].join('\n').match(/Rate recovered task/g).length,1);
 assert.equal(rateView.busy,false);assert.equal(rateView.requestStatus,'');
 console.log('PASS: quota failure makes no writes and restores prompt; two 429 retries resend identical request, exclude failed chat context and schedule exactly once');
+
+// Clear cancels a pending host request and prevents its late reply from writing.
+const beforeClearState=JSON.stringify(saved),beforeClearFiles=JSON.stringify([...files]);
+let lateReply;
+mockHttp=()=>new Promise(resolve=>{lateReply=resolve;});
+const staleSend=rateView.send('This request will be cleared');
+for(let i=0;i<20&&!lateReply;i++)await Promise.resolve();assert(lateReply,'Pending fixture request did not start');
+const clearButton=rateView.contentEl.all().find(n=>n.options.text==='Clear');assert(clearButton);assert(!clearButton.disabled);
+clearButton.events.click();assert.equal(rateView.messages.length,0);assert.equal(rateView.draftText,'');assert.equal(rateView.busy,false);
+await staleSend;
+lateReply({status:200,json:{output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'MUST NOT BE WRITTEN',minutes:30}]})}]}});
+await Promise.resolve();await Promise.resolve();
+assert.equal(JSON.stringify(saved),beforeClearState);assert.equal(JSON.stringify([...files]),beforeClearFiles);assert.equal(rateView.messages.length,0);
+mockHttp=()=>({status:200,json:{output:[{type:'message',content:[{type:'output_text',text:'Fresh conversation'}]}]}});
+await rateView.send('New conversation');mockHttp=null;
+assert.equal(rateView.messages.length,2);assert.equal(rateView.messages.at(-1).content,'Fresh conversation');
+const freshBody=JSON.parse(requests.at(-1).body);assert.equal(freshBody.input.length,1);assert.equal(freshBody.input[0].content,'New conversation');
+ratePlugin.app.workspace.getLeavesOfType=()=>[{view:rateView}];
+ratePlugin.commands.find(c=>c.id==='clear-chat').callback();assert.equal(rateView.messages.length,0);
+assert.equal(JSON.stringify([...files]),beforeClearFiles);
+console.log('PASS: Clear remains enabled while busy, cancels pending request immediately, ignores late scheduling reply, preserves saved notes, starts fresh context and works from command palette');

@@ -12,6 +12,10 @@ export class ChatView extends ItemView {
   private draftText = '';
   private busy = false;
   private requestStatus = '';
+  private generation = 0;
+  private activeJob: number | null = null;
+  private applying = false;
+  private requestAbort?: AbortController;
   private closed = false;
   private modelBusy = false;
   private modelStatus = '';
@@ -21,7 +25,15 @@ export class ChatView extends ItemView {
   getDisplayText(): string { return 'AI scheduling assistant'; }
   getIcon(): string { return 'calendar-clock'; }
   async onOpen(): Promise<void> { this.closed = false; this.render(); this.modelLoad = this.loadModels(); }
-  async onClose(): Promise<void> { this.closed = true; this.messages = []; this.draftText = ''; this.contentEl.empty(); }
+  async onClose(): Promise<void> { this.closed = true; this.clearChat(); this.contentEl.empty(); }
+  clearChat(): void {
+    this.generation++;
+    this.requestAbort?.abort(); this.requestAbort = undefined;
+    this.messages = []; this.draftText = '';
+    if (!this.applying) { this.activeJob = null; this.busy = false; this.requestStatus = ''; }
+    else this.requestStatus = 'Finishing the current schedule save…';
+    this.render();
+  }
   refresh(): void { this.render(); }
   private async loadModels(): Promise<void> {
     if (this.closed || this.modelBusy || !this.plugin.byok.providers.length) return;
@@ -64,6 +76,9 @@ export class ChatView extends ItemView {
       const row = log.createDiv({ cls: `auto-scheduler-message auto-scheduler-${message.role}` });
       row.createEl('strong', { text: message.role === 'user' ? 'You' : 'Assistant' });
       row.createEl('p', { text: message.content });
+      if (message.failed && message.content.includes('HTTP 429') && new URL(this.plugin.state.llm.baseUrl).hostname === 'api.openai.com') {
+        row.createEl('a', {text:'Open API limits', href:'https://platform.openai.com/settings/organization/limits', attr:{target:'_blank',rel:'noopener noreferrer'}});
+      }
       const copy = row.createEl('button', { text: 'Copy', cls: 'auto-scheduler-message-copy', attr: { 'aria-label': 'Copy message' } });
       copy.addEventListener('click', () => {
         void navigator.clipboard.writeText(message.content).then(() => { copy.textContent = 'Copied'; }, () => new Notice('Could not copy. Select the text and use your system copy shortcut.'));
@@ -85,8 +100,8 @@ export class ChatView extends ItemView {
     const send = actions.createEl('button', { text: 'Send', cls: 'mod-cta' }); send.disabled = this.busy || !this.plugin.byok.providers.length;
     send.addEventListener('click', () => { void this.send(input.value); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); void this.send(input.value); } });
-    const clear = actions.createEl('button', { text: 'Clear chat' }); clear.disabled = this.busy;
-    clear.addEventListener('click', () => { this.messages = []; this.draftText = ''; this.render(); });
+    const clear = actions.createEl('button', { text: 'Clear', attr: {'aria-label':'Clear conversation and cancel pending request','title':'Clear conversation and cancel pending request. Saved schedules remain.'} });
+    clear.addEventListener('click', () => this.clearChat());
     log.scrollTop = log.scrollHeight;
   }
   private async send(value: string): Promise<void> {
@@ -94,10 +109,13 @@ export class ChatView extends ItemView {
     const message = value.trim(); const config = { ...this.plugin.state.llm }; const settings = JSON.parse(JSON.stringify(this.plugin.state.settings));
     const providerId = this.plugin.byok.activeProviderId;
     const configKey = JSON.stringify(config), settingsKey = JSON.stringify(settings);
+    const job = ++this.generation; this.activeJob = job;
+    const controller = new AbortController(); this.requestAbort = controller;
+    const current = () => !this.closed && this.generation === job;
     this.busy = true; let token: string;
     try { endpoint(config); token = await this.plugin.getApiToken(); if (config.requiresKey !== false && !token.trim()) throw new Error('First select Configure provider / API key'); }
-    catch (error) { this.busy = false; new Notice((error as Error).message); return; }
-    if (this.closed) { this.busy = false; return; }
+    catch (error) { if (current()) { this.busy = false; this.activeJob = null; new Notice((error as Error).message); } return; }
+    if (!current()) return;
     if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
     const userMessage: ChatMessage & { failed?: boolean } = { role: 'user', content: message };
     this.draftText = ''; this.messages.push(userMessage); this.busy = true; this.render();
@@ -110,34 +128,37 @@ export class ChatView extends ItemView {
         try { json = result.json; } catch { /* Non-JSON provider errors use status/headers. */ }
         return { status: result.status, json, headers: result.headers };
       }, 60000, async date => {
-        if (this.closed) throw new Error('Chat was closed');
+        if (!current()) throw new Error('Chat was closed or cleared');
         const snapshot = await this.plugin.readPlan(date, settingsKey); reads.set(date, snapshot); return snapshot.read;
       }, async()=>{
-        if(this.closed)throw Error('Chat was closed');
+        if(!current())throw Error('Chat was closed or cleared');
         habitRead=await this.plugin.readHabits(settingsKey);return habitRead.index;
-      }, { cancelled: () => this.closed, onRetry: (delay, retry) => {
+      }, { signal: controller.signal, cancelled: () => !current(), onRetry: (delay, retry) => {
         this.requestStatus = `Provider rate limit. Retrying in ${Math.ceil(delay / 1000)}s (${retry}/2)…`; this.render();
       } });
       modelFinished = true;
+      if (!current()) return;
       this.requestStatus = ''; this.render();
-      if (this.closed) return;
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
       if (reply.scheduleExistingHabits || reply.revision || reply.guidelines?.length || reply.tasks.length || reply.habits.length || reply.events.length) {
+        this.applying = true;
         const mixed = [reply.tasks, reply.habits, reply.events].filter(a => a.length).length > 1;
         const result = reply.scheduleExistingHabits ? await this.plugin.scheduleExistingHabits(habitRead!,settingsKey) : reply.revision ? await this.plugin.revisePlan(reads.get(reply.revision.date)!, reply.revision.edits, settingsKey, reply.guidelines, reply.guidelineFiles) : mixed || reply.guidelines?.length ? await this.plugin.schedulePlan(reply.tasks, reply.habits, reply.events, settingsKey, reply.guidelines, reply.guidelineFiles) : reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
         for (const task of reply.tasks) if(task.estimateBasis) result.text += `\n${task.title}: ${task.minutes} min — ${task.estimateBasis}`;
         if (reply.defaultsUsed.length) result.text += `\nDefault duration (${settings.defaultEventDuration} min) used for: ${reply.defaultsUsed.join(', ')}.`;
-        if (!this.closed) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
-        if (!this.closed && result.notes.length) {
+        if (current()) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
+        if (current() && result.notes.length) {
           try { await this.plugin.openScheduledNote(result.notes[0].path); }
-          catch (error) { if (!this.closed) this.messages.push({ role: 'assistant', content: `Schedule saved, but the daily note could not be opened: ${(error as Error).message}` }); }
+          catch (error) { if (current()) this.messages.push({ role: 'assistant', content: `Schedule saved, but the daily note could not be opened: ${(error as Error).message}` }); }
         }
       } else this.messages.push({ role: 'assistant', content: reply.text });
     } catch (error) {
-      if (!this.closed) {
+      if (current()) {
         if (!modelFinished) { this.draftText = message; userMessage.failed = true; }
         this.messages.push({ role: 'assistant', content: `Request failed: ${(error as Error).message}`, failed: true });
       }
-    } finally { this.busy = false; this.requestStatus = ''; this.render(); }
+    } finally {
+      if (this.activeJob === job) { this.activeJob = null; this.busy = false; this.applying = false; this.requestStatus = ''; if (this.requestAbort === controller) this.requestAbort = undefined; this.render(); }
+    }
   }
 }
