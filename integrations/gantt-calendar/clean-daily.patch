@@ -1,0 +1,116 @@
+diff --git a/src/tasks/taskParser/main.ts b/src/tasks/taskParser/main.ts
+index 16a10e6..b8c57a2 100644
+--- a/src/tasks/taskParser/main.ts
++++ b/src/tasks/taskParser/main.ts
+@@ -9,6 +9,8 @@
+  */
+ 
+ import { TFile, ListItemCache } from 'obsidian';
++import { dailyNoteInterval } from '../daily-note-interval';
++import { createDate } from '../../dateUtils/timezone';
+ import type { GCTask } from '../../types';
+ import type { TaskFormatType } from '../taskSerializerSymbols';
+ 
+@@ -144,6 +146,17 @@ export function parseTasksFromListItems(
+             }
+         }
+ 
++        // Infer the scheduled interval only for clean rows in date-named Day Planner notes.
++        // Keep dueDate as the user's business deadline, independent of the session end.
++        const interval = dailyNoteInterval(file.path, lines, lineNumber);
++        if (interval && !task.startDate && !task.scheduledDate) {
++            task.startDate = createDate(interval.start);
++            task.scheduledDate = createDate(interval.end);
++            task.datePrecision = { ...task.datePrecision, startDate: 'time', scheduledDate: 'time' };
++            task.dailyNoteInterval = true;
++            task.description = task.description.replace(/^\d{1,2}:\d{2}(?:\s*[-–—]\s*\d{1,2}:\d{2})?\s+/, '');
++        }
++
+         // ==================== 警告检查 ====================
+         // 混合格式警告
+         if (detectedFormat === 'mixed') {
+diff --git a/src/tasks/taskUpdater.ts b/src/tasks/taskUpdater.ts
+index 669c553..3f1a91f 100644
+--- a/src/tasks/taskUpdater.ts
++++ b/src/tasks/taskUpdater.ts
+@@ -1,4 +1,6 @@
+ import { App, TFile } from 'obsidian';
++import { dailyNoteInterval, completeDailyRow } from './daily-note-interval';
++import { toISOStringLocal } from '../dateUtils/timezone';
+ import { GCTask } from '../types';
+ import { serializeTask, TaskUpdates } from './taskSerializer';
+ import { parseSingleTaskLine } from './taskParser/main';
+@@ -249,6 +251,23 @@ export async function updateTaskProperties(
+ 
+ 		const taskLine = lines[taskLineIndex];
+ 
++        if (task.dailyNoteInterval) {
++            if (!dailyNoteInterval(task.filePath, lines, taskLineIndex)) throw new Error('Daily interval changed; refresh the calendar.');
++            const allowed = new Set(['completed', 'completionDate', 'status']);
++            if (Object.keys(updates).some(key => !allowed.has(key)) || updates.status && !['todo', 'done'].includes(updates.status)) {
++                throw new Error('Edit this clean daily interval in its daily note or with Auto Scheduler. Calendar date fields are inferred from the note and clocks.');
++            }
++            const done = updates.completed ?? (updates.status ? updates.status === 'done' : task.completed);
++            const completedAt = updates.completionDate ? toISOStringLocal(updates.completionDate) : undefined;
++            lines[taskLineIndex] = completeDailyRow(taskLine, done, completedAt);
++            const expected = lines.slice(); expected[taskLineIndex] = taskLine;
++            await app.vault.process(file, current => {
++                if (current !== expected.join('\n')) throw new Error('Daily note changed before writing; refresh the calendar.');
++                return lines.join('\n');
++            });
++            return;
++        }
++
+ 		Logger.debug('taskUpdater', 'Original task line:', taskLine);
+ 
+ 		// 确定任务格式
+diff --git a/src/types.ts b/src/types.ts
+index 12a69ed..418840b 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -106,6 +106,7 @@ export interface CalendarMonth {
+  * - ❌ = cancelledDate (取消日期)
+  */
+ export interface GCTask {
++	dailyNoteInterval?: boolean; // Inferred clean daily interval; do not serialize inferred dates.
+ 	filePath: string;              // 任务所在文件的完整路径
+ 	fileName: string;              // 任务所在文件名
+ 	lineNumber: number;            // 任务在文件中的行号
+diff --git a/tests/dailyNoteIntervals.test.ts b/tests/dailyNoteIntervals.test.ts
+new file mode 100644
+index 0000000..655a9bd
+--- /dev/null
++++ b/tests/dailyNoteIntervals.test.ts
+@@ -0,0 +1,32 @@
++import { TFile, ListItemCache } from 'obsidian';
++import { parseTasksFromListItems } from '../src/tasks/taskParser/main';
++import { updateTaskProperties } from '../src/tasks/taskUpdater';
++const path = 'DailyNotes/2026-10-04.md';
++function read(content: string, name = path) {
++ const lines = content.split('\n');
++ const items = lines.flatMap((line, i) => /^- \[.\]/.test(line) ? [{ position: {start:{line:i,col:0,offset:0},end:{line:i,col:line.length,offset:line.length}},task:line[3]} as ListItemCache] : []);
++ return parseTasksFromListItems({path:name,basename:name.split('/').pop()!.replace('.md','')},lines,items,['tasks','dataview'],'');
++}
++describe('clean daily intervals', () => {
++ it('indexes all five daily tasks; preserves deadline, priority and completion', () => {
++  const tasks = read('# Day planner\n- [x] 12:40 - 13:10 🔼 午餐后快走 ✅ 2026-10-04\n- [x] 18:40 - 19:10 🔼 晚餐后快走 ✅ 2026-10-04\n- [ ] 09:00 - 09:30 ⏫ 🎯 入党申请书 📅 2026-10-20\n- [ ] 09:45 - 10:15 🔼 Website\n- [ ] 10:30 - 11:00 🔼 Book');
++  expect(tasks).toHaveLength(5); expect(tasks.every(t=>t.dailyNoteInterval)).toBe(true);
++  expect(tasks[0].startDate?.getHours()).toBe(12); expect(tasks[0].scheduledDate?.getMinutes()).toBe(10);
++  expect(tasks[0].completed).toBe(true); expect(tasks[0].description).toBe('午餐后快走');
++  expect(tasks[2].dueDate?.getDate()).toBe(20); expect(tasks[2].startDate?.getDate()).toBe(4); expect(tasks[2].priority).toBe('high');
++ });
++ it('preserves explicit date fields and excludes non-daily/fenced rows', () => {
++  expect(read('# Day planner\n- [ ] 09:00 - 10:00 Task 🛫 2026-10-08')[0].startDate?.getDate()).toBe(8);
++  expect(read('# Day planner\n- [ ] 09:00 - 10:00 Task','Habits/Walk.md')[0].dailyNoteInterval).toBeUndefined();
++  expect(read('# Day planner\n```\n- [ ] 09:00 - 10:00 Example\n```')[0].dailyNoteInterval).toBeUndefined();
++ });
++ it('completion/reopening preserves clean text; inferred fields are not serialized', async () => {
++  const source = '# Day planner\n- [ ] 09:00 - 09:30 ⏫ 🎯 Task 📅 2026-10-20\n'; let text = source;
++  const file = new TFile(); file.path = path;
++  const app = {vault:{getAbstractFileByPath:()=>file,read:async()=>text,process:async (_f:TFile,fn:(s:string)=>string)=>{text=fn(text);}},plugins:{getPlugin:()=>null}} as unknown as Parameters<typeof updateTaskProperties>[0];
++  await updateTaskProperties(app,read(text)[0],{completed:true,status:'done',completionDate:new Date(2026,9,4)},['tasks','dataview']);
++  expect(text).toBe(source.replace('[ ]','[x]').replace('2026-10-20','2026-10-20 ✅ 2026-10-04'));
++  await updateTaskProperties(app,read(text)[0],{completed:false,status:'todo',completionDate:null},['tasks','dataview']); expect(text).toBe(source);
++  await expect(updateTaskProperties(app,read(text)[0],{startDate:new Date(2026,9,5,9)},['tasks','dataview'])).rejects.toThrow('daily note'); expect(text).toBe(source);
++ });
++});
