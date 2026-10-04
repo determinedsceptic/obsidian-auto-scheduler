@@ -10,10 +10,12 @@ import { habitInstructions, habitTool, validateHabitDrafts } from './habit-tool'
 import type { HabitDraft } from './habit-tool';
 import type { LlmSettings, Settings, Task } from './types';
 import { dateKey, parseBoundary, safeVaultPath } from './time';
+import { requestLlm } from './llm-request';
+import type { Transport, RetryFeedback } from './llm-request';
+export type { Transport } from './llm-request';
 export interface ChatMessage { role: 'user' | 'assistant'; content: string }
 export interface TaskDraft { title: string; minutes: number; priority: number; split: boolean; minMinutes: number; due: string | null; earliest: string | null; estimateBasis?: string | null; dailyMinutes?: number | null }
 export interface LlmReply { text: string; tasks: TaskDraft[]; habits: HabitDraft[]; events: EventDraft[]; defaultsUsed: string[]; guidelines?: string[]; guidelineFiles?:GuidelineDocument[]; scheduleExistingHabits?: boolean; revision?: { date: string; edits: DailyEdit[] } }
-export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<{ status: number; json: unknown }>;
 const properties = {
   dailyMinutes: {type:['integer','null'],description:'Maximum effort per day for this task, in 15-minute units. Use 60 for a book/study project unless the user specifies another pace; null for unrestricted short tasks'},
   estimateBasis: {type:['string','null'],description:'For estimated effort: concise calculation and explicit assumptions, in user language; null for user-supplied duration or a short defaulted errand'},
@@ -94,7 +96,7 @@ export function authHeaders(config: LlmSettings, token: string): Record<string, 
   else if (token.trim()) headers.Authorization = `Bearer ${token.trim()}`;
   return headers;
 }
-export async function chat(config: LlmSettings, token: string, messages: ChatMessage[], settings: Settings, now: Date, transport: Transport, timeoutMs = 60000, readDaily?: (date: string) => Promise<DailyRead>, readSavedHabits?: () => Promise<HabitIndex>): Promise<LlmReply> {
+export async function chat(config: LlmSettings, token: string, messages: ChatMessage[], settings: Settings, now: Date, transport: Transport, timeoutMs = 60000, readDaily?: (date: string) => Promise<DailyRead>, readSavedHabits?: () => Promise<HabitIndex>, feedback: RetryFeedback = {}): Promise<LlmReply> {
   const url = endpoint(config);
   if ((config.requiresKey !== false && !token.trim()) || /[\r\n]/.test(token)) throw new Error('Configure an API key in the sidebar');
   if (!messages.length || messages.length > 40 || messages.some(m => !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string' || m.content.length > 12000)) throw new Error('Conversation too long. Clear the chat and try again.');
@@ -119,12 +121,7 @@ ${habitInstructions(settings)}`;
       ...(config.model.startsWith('gpt-6') ? { reasoning_effort: 'none', max_completion_tokens: 4096 } : { max_tokens: 4096 }) };
   const readDates = new Set<string>(); let habitsRead=false;
   for (let round = 0; round < 4; round++) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let response: Awaited<ReturnType<Transport>>;
-  try { response = await Promise.race([transport(url, authHeaders(config, token), JSON.stringify(body)), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Request timed out')), timeoutMs); })]); }
-  catch { throw new Error('LLM request failed or timed out. Check your network and provider settings. No tasks were written.'); }
-  finally { if (timer) clearTimeout(timer); }
-  if (response.status < 200 || response.status >= 300) throw new Error(`LLM returned HTTP ${response.status}. Check your API key, model access, and quota. No tasks were written.`);
+  const response = await requestLlm(url, authHeaders(config, token), JSON.stringify(body), transport, timeoutMs, feedback);
   if (JSON.stringify(response.json).length > 1000000) throw new Error('Model response too large');
   const data = object(response.json); const calls: { name: string; arguments: string; id?: string }[] = []; const texts: string[] = [];
   if (config.protocol === 'responses') {

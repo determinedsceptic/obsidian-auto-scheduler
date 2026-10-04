@@ -5,7 +5,7 @@ import { webcrypto } from 'node:crypto';
 import assert from 'node:assert/strict';
 process.env.TZ = 'Asia/Shanghai';
 const notices = []; let saved = null; let latestModal;
-let mockResponse; let mockStatus = 200; const requests = []; const openedNotes = [];
+let mockResponse; let mockStatus = 200; let mockHttp; const requests = []; const openedNotes = [];
 class Node {
   constructor(tag = '', options = {}) { this.tag = tag; this.options = options; this.children = []; this.events = {}; this.value = options.value ?? ''; }
   createEl(tag, options) { const node = new Node(tag, options); this.children.push(node); return node; }
@@ -61,7 +61,7 @@ vm.runInNewContext(await readFile('main.js', 'utf8'), {
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
     return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting,
-      requestUrl: async request => { requests.push(request); return { status: mockStatus, json: typeof mockResponse === 'function' ? mockResponse(request) : mockResponse }; },
+      requestUrl: async request => { requests.push(request); if (mockHttp) return mockHttp(request); return { status: mockStatus, json: typeof mockResponse === 'function' ? mockResponse(request) : mockResponse }; },
       Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
   },
 });
@@ -540,3 +540,26 @@ await completedRestart.readPlan('2026-10-01',JSON.stringify(completedRestart.sta
 completedRestart.commands.find(c=>c.id==='undo-last').callback();await completedRestart.operations.tail;
 assert.equal(files.get(completedPath),completedSource);
 console.log('PASS: Tasks-completed habits plus handwritten book can read/revise, preserving completion dates, restart and exact undo');
+
+// Provider errors retain diagnostics without exposing prose; retries write only once.
+saved=null;files.clear();folders.clear();
+const ratePlugin=new AutoScheduler(app);await ratePlugin.onload();
+await ratePlugin.saveProvider({id:'rate-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
+const rateView=ratePlugin.views.get('auto-scheduler-chat')({});
+mockResponse={data:[{id:'fixture'}]};await rateView.onOpen();await rateView.modelLoad;
+const rateState=JSON.stringify(saved),rateFiles=JSON.stringify([...files]);
+let quotaRequests=0;
+mockHttp=()=>{quotaRequests++;return {status:429,json:{error:{code:'insufficient_quota',message:'DO-NOT-EXPOSE-PROVIDER-BODY'}}};};
+await rateView.send('Schedule a 30-minute task');
+assert.equal(quotaRequests,1);assert.equal(JSON.stringify(saved),rateState);assert.equal(JSON.stringify([...files]),rateFiles);
+assert(rateView.messages.at(-1).content.includes('quota or credit balance'));assert(!rateView.messages.at(-1).content.includes('DO-NOT-EXPOSE'));
+assert.equal(rateView.draftText,'Schedule a 30-minute task');
+let retries=0;const retryBodies=[];
+mockHttp=request=>{retryBodies.push(request.body);retries++;return retries<=2?{status:429,json:{error:{code:'rate_limit_exceeded'}},headers:{'Retry-After':'0'}}:{status:200,json:{output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'Rate recovered task',minutes:30}]})}]}};};
+await rateView.send(rateView.draftText);mockHttp=null;
+assert.equal(retries,3);assert(retryBodies.every(b=>b===retryBodies[0]));
+const resentInput=JSON.parse(retryBodies[0]).input;assert.equal(resentInput.length,1);assert.equal(resentInput[0].content,'Schedule a 30-minute task');
+assert.equal(saved.aiTasks.length,1);assert(!rateView.messages.at(-1).content.includes('Request failed'));
+assert.equal([...files.values()].join('\n').match(/Rate recovered task/g).length,1);
+assert.equal(rateView.busy,false);assert.equal(rateView.requestStatus,'');
+console.log('PASS: quota failure makes no writes and restores prompt; two 429 retries resend identical request, exclude failed chat context and schedule exactly once');

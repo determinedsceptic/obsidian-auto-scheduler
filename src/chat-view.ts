@@ -8,9 +8,10 @@ import type { ChatMessage } from './llm';
 import type { ScheduledNote } from './ai-result';
 export const CHAT_VIEW = 'auto-scheduler-chat';
 export class ChatView extends ItemView {
-  private messages: (ChatMessage & { notes?: ScheduledNote[] })[] = [];
+  private messages: (ChatMessage & { notes?: ScheduledNote[]; failed?: boolean })[] = [];
   private draftText = '';
   private busy = false;
+  private requestStatus = '';
   private closed = false;
   private modelBusy = false;
   private modelStatus = '';
@@ -75,7 +76,7 @@ export class ChatView extends ItemView {
         }
       }
     }
-    if (this.busy) log.createEl('p', { text: 'Reading and scheduling…' });
+    if (this.busy) log.createEl('p', { text: this.requestStatus || 'Reading and scheduling…' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
     const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task, appointment or habit…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; });
@@ -98,19 +99,27 @@ export class ChatView extends ItemView {
     catch (error) { this.busy = false; new Notice((error as Error).message); return; }
     if (this.closed) { this.busy = false; return; }
     if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
-    this.draftText = ''; this.messages.push({ role: 'user', content: message }); this.busy = true; this.render();
+    const userMessage: ChatMessage & { failed?: boolean } = { role: 'user', content: message };
+    this.draftText = ''; this.messages.push(userMessage); this.busy = true; this.render();
+    let modelFinished = false;
     try {
       const reads = new Map<string, DailySnapshot>(); let habitRead:HabitIndexSnapshot|undefined;
-      const reply = await chat(config, token, this.messages.map(({ role, content }) => ({ role, content })), settings, new Date(), async (url, headers, body) => {
+      const reply = await chat(config, token, this.messages.filter(m => !m.failed).map(({ role, content }) => ({ role, content })), settings, new Date(), async (url, headers, body) => {
         const result = await requestUrl({ url, method: 'POST', headers, body, throw: false });
-        return { status: result.status, json: result.status >= 200 && result.status < 300 ? result.json : {} };
+        let json: unknown = {};
+        try { json = result.json; } catch { /* Non-JSON provider errors use status/headers. */ }
+        return { status: result.status, json, headers: result.headers };
       }, 60000, async date => {
         if (this.closed) throw new Error('Chat was closed');
         const snapshot = await this.plugin.readPlan(date, settingsKey); reads.set(date, snapshot); return snapshot.read;
       }, async()=>{
         if(this.closed)throw Error('Chat was closed');
         habitRead=await this.plugin.readHabits(settingsKey);return habitRead.index;
-      });
+      }, { cancelled: () => this.closed, onRetry: (delay, retry) => {
+        this.requestStatus = `Provider rate limit. Retrying in ${Math.ceil(delay / 1000)}s (${retry}/2)…`; this.render();
+      } });
+      modelFinished = true;
+      this.requestStatus = ''; this.render();
       if (this.closed) return;
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
       if (reply.scheduleExistingHabits || reply.revision || reply.guidelines?.length || reply.tasks.length || reply.habits.length || reply.events.length) {
@@ -125,7 +134,10 @@ export class ChatView extends ItemView {
         }
       } else this.messages.push({ role: 'assistant', content: reply.text });
     } catch (error) {
-      if (!this.closed) this.messages.push({ role: 'assistant', content: `Request failed: ${(error as Error).message}` });
-    } finally { this.busy = false; this.render(); }
+      if (!this.closed) {
+        if (!modelFinished) { this.draftText = message; userMessage.failed = true; }
+        this.messages.push({ role: 'assistant', content: `Request failed: ${(error as Error).message}`, failed: true });
+      }
+    } finally { this.busy = false; this.requestStatus = ''; this.render(); }
   }
 }

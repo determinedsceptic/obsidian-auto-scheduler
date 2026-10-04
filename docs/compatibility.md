@@ -24,4 +24,6 @@ A generated block's `due` means its end time; the source task's business deadlin
 
 Upstream plugins are optional. Runtime imports only the Obsidian host; the scheduler can be used alone. Historical verification details are under `development/validation/`.
 
+LLM HTTP 429 responses retain structured error codes and retry headers. Temporary limits retry at most twice, honoring `Retry-After`, `retry-after-ms`, or Gemini RetryInfo; a wait beyond 30 seconds or the request's time budget requires resending later. Explicit quota/billing failures are not retried. No provider/model is switched automatically and no local action is executed until a successful response is validated. Failed model requests restore the input and are excluded from subsequent chat context. Arbitrary provider error prose is not displayed because it may echo credentials or prompts. Provider-side exhausted quota still requires a billing/usage change or selecting another authorized provider/model.
+
 Gantt output uses Dataview priority fields consistently. Combining priority emoji with Dataview dates makes the pinned upstream parser select its mixed/Tasks branch. Clean daily lists still display priority emoji.
