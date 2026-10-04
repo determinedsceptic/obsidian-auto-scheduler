@@ -521,3 +521,22 @@ assert.equal(balancedReply.notes.length,7);assert(saved.settings.balanceLoad);
 for(const note of balancedReply.notes)assert.equal((files.get(note.path).match(/Balanced task/g)||[]).length,1);
 const balancedRestart=new AutoScheduler(app);await balancedRestart.onload();assert(balancedRestart.state.settings.balanceLoad);
 console.log('PASS: seven AI tasks distributed over seven free dates, balanced policy persists after restart');
+
+// Completion dates added by Tasks must not block a read/revise transaction.
+saved=null;files.clear();folders.clear();
+const completedHabitPlugin=new AutoScheduler(app);await completedHabitPlugin.onload();
+await completedHabitPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00','14:00-18:00'],dailyCapacity:360,fixedBuffer:0,blockBuffer:0});
+await completedHabitPlugin.scheduleHabits([{title:'Lunch walk',start:'12:40',end:'13:10',days:[0,1,2,3,4,5,6],priority:3},{title:'Dinner walk',start:'18:40',end:'19:10',days:[0,1,2,3,4,5,6],priority:3}]);
+const completedPath='DailyNotes/2026-10-01.md';
+files.set(completedPath,files.get(completedPath).replace(/^- \[ \] (.*)$/gm,'- [x] $1 ✅ 2026-10-01')+'- [ ] 10:30 - 11:00 Read AI Infra\n');
+const completedSource=files.get(completedPath);
+const completedRead=await completedHabitPlugin.readPlan('2026-10-01',JSON.stringify(completedHabitPlugin.state.settings));
+assert.equal(completedRead.read.items.filter(i=>i.completed).length,2);
+const ordinary=completedRead.read.items.find(i=>i.title==='Read AI Infra');assert(ordinary?.editable);
+const completedReply=await completedHabitPlugin.revisePlan(completedRead,[{ref:ordinary.ref,targetDate:'2026-10-01',title:null,minutes:600,priority:null,dailyMinutes:60,estimateBasis:'Provisional 10 hours'}],JSON.stringify(completedHabitPlugin.state.settings));
+assert(completedReply.text.includes('600 min'));assert.equal((files.get(completedPath).match(/✅ 2026-10-01/g)||[]).length,2);
+const completedRestart=new AutoScheduler(app);await completedRestart.onload();
+await completedRestart.readPlan('2026-10-01',JSON.stringify(completedRestart.state.settings));
+completedRestart.commands.find(c=>c.id==='undo-last').callback();await completedRestart.operations.tail;
+assert.equal(files.get(completedPath),completedSource);
+console.log('PASS: Tasks-completed habits plus handwritten book can read/revise, preserving completion dates, restart and exact undo');
