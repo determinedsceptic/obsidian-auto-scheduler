@@ -97,3 +97,11 @@ describe('Clean daily lists与插件跟踪', () => {
     expect(rehydrate(clean.text, { before: null, after: clean.record })).toContain('as-block');
   });
 });
+
+it('exports Gantt start/end timestamps without replacing the true deadline and round-trips completion',()=>{
+  const text=renderDaily(dailyDocument(null),[block({locked:false})],'day-planner');
+  const output=cleanDaily(text,new Set(),new Map(),true,new Map());
+  expect(output.text).toContain('🛫 2026-10-01 09:00 ⏳ 2026-10-01 10:00');
+  expect(output.text).not.toContain('📅');
+  expect(rehydrate(output.text.replace('- [ ]','- [x]'),{before:null,after:output.record})).toContain('- [x]');
+});

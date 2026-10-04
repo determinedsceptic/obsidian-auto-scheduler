@@ -402,11 +402,11 @@ assert(files.get('DailyNotes/2026-10-02.md').includes('📅 2026-10-05'));
 assert(!files.get('DailyNotes/2026-10-02.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
 assert(files.get('Habits/Walk 30 minutes after lunch and dinner.md').includes('- Walk 30 minutes after lunch and dinner'));
 assert(!files.get('Habits/Walk 30 minutes after lunch and dinner.md').includes('> ACTION:'));
-assert(files.get('Habits/Strength training Mon, Wed, Fri after the evening walk.md').includes('Strength training Mon, Wed, Fri'));
+assert(files.get('Habits/Strength training.md').includes('Strength training Mon, Wed, Fri'));
 const editRestart = new AutoScheduler(app); await editRestart.onload();
 editRestart.commands.find(c=>c.id==='undo-last').callback(); await editRestart.operations.tail;
 assert.equal(files.get('DailyNotes/2026-10-01.md'),editSource); assert.equal(saved.aiTasks.length,0);
-assert.equal(saved.undo,null); assert.equal(files.get('Habits/Walk 30 minutes after lunch and dinner.md'),''); assert.equal(files.get('Habits/Strength training Mon, Wed, Fri after the evening walk.md'),'');
+assert.equal(saved.undo,null); assert.equal(files.get('Habits/Walk 30 minutes after lunch and dinner.md'),''); assert.equal(files.get('Habits/Strength training.md'),'');
 console.log('PASS: actual chat read/edit loop, section privacy, carry-over, default duration, deadline display, natural habit inheritance, destination navigation and restart undo');
 
 // Guideline-only requests must commit despite producing no scheduled blocks.

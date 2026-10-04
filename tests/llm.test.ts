@@ -129,3 +129,11 @@ it('validates a mixed plan with a default-duration task and an undated exact eve
   expect(r.tasks[0].minutes).toBe(30);expect(r.events[0].date).toBeNull();expect(r.events[0].minutes).toBe(60);expect(r.defaultsUsed).toEqual(['Phone number']);
   await expect(chat(DEFAULT_LLM,'test-only',messages,config(),now,async()=>({status:200,json:{output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify({tasks:[],habits:[],events:[]})}]}}))).rejects.toThrow('at least one');
 });
+
+it('retains estimated total effort and assumptions instead of using the errand default',()=>{
+  const basis='暂按300页、每小时30页估算：300÷30=10小时';
+  const tasks=validateDrafts({tasks:[{...draft,title:'读一本书',minutes:600,estimateBasis:basis}]});
+  expect(tasks[0].minutes).toBe(600);expect(tasks[0].estimateBasis).toBe(basis);
+  expect(materializeTasks(tasks,config(),now,'book')[0].remaining).toBe(600);
+  expect(()=>validateDrafts({tasks:[{...draft,minutes:null,estimateBasis:basis}]})).toThrow('explicit minutes');
+});

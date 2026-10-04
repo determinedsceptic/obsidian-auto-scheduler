@@ -166,3 +166,15 @@ A deadline-only task uses **Default duration** while retaining its original dead
 Try: “Save these habits: walk 30 minutes after lunch and dinner, resting 10–20 minutes first; do strength training on Monday, Wednesday and Friday after the evening walk; keep my dietary rules as written.” The assistant decomposes the routine into separate actions and non-time rules, then stores each distinct habit in a separate Markdown file named after its specific title in the configured habits folder. Generated daily schedule notes contain timed blocks, not repeated source prose. Relative routines and conditional rules remain guidelines until you confirm their clock times and a rest duration; strength training uses the configured default duration when none is given. the assistant asks for meal/anchor times to create timed blocks. It lists the decomposed actions and marks missing times for confirmation; it does not invent meal times. Whole-plan inheritance can save the action list and move tasks in one undoable action. Existing habit sections are preserved; an absent section is created as **Habits and guidelines**.
 
 Confirmed habit anchors are persisted as fixed time rows in the individual habit file, not just relative descriptions. The `save_habit_guidelines` document schema includes `schedule` (start, end, weekdays, priority); a null end applies Default duration. Null schedule is reserved for non-time constraints or genuinely unknown anchors. Later reads use the stored start/end directly.
+
+### Habit reuse and effort estimates
+
+Before creating a routine, the assistant reads all habit templates and reuses the canonical title for an equivalent activity. Identical timed routines are idempotent; conflicting times and ambiguous existing duplicates are rejected for clarification. Lunch and dinner walks remain separate. Descriptive rules are merged into the existing document rather than generating a file per sentence.
+
+For projects such as reading a book, the assistant estimates total effort before scheduling and reports its calculation and assumptions. For example, a provisional 300-page book at 30 pages/hour requires 600 minutes, split across available days. This is an adjustable estimate, not a confirmed fact about your book. Short atomic errands can still use the configured default duration.
+
+### Calendar interoperability
+
+Liam Cain's Calendar needs the core Daily Notes folder set to `DailyNotes` and format `YYYY-MM-DD`; enable Calendar under Community plugins. Calendar opens dated notes; Gantt Calendar displays their task intervals.
+
+Clean daily output keeps the Day Planner clock range and adds public Tasks emoji timestamps: `🛫` for the block start and `⏳` for the block end. Configure Gantt Calendar with an empty global task filter, date filter **Start date**, Gantt start **Start date**, and Gantt end **Scheduled date**. Here the scheduled-date field is intentionally used as the displayed block endpoint; `📅` remains the actual task deadline and is never replaced with the block end. No internal management comments or Dataview scheduled fields appear in clean notes.

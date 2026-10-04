@@ -60,3 +60,20 @@ it('marks only genuinely unresolved actions as missing anchors',async()=>{
   const staged=await stageHabitFiles(v,settings,[],docs.flatMap(d=>d.rules),docs);
   expect(staged.unresolvedRules).toEqual(['ACTION: 午餐后走30分钟']);
 });
+
+it('reuses similar routine titles without changing IDs or duplicating timed rows',async()=>{
+  const v=new MemoryVault();v.files={'Habits/午餐后快走.md':'# 午餐后快走\n- 12:40-13:10 🔼 午餐后快走 (Mon, Wed, Fri)\n'};
+  const staged=await stageHabitFiles(v,settings,[{title:'每周午饭后散步',start:'12:40',end:'13:10',days:[1,3,5],priority:3}],[],[{title:'每天午餐结束后快走30分钟',rules:['ACTION: 饭后休息10分钟再走']}]);
+  expect(Object.keys(staged.updates)).toEqual(['Habits/午餐后快走.md']);
+  expect(staged.created.size).toBe(0);
+  expect(staged.updates['Habits/午餐后快走.md'].match(/12:40-13:10/g)).toHaveLength(1);
+  await expect(stageHabitFiles(v,settings,[{title:'午饭后散步',start:'13:00',end:'13:30',days:[1,3,5],priority:3}],[])).rejects.toThrow('different times');
+});
+
+it('groups inherited sentence rules under concise canonical filenames in a fresh vault',async()=>{
+  const v=new MemoryVault();v.files={};
+  const rules=['ACTION: 每天午餐结束后休息10分钟，再快走30分钟。','RULE: 正餐外默认不吃零食，不喝有热量的饮料。','RULE: 训练前后若明显饥饿，可以补充无糖酸奶。'];
+  const staged=await stageHabitFiles(v,settings,[],rules);
+  expect(Object.keys(staged.updates)).toEqual(['Habits/午餐后快走.md','Habits/饮食规则.md']);
+  expect(staged.updates['Habits/饮食规则.md']).toContain('训练前后');
+});
