@@ -93,3 +93,20 @@ describe('确定性排程', () => {
     }
   });
 });
+
+it('checks today first for paced projects, continues across days and keeps overflow unscheduled',()=>{
+  const s=config({periods:['09:00-12:00','14:00-18:00'],dailyCapacity:360});
+  const current=new Date('2026-10-01T16:10:00+08:00');
+  const result=schedule([task({remaining:600,dailyMinutes:60})],[],[],s,current);
+  expect(result.errors).toEqual([]);expect(result.blocks[0].date).toBe('2026-10-01');
+  expect(result.blocks[0].start).toBeGreaterThanOrEqual(current.getTime()/60000);
+  expect(new Set(result.blocks.map(b=>b.date)).size).toBe(7);expect(result.unscheduled[0].remaining).toBe(180);
+});
+it('counts completed sessions against the project daily pace while preserving an explicit later start',()=>{
+  const s=config({periods:['09:00-18:00'],dailyCapacity:360});
+  const result=schedule([task({remaining:180,dailyMinutes:60})],[],[block({completed:true})],s,now);
+  expect(result.errors).toEqual([]);
+  expect(result.blocks.filter(b=>b.date==='2026-10-01'&&!b.completed)).toHaveLength(0);
+  const later=schedule([task({remaining:180,dailyMinutes:60,earliest:interval('09:00','10:00','2026-10-02').start})],[],[],s,now);
+  expect(later.blocks[0].date).toBe('2026-10-02');
+});

@@ -164,3 +164,36 @@ describe('handwritten calendar compatibility during carry-over', () => {
     await expect(revise(v)).rejects.toThrow('deadline'); expect(v.writes).toBe(0);
   });
 });
+
+it('turns a legacy half-hour book row into a paced whole-book plan starting in today’s remaining gap',async()=>{
+  const v=new EditVault();v.files={[source]:'# Day planner\n- [ ] 10:30 - 11:00 🔼 《AI Infra》\n'};
+  const time=new Date('2026-10-01T11:20:00+08:00');
+  const s=config({outputLocation:'daily',outputMode:'day-planner',cleanDaily:true,periods:['09:00-12:00','14:00-18:00'],dailyCapacity:360});
+  const snap=await readDailyPlan(v,s,{},[], '2026-10-01',time);
+  expect(snap.read.availability?.remainingPeriods).toEqual(['11:20-12:00','14:00-18:00']);
+  const {preview}=await previewDailyEdits(v,s,{},[],snap,[{ref:'row_2',targetDate:'2026-10-01',title:null,minutes:600,priority:null,estimateBasis:'暂按300页、每小时30页：10小时',dailyMinutes:60}],time,'book');
+  expect(preview.result.errors).toEqual([]);
+  const blocks=preview.result.blocks;expect(blocks[0].date).toBe('2026-10-01');
+  expect(blocks[0].start).toBeGreaterThanOrEqual(time.getTime()/60000);
+  for(const date of new Set(blocks.map(b=>b.date)))expect(blocks.filter(b=>b.date===date).reduce((n,b)=>n+b.end-b.start,0)).toBeLessThanOrEqual(60);
+  expect(new Set(blocks.map(b=>b.date)).size).toBe(7);
+  expect(preview.result.unscheduled[0].remaining).toBe(180);
+  await applyPreview(v,v,preview,s,time);
+  expect(v.aiTasks[0].remaining).toBe(600);expect(v.aiTasks[0].dailyMinutes).toBe(60);
+  const reread=await readDailyPlan(v,s,v.tracking,v.aiTasks,'2026-10-02',time);
+  expect(reread.read.items[0].totalMinutes).toBe(600);expect(reread.read.items[0].minutes).toBe(60);
+  expect(reread.read.items[0].remainingMinutes).toBe(600);
+});
+
+it('revises an existing project estimate without losing its ID, deadline or completed sessions',async()=>{
+  const v=new EditVault();v.files={};
+  const draft={title:'Read book',minutes:240,priority:3,split:true,minMinutes:30,earliest:null,due:'2026-10-07'};
+  const added=materializeTasks([draft],settings,now,'bookexisting');
+  const initial=await createPreview(v,settings,now,{},false,[],added);await applyPreview(v,v,initial,settings,now);
+  v.files[source]=v.files[source].replace('- [ ] 09:00','- [x] 09:00');
+  const snapshot=await readDailyPlan(v,settings,v.tracking,v.aiTasks,'2026-10-02',now);
+  const {preview}=await previewDailyEdits(v,settings,v.tracking,v.aiTasks,snapshot,[{ref:added[0].id,targetDate:'2026-10-01',title:null,minutes:600,priority:null,estimateBasis:'10-hour provisional total',dailyMinutes:60}],now,'expanded');
+  expect(preview.result.errors).toEqual([]);expect(preview.aiTasksAfter[0].id).toBe(added[0].id);
+  expect(preview.aiTasksAfter[0].due).toBe(added[0].due);expect(preview.result.blocks.some(b=>b.completed)).toBe(true);
+  expect(preview.aiTasksAfter[0].remaining).toBe(600);
+});

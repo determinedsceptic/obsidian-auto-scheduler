@@ -17,7 +17,7 @@ import { ProviderModal } from './provider-modal';
 import { activeConfig, migrateByok, validateByok, validateProvider, modelChoices, discoverModels } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
 import { materializeTasks, validAiTasks } from './llm';
-import { describeAiSchedule } from './ai-result';
+import { describeAiSchedule, planningDetails } from './ai-result';
 import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
 import { validTracking } from './tracking';
@@ -252,7 +252,7 @@ export default class AutoScheduler extends Plugin {
       try {
         const applied = await applyPreview(this.vaultPort, storage, preview, settings, new Date());
         const blocks = preview.result.blocks.filter(b => ids.has(b.taskId) && !b.completed);
-        const lines = [`Updated ${edits.length} unfinished tasks from ${read.read.date}. Completed records and recurring habits were preserved.`, 'Saved to daily notes:'];
+        const lines = [...planningDetails(preview,ids), `Updated ${edits.length} unfinished tasks from ${read.read.date}. Completed records and recurring habits were preserved.`, 'Saved to daily notes:'];
         for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
         for (const t of preview.result.unscheduled.filter(t => ids.has(t.taskId))) lines.push(`Not yet scheduled: ${t.title}, ${t.remaining} min remaining. Saved for a later replan.`);
         if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${settings.habitFolder}. It is a template, not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); if(unresolvedRules.length)lines.push(habitAnchorQuestion(unresolvedRules)); }
@@ -325,7 +325,7 @@ export default class AutoScheduler extends Plugin {
         const applied = await applyPreview(this.vaultPort, storage, preview, settings, new Date());
         const ids = new Set(added.map(t => t.id));
         const blocks = preview.result.blocks.filter(b => ids.has(b.taskId) || [...createdHabits].some(id => b.taskId === `habit_${id}_${b.date.replace(/-/g, '')}`));
-        const lines = ['Saved to daily notes:'];
+        const lines = [...planningDetails(preview,ids), 'Saved to daily notes:'];
         for (const e of events) lines.push(`• ${e.date} ${e.startTime}–${e.endTime}: ${e.title}${e.defaulted ? ` (default duration: ${settings.defaultEventDuration} min)` : ''}${e.dateDefaulted ? ' (default date: next occurrence of this time)' : ''}`);
         for (const b of blocks) lines.push(`• ${b.date} ${clock(b.start)}–${endClock(b)}: ${b.title} (priority ${b.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===b.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===b.taskId)!.due!)}`}`);
         if (guidelines.length) { lines.push(`Decomposed habit/action list saved in ${Object.keys(updates).join(', ')}. It is not copied into daily schedule notes:`); const actions=guidelines.filter(item=>item.startsWith('ACTION: ')), rules=guidelines.filter(item=>item.startsWith('RULE: ')); if(actions.length){lines.push('Schedule actions:');for(const item of actions)lines.push(`• ${item.slice(8)}`);} if(rules.length){lines.push('Rules / conditions:');for(const item of rules)lines.push(`• ${item.slice(6)}`);} for(const item of guidelines.filter(item=>!item.startsWith('ACTION: ')&&!item.startsWith('RULE: ')))lines.push(`• ${item}`); if(staged.unresolvedRules.length)lines.push(habitAnchorQuestion(staged.unresolvedRules)); }

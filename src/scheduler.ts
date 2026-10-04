@@ -29,6 +29,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
     if (overlap({ start: a.start, end: a.end + buffer }, { start: b.start, end: b.end + buffer })) errors.push({ path: settings.outputFile, line: 0, message: `Locked block or buffer conflict: ${a.id} / ${b.id}` });
   }
   for (const task of tasks) {
+    if(task.dailyMinutes!==undefined&&(!Number.isInteger(task.dailyMinutes)||task.dailyMinutes<task.min||task.dailyMinutes%GRID||!task.split))errors.push({path:task.path,line:task.line,message:'Invalid per-task daily effort limit'});
     const minutes = lockedMinutes.get(task.id) ?? 0;
     if (!task.completed && minutes > task.remaining) errors.push({ path: task.path, line: task.line, message: `Locked time exceeds remaining duration: ${task.id}` });
     if (!task.completed && !task.split && protectedBlocks.filter(b => b.taskId === task.id).length > 1) errors.push({ path: task.path, line: task.line, message: `An unsplittable task cannot have multiple locked blocks: ${task.id}` });
@@ -52,6 +53,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
       let largestGap = 0;
       for (const day of days) {
         if (!remaining) break;
+        let dayBudget=(task.dailyMinutes??Infinity)-previous.filter(b=>b.taskId===task.id&&b.date===day.date&&(b.completed||b.locked)).reduce((n,b)=>n+b.end-b.start,0);
         for (const window of day.windows) {
           if (!remaining) break;
           const available: Interval = { start: Math.max(window.start, nowMinute, task.earliest ?? -Infinity), end: Math.min(window.end, task.due ?? Infinity) };
@@ -63,7 +65,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
             const max = Math.floor((gap.end - start) / GRID) * GRID;
             largestGap = Math.max(largestGap, max);
             const lower = task.split ? task.min : remaining;
-            let length = Math.min(remaining, max);
+            let length = Math.min(remaining, max, dayBudget);
             if (!task.split && length !== remaining) continue;
             while (length >= lower) {
               const tail = remaining - length;
@@ -75,7 +77,7 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
             if (length < lower) continue;
             const end = start + length;
             const block: Block = { id: `b_${task.id}_${day.date.replace(/-/g, '')}_${Math.round(start)}_${length}`, taskId: task.id, date: day.date, start, end, title: task.title, priority: task.priority, path: task.path, locked: false, completed: false };
-            result.blocks.push(block); day.occupied = merge([...day.occupied, { start, end: end + settings.blockBuffer }]); remaining -= length;
+            result.blocks.push(block); day.occupied = merge([...day.occupied, { start, end: end + settings.blockBuffer }]); remaining -= length; dayBudget -= length;
           }
         }
       }

@@ -481,3 +481,32 @@ assert.equal(timedIndex.index.files.flatMap(f=>f.habits).length,3);
 const reapplied=await timedRestart.scheduleExistingHabits(timedIndex,JSON.stringify(timedRestart.state.settings));
 assert(reapplied.text.includes('already present'));assert(files.get('DailyNotes/2026-10-02.md').includes('19:10 - 19:55'));
 console.log('PASS: guideline schedules persist exact meal anchors, report configured default, produce actual dated blocks, and survive restart without asking again');
+
+// Actual bundle: a legacy book session becomes a durable paced project via read/revise tools.
+saved=null;files.clear();folders.clear();folders.add('DailyNotes');
+const bookPlugin=new AutoScheduler(app);await bookPlugin.onload();
+await bookPlugin.saveProvider({id:'book-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
+await bookPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00','14:00-18:00'],dailyCapacity:360,fixedBuffer:0,blockBuffer:0});
+const bookSource='# Day planner\n- [ ] 10:30 - 11:00 🔼 《AI Infra》\n';
+files.set('DailyNotes/2026-10-01.md',bookSource);
+mockResponse={data:[{id:'fixture'}]};
+const bookView=bookPlugin.views.get('auto-scheduler-chat')({});await bookView.onOpen();await bookView.modelLoad;
+let bookRounds=0;
+mockResponse=request=>{
+  const body=JSON.parse(request.body);bookRounds++;
+  assert(body.instructions.includes('targetDate must be TODAY'));
+  if(bookRounds===1)return {status:'completed',output:[{type:'function_call',name:'read_daily_plan',call_id:'read-book',arguments:JSON.stringify({date:'2026-10-01'})}]};
+  const read=JSON.parse(body.input.at(-1).output);assert.equal(read.items[0].minutes,30);assert(read.availability.workingDay);
+  return {status:'completed',output:[{type:'function_call',name:'revise_daily_tasks',call_id:'plan-book',arguments:JSON.stringify({date:'2026-10-01',guidelines:[],edits:[{ref:read.items[0].ref,targetDate:'2026-10-01',title:null,minutes:600,priority:null,estimateBasis:'Provisional 300 pages at 30 pages/hour = 10 hours',dailyMinutes:60}]})}]};
+};
+await bookView.send('Plan the whole book starting with today’s remaining time, one hour per day.');
+assert(!bookView.messages.at(-1).content.includes('Request failed'),bookView.messages.at(-1).content);
+assert(bookView.messages.at(-1).content.includes('600 min'));assert(bookView.messages.at(-1).content.includes('60 min/day'));
+assert.equal(openedNotes.at(-1),'DailyNotes/2026-10-01.md');
+assert.equal(saved.aiTasks.length,1);assert.equal(saved.aiTasks[0].remaining,600);assert.equal(saved.aiTasks[0].dailyMinutes,60);
+const bookRestart=new AutoScheduler(app);await bookRestart.onload();
+const bookRead=await bookRestart.readPlan('2026-10-02',JSON.stringify(bookRestart.state.settings));
+assert.equal(bookRead.read.items[0].totalMinutes,600);assert.equal(bookRead.read.items[0].minutes,60);
+bookRestart.commands.find(c=>c.id==='undo-last').callback();await bookRestart.operations.tail;
+assert.equal(files.get('DailyNotes/2026-10-01.md'),bookSource);assert.equal(saved.aiTasks.length,0);
+console.log('PASS: whole-book estimate, today-first read/revise, per-day pace, durable total vs session duration, restart and undo');
