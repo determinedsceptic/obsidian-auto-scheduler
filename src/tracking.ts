@@ -1,4 +1,3 @@
-import { dateKey, atDate, clock } from './time';
 import { deadlineLabel } from './calendar-format';
 import { START, END, parseOutput, prioritySymbol } from './output';
 import type { DailyTracking, Tracking, TrackingPair } from './types';
@@ -8,10 +7,11 @@ export function cleanDaily(text: string, aiIds: Set<string> = new Set(), priorit
   const parsed = parseOutput(text), newline = parsed.newline;
   const annotated = text.slice(text.indexOf(START), text.indexOf(END) + END.length);
   const lines = parsed.blocks.map(b => {
-    const line = (b.raw ?? '').replace(/<!-- as-block .+? -->/g, '')
+    let line = (b.raw ?? '').replace(/<!-- as-block .+? -->/g, '')
       .replace(/%%\[as-block::[^\]]+\]%%/g, '').replace(/\[(?:start|scheduled|due)::[^\]]+\]/gi, '').replace(aiIds.has(b.taskId) ? / \[\[[^\]]+\]\]/g : /$^/, '');
+    if (format) line = line.replace(/[🛫⏳📅]\s*\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?/gu, '');
     const deadline = deadlines.get(b.taskId);
-    const suffix = format ? `${deadline !== undefined ? ` 📅 ${deadlineLabel(deadline)}` : ''} 🛫 ${dateKey(atDate(b.start))} ${clock(b.start)} ⏳ ${dateKey(atDate(b.end))} ${clock(b.end)}` : '';
+    const suffix = format && deadline !== undefined ? ` 📅 ${deadlineLabel(deadline)}` : '';
     return (format ? line.replace(/(\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\s+)(?:工作块：\s*)?(?:[🔺⏫🔼🔽⏬]\s*)?/u, `$1${prioritySymbol(priorities.get(b.taskId) ?? b.priority ?? 3)} `) : line).trimEnd() + suffix;
   });
   const visible = lines.join(newline);

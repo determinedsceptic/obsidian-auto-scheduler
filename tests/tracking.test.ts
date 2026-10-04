@@ -98,10 +98,21 @@ describe('Clean daily lists与插件跟踪', () => {
   });
 });
 
-it('exports Gantt start/end timestamps without replacing the true deadline and round-trips completion',()=>{
+it('keeps a concise clock range without calendar endpoints and round-trips completion',()=>{
   const text=renderDaily(dailyDocument(null),[block({locked:false})],'day-planner');
   const output=cleanDaily(text,new Set(),new Map(),true,new Map());
-  expect(output.text).toContain('🛫 2026-10-01 09:00 ⏳ 2026-10-01 10:00');
+  expect(output.text).not.toMatch(/[🛫⏳]/u);
+  expect(output.text).toContain('09:00 - 10:00');
   expect(output.text).not.toContain('📅');
   expect(rehydrate(output.text.replace('- [ ]','- [x]'),{before:null,after:output.record})).toContain('- [x]');
+});
+
+
+it('does not display the scheduling end constraint of a habit as a deadline',async()=>{
+  const vault=new MemoryVault();vault.files={'Habits/Walk.md':'# Walk\n- 12:40-13:10 🔼 Lunch walk (Sun, Mon, Tue, Wed, Thu, Fri, Sat)\n'};
+  const p=await preview(vault);expect(p.result.errors).toEqual([]);
+  await applyPreview(vault,vault,p,settings(),now);
+  const note=vault.files['DailyNotes/2026-10-01.md'];
+  expect(note).toContain('- [ ] 12:40 - 13:10 🔼 Lunch walk');
+  expect(note).not.toMatch(/[📅🛫⏳]/u);
 });

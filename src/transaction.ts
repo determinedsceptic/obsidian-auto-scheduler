@@ -146,7 +146,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
               } catch { /* Try the other recovery record. */ }
             }
           }
-          const clean = cleanDaily(output, plainSourceIds, new Map(parsed.tasks.map(t => [t.id, t.priority])), true, new Map(parsed.tasks.filter(t => t.due !== undefined).map(t => [t.id, t.due!])));
+          const clean = cleanDaily(output, plainSourceIds, new Map(parsed.tasks.map(t => [t.id, t.priority])), true, new Map(parsed.tasks.filter(t => t.due !== undefined && !isHabit(t.id)).map(t => [t.id, t.due!])));
           preview.nextTracking[path] = { before, after: frozen.cleanDaily ? clean.record : null };
           preview.outputs[path] = frozen.cleanDaily ? clean.text : output;
         } else preview.outputs[path] = output;

@@ -175,6 +175,6 @@ For projects such as reading a book, the assistant estimates total effort before
 
 ### Calendar interoperability
 
-Liam Cain's Calendar needs the core Daily Notes folder set to `DailyNotes` and format `YYYY-MM-DD`; enable Calendar under Community plugins. Calendar opens dated notes; Gantt Calendar displays their task intervals.
+Liam Cain's Calendar needs the core Daily Notes folder set to `DailyNotes` and format `YYYY-MM-DD`; enable Calendar under Community plugins. Calendar opens dated notes; Gantt Calendar requires explicit date fields to display task intervals.
 
-Clean daily output keeps the Day Planner clock range and adds public Tasks emoji timestamps: `🛫` for the block start and `⏳` for the block end. Configure Gantt Calendar with an empty global task filter, date filter **Start date**, Gantt start **Start date**, and Gantt end **Scheduled date**. Here the scheduled-date field is intentionally used as the displayed block endpoint; `📅` remains the actual task deadline and is never replaced with the block end. No internal management comments or Dataview scheduled fields appear in clean notes.
+Clean daily output is a concise Day Planner list, for example `- [ ] 12:40 - 13:10 🔼 Lunch walk`. Only genuine task deadlines use `📅`; a habit's fixed end is not a deadline. Calendar opens these notes by their filename. Gantt Calendar does not natively infer precise intervals from a bare Day Planner clock range; full Gantt date fields require opting into Gantt output with Clean daily lists disabled for manual scheduling. Compact daily notes do not append duplicate start/end metadata merely to populate the Gantt view.
