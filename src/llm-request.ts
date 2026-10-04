@@ -41,11 +41,15 @@ export function rateLimitDetails(response: LlmHttpResponse): string {
   if (categories) details.push(`limit=${categories}`);
   for (const kind of ['requests','tokens','project-tokens']) {
     const remaining = headers[`x-ratelimit-remaining-${kind}`], limit = headers[`x-ratelimit-limit-${kind}`];
+    const reset = headers[`x-ratelimit-reset-${kind}`];
+    if (reset && /^(?:\d+(?:\.\d+)?(?:ms|s|m|h|d))+$/.test(reset)) details.push(`${kind} reset=${reset}`);
     if (remaining !== undefined && /^\d+$/.test(remaining)) details.push(`${kind} remaining=${remaining}${limit && /^\d+$/.test(limit) ? `/${limit}` : ''}`);
   }
-  const cap = /\bLimit:\s*(\d+(?:\.\d+)?)/i.exec(message)?.[1];
-  const requested = /\bRequested:\s*(\d+(?:\.\d+)?)/i.exec(message)?.[1];
+  const cap = /\bLimit\s*:?\s*(\d+(?:\.\d+)?)/i.exec(message)?.[1];
+  const requested = /\bRequested\s*:?\s*(\d+(?:\.\d+)?)/i.exec(message)?.[1];
   if (categories && cap) details.push(`cap=${cap}`);
+  const used = /\bUsed\s*:?\s*(\d+(?:\.\d+)?)/i.exec(message)?.[1];
+  if (categories && used) details.push(`used=${used}`);
   if (categories && requested) details.push(`requested=${requested}`);
   return details.length ? ` Limit details: ${details.join('; ')}.` : '';
 }
@@ -88,7 +92,7 @@ export async function requestLlm(url: string, headers: Record<string, string>, b
     if (response.status === 429) {
       if (quotaExhausted(response.json)) throw new Error('LLM returned HTTP 429: provider quota or credit balance exhausted. Check billing/usage with your provider, or select another configured provider/model. Automatic retries will not resolve this. No tasks were written.');
       const delay = retryDelay(response, attempt + 1);
-      const details = rateLimitDetails(response);
+      const details = rateLimitDetails(response) + ` Request payload=${body.length} characters (not a token count).`;
       if (attempt === 2) throw new Error(`LLM returned HTTP 429: still rate-limited after 3 attempts.${details} Check the selected model/project rate limits or select another configured model. No tasks were written.`);
       if (delay > 30000 || delay >= deadline - Date.now()) throw new Error(`LLM returned HTTP 429: provider Retry-After is ${Math.ceil(delay / 1000)} seconds, outside the automatic retry budget.${details} This can be a model/project request or token limit even with a valid key and available balance. Check API limits or select another configured model; automatic retry is deferred. No tasks were written.`);
       feedback.onRetry?.(delay, attempt + 1);

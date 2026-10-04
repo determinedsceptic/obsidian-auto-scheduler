@@ -75,6 +75,12 @@ describe('provider rate limits', () => {
     await vi.advanceTimersByTimeAsync(1);controller.abort();await checked;
     expect(transport).toHaveBeenCalledTimes(1);expect(vi.getTimerCount()).toBe(0);
   });
+  it('captures OpenAI colon-free counters and reset durations without shortening Retry-After', () => {
+    const response={status:429,headers:{'Retry-After':'12779','x-ratelimit-reset-tokens':'6m0s','x-ratelimit-remaining-tokens':'4859','x-ratelimit-limit-tokens':'100000'},json:{error:{code:'rate_limit_exceeded',message:'org-private tokens per min (TPM): Limit 100000, Used 95141, Requested 8037. private-token'}}};
+    const details=rateLimitDetails(response);
+    expect(details).toContain('used=95141');expect(details).toContain('requested=8037');expect(details).toContain('tokens reset=6m0s');expect(details).not.toContain('private');
+    expect(retryDelay(response,1)).toBe(12779000);
+  });
   it('cancels an in-flight host request even when the transport cannot abort', async () => {
     vi.useFakeTimers();const controller=new AbortController();
     const transport=vi.fn().mockImplementation(()=>new Promise(()=>{}));

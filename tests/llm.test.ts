@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chat, endpoint, materializeTasks, validAiTasks, validateDrafts } from '../src/llm';
+import { chat, endpoint, materializeTasks, validAiTasks, validateDrafts, compactSchema, planTool } from '../src/llm';
 import { DEFAULT_LLM } from '../src/types';
 import type { Task } from '../src/types';
 import { applyPreview, createPreview, undoLast } from '../src/transaction';
@@ -9,6 +9,14 @@ const args = JSON.stringify({ tasks: [draft, { ...draft, title: '课程2复习' 
 const messages = [{ role: 'user' as const, content: '两门课，每门2小时，很重要，安排一下' }];
 const response = { status: 'completed', output: [{ type: 'function_call', name: 'create_tasks', arguments: args }] };
 describe('LLM adapters and host validation', () => {
+  it('compacts mixed-plan descriptions while preserving every validation field and the original schema', () => {
+    const before=JSON.stringify(planTool.parameters), compact=compactSchema(planTool.parameters);
+    const descriptionsRemoved=JSON.parse(before, (key,value)=>key==='description'?undefined:value);
+    expect(compact).toEqual(descriptionsRemoved);
+    expect(JSON.stringify(planTool.parameters)).toBe(before);
+    expect(before.length-JSON.stringify(compact).length).toBeGreaterThan(1000);
+    expect(compact.required).toEqual(['tasks','events','habits']);
+  });
   it('uses Responses tools and sends no vault contents; model ID remains configurable', async () => {
     const reply = await chat(DEFAULT_LLM, 'test-only', messages, config(), now, async (url, headers, body) => {
       expect(url).toBe('https://api.openai.com/v1/responses'); expect(headers.Authorization).toBe('Bearer test-only');
