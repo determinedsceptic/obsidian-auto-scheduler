@@ -16,7 +16,8 @@ import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
 import { activeConfig, migrateByok, validateByok, validateProvider, modelChoices, discoverModels } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
-import { materializeTasks, validAiTasks } from './llm';
+import { materializeTasks, validAiTasks, endpoint } from './llm';
+import { requestLlm } from './llm-request';
 import { describeAiSchedule, planningDetails } from './ai-result';
 import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
@@ -88,6 +89,19 @@ export default class AutoScheduler extends Plugin {
   get byok(): ByokSettings { return this.state.byok!; }
   get credentialMode(): string { return this.credentials.mode; }
   async getApiToken(): Promise<string> { activeConfig(this.byok); return this.credentials.get(this.byok.activeProviderId); }
+  async checkApiConnection(): Promise<void> {
+    try {
+      endpoint(this.state.llm); // Validate the address before a credential-free GET.
+      const url = this.state.llm.baseUrl.replace(/\/$/, '') + '/models';
+      new Notice('Checking API connection without a token…');
+      const reply = await requestLlm(url, {}, '', async () => {
+        const result = await requestUrl({ url, method: 'GET', throw: false });
+        return { status: 200, json: { httpStatus: result.status } };
+      }, 15000);
+      const status = (reply.json as { httpStatus: number }).httpStatus;
+      new Notice(`API connection reached the server (HTTP ${status}). No token was sent; model access and quota were not tested.`, 15000);
+    } catch (error) { new Notice(`API connection check failed: ${(error as Error).message}`, 15000); }
+  }
   private operations = new OperationQueue();
   private vaultPort!: VaultPort;
   private storage: StatePort = {
@@ -118,6 +132,7 @@ export default class AutoScheduler extends Plugin {
     this.addCommand({ id: 'clear-chat', name: 'Clear AI conversation', callback: () => {
       for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.clearChat();
     } });
+    this.addCommand({ id: 'check-api-connection', name: 'Check API connection (no token)', callback: () => { void this.checkApiConnection(); } });
     this.addCommand({ id: 'open-chat', name: 'Open AI assistant', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));

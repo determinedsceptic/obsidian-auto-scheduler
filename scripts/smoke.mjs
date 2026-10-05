@@ -79,7 +79,14 @@ const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => 
   process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
 } };
 const plugin = new AutoScheduler(app); await plugin.onload();
-assert.equal(plugin.commands.length, 6);
+assert.equal(plugin.commands.length, 7);
+mockStatus = 401;
+await plugin.checkApiConnection();
+assert.equal(requests.at(-1).method, 'GET');
+assert.equal(requests.at(-1).headers, undefined);
+assert.equal(requests.at(-1).body, undefined);
+assert(notices.some(text => text.includes('reached the server (HTTP 401)')));
+mockStatus = 200;
 plugin.commands.find(command => command.id === 'preview-week').callback();
 await plugin.operations.tail;
 assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
