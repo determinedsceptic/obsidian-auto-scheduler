@@ -10,7 +10,8 @@ export interface AiScheduleReply { text: string; notes: ScheduledNote[] }
 export function planningDetails(preview:Preview,ids:Set<string>,now=new Date()):string[]{
   const lines:string[]=[];
   for(const task of preview.aiTasksAfter.filter(t=>ids.has(t.id))){
-    if(task.estimateBasis)lines.push(`${task.title}: estimated total ${task.remaining} min; ${task.estimateBasis}${task.dailyMinutes?`; up to ${task.dailyMinutes} min/day (about ${Math.ceil(task.remaining/task.dailyMinutes)} study days before accounting for completed work)`:''}.`);
+    if(task.rollingMinutes)lines.push(`${task.title}: rolling seven-day study budget ${task.rollingMinutes} min, up to ${task.dailyMinutes} min/day. Total effort and finish date remain unknown. Completing sessions does not finish the Tasks goal; review progress and replan to continue.`);
+    else if(task.estimateBasis)lines.push(`${task.title}: estimated total ${task.remaining} min; ${task.estimateBasis}${task.dailyMinutes?`; up to ${task.dailyMinutes} min/day (about ${Math.ceil(task.remaining/task.dailyMinutes)} study days before accounting for completed work)`:''}.`);
   }
   const today=dateKey(now);
   if(preview.result.blocks.some(b=>ids.has(b.taskId)&&!b.completed)&&!preview.result.blocks.some(b=>ids.has(b.taskId)&&!b.completed&&b.date===today)&&preview.aiTasksAfter.some(t=>ids.has(t.id)&&(t.earliest===undefined||t.earliest<(new Date(`${today}T23:59:59`).getTime()/60000)))){

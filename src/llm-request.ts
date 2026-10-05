@@ -106,7 +106,7 @@ export async function requestLlm(url: string, headers: Record<string, string>, b
     } catch (error) {
       check();
       if (timedOut) throw new Error(`LLM response timed out after ${Math.ceil(timeoutMs / 1000)} seconds. The provider may still be processing; this request was not automatically resent. No tasks were written.`);
-      throw new Error(`${connectionFailure(error)}. Check network access and the system proxy used by Obsidian; a working browser or Codex connection does not establish that Obsidian can reach the API. No tasks were written.`);
+      throw new Error(`LLM request failed: ${connectionFailure(error)}. Check network access and the system proxy used by Obsidian; a working browser or Codex connection does not establish that Obsidian can reach the API. No tasks were written.`);
     } finally { if (timer) clearTimeout(timer); if (abort) feedback.signal?.removeEventListener('abort', abort); }
     check();
     if (response.status >= 200 && response.status < 300) return response;

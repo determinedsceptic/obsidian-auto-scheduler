@@ -3,7 +3,7 @@ export interface Interval { start: number; end: number }
 export interface Diagnostic { path: string; line: number; message: string }
 export interface Task {
   id: string; title: string; path: string; line: number; remaining: number;
-  priority: number; due?: number; earliest?: number; split: boolean; min: number; completed: boolean; dailyMinutes?: number; estimateBasis?: string;
+  priority: number; due?: number; earliest?: number; split: boolean; min: number; completed: boolean; dailyMinutes?: number; estimateBasis?: string; rollingMinutes?: number;
 }
 export interface Block extends Interval {
   priority?: number;

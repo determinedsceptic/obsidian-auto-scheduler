@@ -591,3 +591,22 @@ ratePlugin.app.workspace.getLeavesOfType=()=>[{view:rateView}];
 ratePlugin.commands.find(c=>c.id==='clear-chat').callback();assert.equal(rateView.messages.length,0);
 assert.equal(JSON.stringify([...files]),beforeClearFiles);
 console.log('PASS: Clear remains enabled while busy, cancels pending request immediately, ignores late scheduling reply, preserves saved notes, starts fresh context and works from command palette');
+
+// Real compiled chat creates an open-ended goal, separately from its weekly sessions.
+saved=null;files.clear();folders.clear();
+const studyPlugin=new AutoScheduler(app);await studyPlugin.onload();
+await studyPlugin.saveProvider({id:'study-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
+const studyView=studyPlugin.views.get('auto-scheduler-chat')({});mockResponse={data:[{id:'fixture'}]};await studyView.onOpen();await studyView.modelLoad;
+const studyPath='DailyNotes/2026-10-01.md';
+files.set(studyPath,'# Day planner\n- [ ] 🔼 Website project\n# Journal\nKeep private text\n');
+mockResponse={output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'Study AI Infra',minutes:180,dailyMinutes:60,rollingMinutes:180,estimateBasis:'Three provisional study sessions; total unknown'}]})}]};
+await studyView.send('Help me learn this book; total duration unknown');
+assert.equal(saved.aiTasks.length,1);assert.equal(saved.aiTasks[0].rollingMinutes,180);
+assert(files.get(studyPath).includes('# Tasks\n'));assert(files.get(studyPath).includes('- [ ] 🔼 Website project'));
+assert(files.get(studyPath).includes('- [ ] ⏫ Study AI Infra'));assert(files.get(studyPath).includes('# Journal\nKeep private text'));
+assert(studyView.messages.at(-1).content.includes('Total effort and finish date remain unknown'));
+assert.equal([...files.values()].join('\n').match(/\d\d:\d\d - \d\d:\d\d ⏫ Study AI Infra/g).length,3);
+const studyRestart=new AutoScheduler(app);await studyRestart.onload();assert.equal(studyRestart.state.aiTasks[0].rollingMinutes,180);
+studyRestart.commands.find(c=>c.id==='undo-last').callback();await studyRestart.operations.tail;
+assert.equal(files.get(studyPath),'# Day planner\n- [ ] 🔼 Website project\n# Journal\nKeep private text\n');
+console.log('PASS: compiled chat saves unknown-effort study goal in Tasks, allocates three paced sessions, preserves journal, persists on restart and undoes exactly');

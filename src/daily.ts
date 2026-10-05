@@ -6,7 +6,7 @@ import type { Block, Diagnostic, Interval, OutputDocument, Settings } from './ty
 export function dailyPaths(settings: Settings, today: string): string[] {
   return Array.from({ length: 7 }, (_, i) => `${settings.dailyFolder}/${addDays(today, i)}.md`);
 }
-interface Section { start: number; end: number }
+export interface Section { start: number; end: number }
 export function dayPlannerSection(content: string): Section | undefined {
   const lines = content.split(/\r?\n/), visible = visibleLines(content);
   const headings = visible.filter(l => /^#{1,6}\s+Day planner\s*#*\s*$/i.test(l.text));
@@ -69,4 +69,39 @@ export function dailyInputs(path: string, content: string | null, defaultDuratio
     } catch (error) { errors.push({ path, line: startLine + number - 1, message: (error as Error).message }); }
   }
   return { content: '\n'.repeat(startLine - 1) + selected.join('\n'), intervals, errors };
+}
+
+/** Only the explicitly named task section is exposed to AI; journals remain private. */
+export function taskSection(content: string): Section | undefined {
+  const headings=visibleLines(content).filter(l=>/^# Tasks\s*#*\s*$/i.test(l.text));
+  if(headings.length>1)throw Error('Duplicate Tasks headings; refusing to write');
+  if(!headings.length)return undefined;
+  const lines=content.split(/\r?\n/), offsets:number[]=[];let offset=0;
+  for(const line of lines){offsets.push(offset);offset+=line.length+(content.includes('\r\n')?2:1);}
+  const next=visibleLines(content).find(l=>l.line>headings[0].line&&/^#\s+/.test(l.text));
+  return {start:offsets[headings[0].line]??content.length,end:next?offsets[next.line-1]:content.length};
+}
+export function appendTaskRows(text:string, rows:string[]):string {
+  if(!rows.length)return text;
+  const newline=text.includes('\r\n')?'\r\n':'\n',part=taskSection(text);
+  if(part)return text.slice(0,part.end)+(text.slice(0,part.end).endsWith('\n')?'':newline)+rows.join(newline)+newline+text.slice(part.end);
+  return '# Tasks'+newline+newline+rows.join(newline)+newline+newline+text;
+}
+/** Move only standalone untimed checkboxes, retaining all other note bytes. */
+export function organizeDailyTasks(text:string,defaultDuration=30):string {
+  const part=dayPlannerSection(text);taskSection(text);if(!part)return text;
+  const rows=visibleLines(text),lines=text.split(/\r?\n/),newline=text.includes('\r\n')?'\r\n':'\n';
+  const offsets:number[]=[];let offset=0;for(const line of lines){offsets.push(offset);offset+=line.length+newline.length;}
+  const moved:string[]=[],remove=new Set<number>();let managed=false;
+  for(const row of rows){
+    const at=offsets[row.line-1];if(at<part.start||at>=part.end)continue;
+    if(row.text===START){managed=true;continue;}if(row.text===END){managed=false;continue;}
+    const startOnly=/^([-*+] \[[ xX]\] )(\d{2}:\d{2})\s+([^-\s].*)$/.exec(row.text);
+    if(!managed&&startOnly){lines[row.line-1]=`${startOnly[1]}${startOnly[2]} - ${endAfter(startOnly[2],defaultDuration)} ${startOnly[3]}`;continue;}
+    if(managed||!/^[-*+] \[[ xX]\] /.test(row.text)||/^[-*+] \[[ xX]\] \d{2}:\d{2}(?:\s|$)/.test(row.text))continue;
+    // Multi-line items and source-managed directives require explicit editing.
+    if(/^\s{2,}\S/.test(lines[row.line]??'')||/<!--|%%|\[\[|[🛫⏳]\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(row.text))continue;
+    moved.push(row.text);remove.add(row.line-1);
+  }
+  return appendTaskRows(lines.filter((_,i)=>!remove.has(i)).join(newline),moved);
 }
