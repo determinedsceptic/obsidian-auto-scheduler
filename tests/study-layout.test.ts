@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {organizeDailyTasks,dayPlannerSection} from '../src/daily';
-import {readDailyPlan} from '../src/daily-edit';
+import {readDailyPlan,previewDailyEdits} from '../src/daily-edit';
 import {materializeTasks,validAiTasks} from '../src/llm';
 import {createPreview,applyPreview,undoLast} from '../src/transaction';
 import type {Task,Tracking,UndoRecord} from '../src/types';
@@ -52,6 +52,17 @@ describe('task layout and rolling learning goals',()=>{
   expect(next.aiTasksAfter.map(t=>t.id)).toEqual([tasks[0].id]);
   await applyPreview(v,v,next,settings,nextWeek);expect(v.files[source]).toContain('- [ ] 🔼 学习《AI Infra》');
   await undoLast(v,v,v.undo);for(const [path,text] of Object.entries(before))expect(v.files[path]).toBe(text);
+ });
+ it('indexes an old open goal from today without leaking its journal and rejects stale goal edits',async()=>{
+  const v=new StudyVault();v.files={};const tasks=materializeTasks([draft],settings,now,'old-goal');
+  const first=await createPreview(v,settings,now,{},false,[],tasks);await applyPreview(v,v,first,settings,now);
+  v.files[source]+='\n# Journal\nprivate-old-journal\n';
+  const future=new Date('2026-11-11T08:00:00+08:00');
+  const read=await readDailyPlan(v,settings,v.tracking,v.aiTasks,'2026-11-11',future);
+  expect(read.read.items.find(i=>i.ref===tasks[0].id)?.goalDate).toBe('2026-10-01');
+  expect(JSON.stringify(read.read)).not.toContain('private-old-journal');
+  v.files[source]=v.files[source].replace('- [ ] 🔼 学习《AI Infra》','- [x] 🔼 学习《AI Infra》');
+  await expect(previewDailyEdits(v,settings,v.tracking,v.aiTasks,read,[{ref:tasks[0].id,targetDate:'2026-11-11',title:null,minutes:null,priority:null}],future,'stale')).rejects.toThrow('Study goal changed');
  });
  it('only checking the master goal stops future sessions, while duplicate goals fail safely',async()=>{
   const v=new StudyVault();v.files={};const tasks=materializeTasks([draft],settings,now,'goal');
