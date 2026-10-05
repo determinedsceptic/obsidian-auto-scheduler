@@ -97,7 +97,11 @@ describe('LLM read/edit tool round trip', () => {
   it.each(['responses','chat-completions','anthropic','gemini'] as const)('reads and revises through %s without arbitrary paths', async protocol => {
     let count=0; const dates:string[]=[];
     const reply = await chat({...DEFAULT_LLM,protocol},'test-only',[{role:'user',content:'Move unfinished work to tomorrow'}],settings,now,async (_,__,body) => {
-      const data=JSON.parse(body); count++;
+      const data=JSON.parse(body);
+      const tools=protocol==='responses'?data.tools:protocol==='anthropic'?data.tools:protocol==='gemini'?data.tools[0].functionDeclarations:data.tools.map((t:any)=>t.function);
+      if(count)expect(tools.map((t:any)=>t.name)).toContain('revise_daily_tasks');
+      else expect(tools.map((t:any)=>t.name)).not.toContain('revise_daily_tasks');
+      count++;
       if(count===1) return {status:200,json:providerReply(protocol,'read_daily_plan',{date:'2026-10-01'})};
       expect(body).toContain('Review'); expect(body).not.toContain('absolute-private-path');
       if(protocol==='responses') expect(data.input.at(-1).call_id).toBe('read1');

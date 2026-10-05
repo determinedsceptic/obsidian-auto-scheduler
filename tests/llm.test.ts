@@ -17,12 +17,23 @@ describe('LLM adapters and host validation', () => {
     expect(before.length-JSON.stringify(compact).length).toBeGreaterThan(1000);
     expect(compact.required).toEqual(['tasks','events','habits']);
   });
+  it('keeps the first scheduling request small and exposes one complete creation schema', async () => {
+    await chat(DEFAULT_LLM, 'test-only', [{role:'user',content:'2个小时，软件工程安全课程PPT'}], config(), now, async (_, __, body) => {
+      const data = JSON.parse(body);
+      expect(data.tools.map((t:any) => t.name)).toEqual(['create_plan','read_daily_plan','read_habits']);
+      expect(data.tools[0].parameters).toEqual(compactSchema(planTool.parameters));
+      expect(data.instructions).not.toContain('# Recurring habits');
+      expect(body.length).toBeLessThan(11000);
+      console.log(`Initial scheduling request: ${body.length} characters`);
+      return {status:200,json:{output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify({tasks:[draft],events:[],habits:[]})}]}};
+    }, 1000, async () => ({date:'2026-10-01',items:[]}), async () => ({files:[]}));
+  });
   it('uses Responses tools and sends no vault contents; model ID remains configurable', async () => {
     const reply = await chat(DEFAULT_LLM, 'test-only', messages, config(), now, async (url, headers, body) => {
       expect(url).toBe('https://api.openai.com/v1/responses'); expect(headers.Authorization).toBe('Bearer test-only');
       const data = JSON.parse(body); expect(data.model).toBe('gpt-6-luna'); expect(data.store).toBe(false);
       expect(data.max_output_tokens).toBe(2048); expect(data.reasoning.effort).toBe('none');
-      expect(data.tools[0].name).toBe('create_tasks'); expect(data.tools[0].parameters.additionalProperties).toBe(false);
+      expect(data.tools[0].name).toBe('create_plan'); expect(data.tools[0].parameters.additionalProperties).toBe(false);
       expect(body).not.toContain('Tasks/A.md'); return { status: 200, json: response };
     });
     expect(reply.tasks.map(t => t.minutes)).toEqual([120, 120]);
@@ -30,7 +41,7 @@ describe('LLM adapters and host validation', () => {
   });
   it('supports compatible Chat Completions and arbitrary model IDs', async () => {
     const reply = await chat({ protocol: 'chat-completions', baseUrl: 'https://example.test/v1/', model: 'other-model' }, 'test-only', messages, config(), now, async (url, _, body) => {
-      const data = JSON.parse(body); expect(url).toBe('https://example.test/v1/chat/completions'); expect(data.model).toBe('other-model'); expect(data.tools[0].function.name).toBe('create_tasks');
+      const data = JSON.parse(body); expect(url).toBe('https://example.test/v1/chat/completions'); expect(data.model).toBe('other-model'); expect(data.tools[0].function.name).toBe('create_plan');
       return { status: 200, json: { choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function', function: { name: 'create_tasks', arguments: args } }] } }] } };
     }); expect(reply.tasks).toHaveLength(2);
   });

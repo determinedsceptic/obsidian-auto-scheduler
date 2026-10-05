@@ -36,7 +36,17 @@ it.each(['responses','chat-completions','anthropic','gemini'] as const)('reads t
   let round=0,reads=0;
   const index={files:[{path:'Templates/Routines/Training.md',habits:[{title:'Strength',start:'19:10',end:'19:40',days:[1,3,5],priority:3,enabled:true}],guidelines:[]}]};
   const reply=await chat({...DEFAULT_LLM,protocol},'fixture',[{role:'user',content:'Add my existing habits to the schedule'}],settings,now,async(_url,_headers,body)=>{
-    expect(body).toContain('read_habits');expect(body).toContain('schedule_existing_habits');
+    const d=JSON.parse(body);
+    const tools=protocol==='responses'?d.tools:protocol==='anthropic'?d.tools:protocol==='gemini'?d.tools[0].functionDeclarations:d.tools.map((t:any)=>t.function);
+    const names=tools.map((t:any)=>t.name);
+    expect(names).toContain('read_habits');
+    if(round){
+      expect(names).toContain('schedule_existing_habits');expect(names).toContain('save_habit_guidelines');
+      expect(body).toContain('# Recurring habits');
+    }else{
+      expect(names).not.toContain('schedule_existing_habits');expect(names).not.toContain('save_habit_guidelines');
+      expect(body).not.toContain('# Recurring habits');
+    }
     if(round++)expect(body).toContain('Templates/Routines/Training.md');
     return {status:200,json:response(protocol,round===1?'read_habits':'schedule_existing_habits',{})};
   },1000,undefined,async()=>{reads++;return index;});

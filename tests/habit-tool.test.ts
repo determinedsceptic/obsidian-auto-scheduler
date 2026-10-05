@@ -24,7 +24,7 @@ describe('habit skill and model tools', () => {
   it.each(['responses','chat-completions','anthropic','gemini'] as const)('协议 %s 注册和解析习惯调用', async protocol => {
     const args = { habits: [draft] };
     const reply = await chat({ ...DEFAULT_LLM, protocol }, 'fixture', messages, settings, now, async (_, __, body) => {
-      const data = JSON.parse(body); expect(body).toContain('create_habits'); expect(body).toContain('Templates/Habits/Habit template.md');
+      const data = JSON.parse(body); expect(body).toContain('create_plan'); expect(body).toContain('Templates/Habits/Habit template.md');
       const json = protocol === 'responses' ? { output: [{ type: 'function_call', name: 'create_habits', arguments: JSON.stringify(args) }] }
         : protocol === 'chat-completions' ? { choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function', function: { name: 'create_habits', arguments: JSON.stringify(args) } }] } }] }
         : protocol === 'anthropic' ? { stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'create_habits', input: args }] }

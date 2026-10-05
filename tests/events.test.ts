@@ -49,7 +49,7 @@ it.each(['responses','chat-completions','anthropic','gemini'] as const)('support
   const call={name:'create_events',arguments:JSON.stringify({events:[event]})};
   const json=protocol==='responses'?{output:[{type:'function_call',...call}]}:protocol==='chat-completions'?{choices:[{finish_reason:'tool_calls',message:{tool_calls:[{type:'function',function:call}]}}]}:protocol==='anthropic'?{stop_reason:'tool_use',content:[{type:'tool_use',name:call.name,input:{events:[event]}}]}:{candidates:[{finishReason:'STOP',content:{parts:[{functionCall:{name:call.name,args:{events:[event]}}}]}}]};
   const reply=await chat({protocol,baseUrl:'https://example.test/v1',model:'fixture'},'test-only',[{role:'user',content:'Gym at 19:00 today'}],settings,now,async(_,__,body)=>{
-    expect(body).toContain('create_events');expect(body).toContain('30 minutes');return {status:200,json};
+    expect(body).toContain('create_plan');expect(body).toContain('30 minutes');return {status:200,json};
   });expect(reply.events).toEqual([event]);expect(reply.tasks).toEqual([]);
 });
 it('defaults recurring habit end times in the host and reports the assumption',async()=>{

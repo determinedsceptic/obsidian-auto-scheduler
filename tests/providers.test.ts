@@ -41,7 +41,7 @@ describe('BYOK providers and discovery', () => {
       expect(headers.Authorization).toBe('Bearer test-only');
       const request = JSON.parse(body);
       expect(request.model).toBe('deepseek-flash');
-      expect(request.tools.map((tool: any) => tool.function.name)).toContain('create_tasks');
+      expect(request.tools.map((tool: any) => tool.function.name)).toContain('create_plan');
       return { status: 200, json: { choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function', function: { name: 'create_tasks', arguments: JSON.stringify({ tasks }) } }] } }] } };
     });
     expect(reply.tasks).toEqual(tasks);
@@ -84,7 +84,7 @@ describe('native provider tool protocols', () => {
     const c = providerConfig(provider({ ...PROVIDER_TEMPLATES.anthropic, models: ['claude-test'] }), 'claude-test');
     const r = await chat(c, 'test-only', messages, config(), now, async (url, headers, body) => {
       expect(url).toBe('https://api.anthropic.com/v1/messages'); expect(headers['x-api-key']).toBe('test-only'); expect(headers['anthropic-version']).toBe('2023-06-01'); expect(headers.Authorization).toBeUndefined();
-      const d = JSON.parse(body); expect(d.system).toContain('Obsidian'); expect(d.tools[0].input_schema.required).toEqual(['tasks']);
+      const d = JSON.parse(body); expect(d.system).toContain('Obsidian'); expect(d.tools[0].input_schema.required).toEqual(['tasks','events','habits']);
       return { status: 200, json: { stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'create_tasks', input: { tasks } }] } };
     }); expect(r.tasks).toEqual(tasks);
   });
