@@ -2,6 +2,25 @@ export interface LlmHttpResponse { status: number; json: unknown; headers?: Reco
 export type Transport = (url: string, headers: Record<string, string>, body: string) => Promise<LlmHttpResponse>;
 export interface RetryFeedback { cancelled?: () => boolean; signal?: AbortSignal; onRetry?: (delayMs: number, retry: number) => void }
 
+/** Classify only known network codes; never echo arbitrary exception text or URLs. */
+function connectionFailure(error: unknown): string {
+  const value = error as { code?: unknown; message?: unknown; cause?: { code?: unknown } } | null;
+  const text = [value?.code, value?.cause?.code, value?.message].filter(v => typeof v === 'string').join(' ');
+  const groups: [string[], string][] = [
+    [['ENOTFOUND','EAI_AGAIN','ERR_NAME_NOT_RESOLVED'], 'DNS resolution failed'],
+    [['ERR_PROXY_CONNECTION_FAILED','ERR_TUNNEL_CONNECTION_FAILED'], 'Proxy connection failed'],
+    [['ECONNREFUSED','ERR_CONNECTION_REFUSED'], 'Connection refused'],
+    [['ECONNRESET','ERR_CONNECTION_RESET','ERR_CONNECTION_CLOSED'], 'Connection interrupted'],
+    [['ETIMEDOUT','ERR_CONNECTION_TIMED_OUT','ERR_TIMED_OUT'], 'Network connection timed out'],
+    [['CERT_HAS_EXPIRED','UNABLE_TO_VERIFY_LEAF_SIGNATURE','ERR_CERT_AUTHORITY_INVALID','ERR_CERT_DATE_INVALID'], 'TLS certificate validation failed'],
+    [['ERR_INTERNET_DISCONNECTED','ENETUNREACH','EHOSTUNREACH'], 'Network unavailable'],
+  ];
+  for (const [codes, reason] of groups) for (const code of codes) {
+    if (new RegExp(`(?:^|[^A-Z_])${code}(?:$|[^A-Z_])`).test(text)) return `${reason} (${code})`;
+  }
+  return 'Network request failed before an HTTP response';
+}
+
 function quotaExhausted(json: unknown): boolean {
   const error = (json as { error?: { code?: unknown; type?: unknown; message?: unknown } } | null)?.error;
   const code = [error?.code, error?.type].filter(x => typeof x === 'string').join(' ').toLowerCase();
@@ -73,19 +92,21 @@ export async function requestLlm(url: string, headers: Record<string, string>, b
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error('LLM request timed out. No tasks were written.');
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     let abort: (() => void) | undefined;
     let response: LlmHttpResponse;
     try {
       response = await Promise.race([transport(url, headers, body), new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Timeout')), remaining);
+        timer = setTimeout(() => { timedOut = true; reject(new Error('Timeout')); }, remaining);
       }), new Promise<never>((_, reject) => {
         abort = () => reject(new Error('Request canceled'));
         feedback.signal?.addEventListener('abort', abort, {once:true});
         if (feedback.signal?.aborted) abort();
       })]);
-    } catch {
+    } catch (error) {
       check();
-      throw new Error('LLM request failed or timed out. Check your network and provider settings. No tasks were written.');
+      if (timedOut) throw new Error(`LLM response timed out after ${Math.ceil(timeoutMs / 1000)} seconds. The provider may still be processing; this request was not automatically resent. No tasks were written.`);
+      throw new Error(`${connectionFailure(error)}. Check network access and the system proxy used by Obsidian; a working browser or Codex connection does not establish that Obsidian can reach the API. No tasks were written.`);
     } finally { if (timer) clearTimeout(timer); if (abort) feedback.signal?.removeEventListener('abort', abort); }
     check();
     if (response.status >= 200 && response.status < 300) return response;

@@ -58,6 +58,16 @@ describe('provider rate limits', () => {
     transport.mockRejectedValue(new Error('private-token'));
     await expect(requestLlm(url,{},'{}',transport,60000)).rejects.toThrow('network'); expect(transport).toHaveBeenCalledTimes(2);
   });
+  it.each(['ENOTFOUND','ERR_PROXY_CONNECTION_FAILED','ECONNREFUSED','ETIMEDOUT','ERR_CERT_AUTHORITY_INVALID'])('reports only a safe network classification for %s', async code => {
+    const transport=vi.fn().mockRejectedValue(new Error(`${code}: private-token https://private.example/key`));
+    const failure=await requestLlm(url,{},'{}',transport,60000).catch(e=>e.message);
+    expect(failure).toContain(code);expect(failure).not.toContain('private');expect(failure).not.toContain('response timed out');expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it('distinguishes a local response deadline from an immediate network error without resending', async () => {
+    vi.useFakeTimers();const transport=vi.fn().mockImplementation(()=>new Promise(()=>{}));
+    const checked=expect(requestLlm(url,{},'{}',transport,60000)).rejects.toThrow('response timed out after 60 seconds');
+    await vi.advanceTimersByTimeAsync(60000);await checked;expect(transport).toHaveBeenCalledTimes(1);expect(vi.getTimerCount()).toBe(0);
+  });
   it('uses the server clock for HTTP-date Retry-After instead of creating a four-hour wait', () => {
     expect(retryDelay({status:429,json:{},headers:{Date:'Sun, 04 Oct 2026 08:00:00 GMT','Retry-After':'Sun, 04 Oct 2026 08:00:02 GMT'}},1,Date.UTC(2026,9,4,3,42,5))).toBe(2000);
     // Numeric Retry-After is seconds, even when large: never silently reinterpret as ms.
