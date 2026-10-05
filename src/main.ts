@@ -16,12 +16,14 @@ import type { SecretPort } from './credentials';
 import { ProviderModal } from './provider-modal';
 import { activeConfig, migrateByok, validateByok, validateProvider, modelChoices, discoverModels } from './providers';
 import { ChatView, CHAT_VIEW } from './chat-view';
+import type { ChatConversation } from './chat-view';
 import { materializeTasks, validAiTasks, endpoint } from './llm';
 import { requestLlm } from './llm-request';
 import { describeAiSchedule, planningDetails } from './ai-result';
 import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
 import { validTracking } from './tracking';
+import { releaseEditedTracking } from './tracking-recovery';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
 import type { Preview, VaultPort, StatePort } from './transaction';
@@ -85,6 +87,7 @@ function validUndo(value: unknown): value is UndoRecord {
 }
 export default class AutoScheduler extends Plugin {
   state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null, tracking: {}, aiTasks: [], llm: { ...DEFAULT_LLM } };
+  chatHistory:{activeId:string;sessions:ChatConversation[]}={activeId:crypto.randomUUID(),sessions:[]};
   credentials!: Credentials;
   get byok(): ByokSettings { return this.state.byok!; }
   get credentialMode(): string { return this.credentials.mode; }
@@ -133,6 +136,11 @@ export default class AutoScheduler extends Plugin {
       for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.clearChat();
     } });
     this.addCommand({ id: 'check-api-connection', name: 'Check API connection (no token)', callback: () => { void this.checkApiConnection(); } });
+    this.addCommand({ id: 'new-chat', name: 'Start new AI conversation', callback: () => { void this.action(async () => {
+      await this.openChat();
+      const leaf=this.app.workspace.getLeavesOfType(CHAT_VIEW)[0];
+      if(leaf?.view instanceof ChatView)leaf.view.newChat();
+    }); } });
     this.addCommand({ id: 'open-chat', name: 'Open AI assistant', callback: () => { void this.action(() => this.openChat()); } });
     this.vaultPort = new ObsidianVault(this.app);
     this.addSettingTab(new SchedulerSettings(this.app, this));
@@ -151,6 +159,12 @@ export default class AutoScheduler extends Plugin {
       if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('Enable daily-note output and clean daily lists first');
       const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
+    }); } });
+    this.addCommand({ id: 'recover-edited-daily', name: 'Recover edited daily schedule tracking', callback: () => { void this.action(async () => {
+      const file = this.app.workspace.getActiveFile();
+      if (!(file instanceof TFile)) throw Error('Open the edited daily note first');
+      const backup = await this.recoverEditedDaily(file.path);
+      new Notice(`Tracking recovered; existing rows are preserved as handwritten events. Saved AI goals and habits remain active. Backup: ${backup}`, 15000);
     }); } });
     this.addCommand({ id: 'undo-last', name: 'Undo last schedule', callback: () => { void this.action(async () => {
       await undoLast(this.vaultPort, this.storage, this.state.undo); new Notice('Last schedule undone');
@@ -389,6 +403,22 @@ export default class AutoScheduler extends Plugin {
         throw error;
       }
     });
+  }
+
+  async recoverEditedDaily(path: string): Promise<string> {
+    const text = await this.vaultPort.read(path);
+    if (text === null) throw Error('Daily note not found');
+    const nextTracking = releaseEditedTracking(path, text, this.state.tracking, this.state.settings);
+    const stateKey = JSON.stringify(this.state);
+    const backup = `${this.app.vault.configDir}/plugins/${this.manifest.id}/tracking-recovery-${crypto.randomUUID()}.json`;
+    const payload = JSON.stringify({version:1,createdAt:new Date().toISOString(),path,note:text,tracking:this.state.tracking[path],aiTasks:this.state.aiTasks,undo:this.state.undo},null,2);
+    // Save and verify recovery evidence before changing ownership. No note write.
+    await this.app.vault.adapter.write(backup,payload);
+    if (await this.app.vault.adapter.read(backup) !== payload) throw Error('Recovery backup verification failed; tracking was not changed');
+    if (await this.vaultPort.read(path) !== text || JSON.stringify(this.state) !== stateKey) throw Error('Daily note or plugin state changed during recovery; retry');
+    const next = {...this.state,tracking:nextTracking};
+    await this.saveData(next); this.state = next;
+    return backup;
   }
 
   async openScheduledNote(path: string): Promise<void> {

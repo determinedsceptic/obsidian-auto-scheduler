@@ -30,3 +30,7 @@
 .auto-scheduler-chat .auto-scheduler-message p,
 .auto-scheduler-chat .auto-scheduler-message strong { user-select: text; -webkit-user-select: text; cursor: text; }
 .auto-scheduler-message-copy { display: block; margin: 8px 0 0 auto; font-size: var(--font-smallest); box-shadow: none; }
+
+.auto-scheduler-conversations { display: flex; gap: 8px; align-items: center; margin-top: 10px; margin-bottom: 12px; }
+.auto-scheduler-conversations button { flex-shrink: 0; width: auto; }
+.auto-scheduler-conversations select { flex: 1; min-width: 0; text-overflow: ellipsis; }

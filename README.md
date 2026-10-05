@@ -98,10 +98,12 @@ Use hosted APIs or a compatible local service. Changing the endpoint or protocol
 | Command | Purpose |
 | --- | --- |
 | Open AI assistant | Open the chat sidebar. |
+| Start new AI conversation | Start an independent context; use the Conversation selector to return to earlier chats during this plugin session. |
 | Clear AI conversation | Clear messages/draft and cancel a pending model request; preserve saved schedules and provider settings. |
 | Create habits template | Create and open an example template without replacing an existing one. |
 | Preview weekly schedule | Preview today plus six days, then apply manually. |
 | Clean daily schedule format | Remove legacy display metadata from existing tracked daily output without replanning. |
+| Recover edited daily schedule tracking | Back up an edited dated note and its old tracking, then preserve its current rows as handwritten events. Saved AI goals and habit templates remain active. |
 | Undo last schedule | Restore the latest template and schedule write, if the files are unchanged. |
 
 ## Privacy, payments, and accounts

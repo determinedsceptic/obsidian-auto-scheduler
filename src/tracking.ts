@@ -56,7 +56,7 @@ export function rehydrate(text: string | null, pair?: TrackingPair): string | nu
     const protectedRecord = pair.after ?? pair.before;
     if (!protectedRecord || !/^\s*- \[[ xX]\].*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}/m.test(text)) return text;
   }
-  throw new Error('Generated blocks were edited or the tracked region is not unique; refusing to overwrite. Undo or restore the region and preview again.');
+  throw new Error('Generated blocks were edited or the tracked region is not unique; refusing to overwrite. Undo or open this note and run Recover edited daily schedule tracking to preserve manual edits, then send again.');
 }
 export function validTracking(value: unknown): value is Tracking {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;

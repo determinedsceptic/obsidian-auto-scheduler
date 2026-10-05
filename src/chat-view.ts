@@ -7,8 +7,13 @@ import { modelChoices } from './providers';
 import type { ChatMessage } from './llm';
 import type { ScheduledNote } from './ai-result';
 export const CHAT_VIEW = 'auto-scheduler-chat';
+type ChatEntry = ChatMessage & { notes?: ScheduledNote[]; failed?: boolean };
+export interface ChatConversation { id:string; messages:ChatEntry[]; draft:string }
 export class ChatView extends ItemView {
-  private messages: (ChatMessage & { notes?: ScheduledNote[]; failed?: boolean })[] = [];
+  private messages: ChatEntry[] = [];
+  private conversations: ChatConversation[];
+  private conversationId: string;
+  private pendingUser?: ChatEntry;
   private draftText = '';
   private busy = false;
   private requestStatus = '';
@@ -20,19 +25,47 @@ export class ChatView extends ItemView {
   private modelBusy = false;
   private modelStatus = '';
   private modelLoad: Promise<void> | null = null;
-  constructor(leaf: WorkspaceLeaf, private plugin: AutoScheduler) { super(leaf); }
+  constructor(leaf: WorkspaceLeaf, private plugin: AutoScheduler) {
+    super(leaf); this.conversations=plugin.chatHistory.sessions;this.conversationId=plugin.chatHistory.activeId;
+    const current=this.conversations.find(c=>c.id===this.conversationId);
+    if(current){this.messages=current.messages;this.draftText=current.draft;}
+  }
   getViewType(): string { return CHAT_VIEW; }
   getDisplayText(): string { return 'AI scheduling assistant'; }
   getIcon(): string { return 'calendar-clock'; }
   async onOpen(): Promise<void> { this.closed = false; this.render(); this.modelLoad = this.loadModels(); }
-  async onClose(): Promise<void> { this.closed = true; this.clearChat(); this.contentEl.empty(); }
-  clearChat(): void {
+  async onClose(): Promise<void> { this.cancelPending(true);this.saveConversation();this.closed = true;this.contentEl.empty(); }
+  private saveConversation(): void {
+    const current=this.conversations.find(c=>c.id===this.conversationId);
+    if(current){current.messages=this.messages;current.draft=this.draftText;}
+    else this.conversations.push({id:this.conversationId,messages:this.messages,draft:this.draftText});
+    this.plugin.chatHistory.activeId=this.conversationId;
+  }
+  private cancelPending(restoreDraft=false): void {
+    if(restoreDraft && this.pendingUser){
+      this.pendingUser.failed=true;
+      if(this.applying)this.messages.push({role:'assistant',content:'Schedule save was already in progress. Check daily notes before resending.',failed:true});
+      else {this.draftText=this.pendingUser.content;this.messages.push({role:'assistant',content:'Request cancelled. The draft is available to resend.',failed:true});}
+    }
+    this.pendingUser=undefined;
     this.generation++;
     this.requestAbort?.abort(); this.requestAbort = undefined;
-    this.messages = []; this.draftText = '';
     if (!this.applying) { this.activeJob = null; this.busy = false; this.requestStatus = ''; }
     else this.requestStatus = 'Finishing the current schedule save…';
-    this.render();
+  }
+  newChat(): void {
+    if(this.applying){new Notice('Wait for the current schedule save to finish');return;}
+    this.cancelPending(true);this.saveConversation();
+    this.conversationId=crypto.randomUUID();this.messages=[];this.draftText='';this.render();
+  }
+  private switchConversation(id:string):void {
+    if(this.applying||id===this.conversationId)return;
+    const target=this.conversations.find(c=>c.id===id);if(!target)return;
+    this.cancelPending(true);this.saveConversation();this.conversationId=id;
+    this.messages=target.messages;this.draftText=target.draft;this.render();
+  }
+  clearChat(): void {
+    this.cancelPending();this.messages=[];this.draftText='';this.saveConversation();this.render();
   }
   refresh(): void { this.render(); }
   private async loadModels(): Promise<void> {
@@ -46,10 +79,23 @@ export class ChatView extends ItemView {
   }
   private render(): void {
     if (this.closed) return;
+    this.saveConversation();
     const root = this.contentEl; root.empty(); root.addClass('auto-scheduler-chat');
     const header = root.createDiv({ cls: 'auto-scheduler-chat-header' });
     const configure = header.createEl('button', { text: 'Configure provider / API key' }); configure.disabled = this.busy;
     configure.addEventListener('click', () => this.plugin.openProvider(this.plugin.byok.providers.find(p => p.id === this.plugin.byok.activeProviderId)));
+    const sessions=header.createDiv({cls:'auto-scheduler-conversations'});
+    const start=sessions.createEl('button',{text:'New chat',attr:{'title':'Start a separate conversation. Saved schedules remain.'}});
+    start.disabled=this.applying;start.addEventListener('click',()=>this.newChat());
+    if(this.conversations.length>1){
+      const select=sessions.createEl('select',{attr:{'aria-label':'Conversation','title':'Conversations are kept in memory until the plugin reloads.'}});
+      for(const [index,conversation] of this.conversations.entries()){
+        const title=conversation.messages.find(m=>m.role==='user')?.content.replace(/\s+/g,' ').slice(0,60)||`New chat ${index+1}`;
+        select.createEl('option',{text:title,value:conversation.id});
+      }
+      select.value=this.conversationId;select.disabled=this.applying;
+      select.addEventListener('change',()=>this.switchConversation(select.value));
+    }
     if (this.plugin.byok.providers.length) {
       const picker = header.createEl('label', { cls: 'auto-scheduler-chat-model' });
       picker.createSpan({ text: 'Model' });
@@ -94,7 +140,7 @@ export class ChatView extends ItemView {
     if (this.busy) log.createEl('p', { text: this.requestStatus || 'Reading and scheduling…' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
     const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task, appointment or habit…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
-    input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; });
+    input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; this.saveConversation(); });
     input.disabled = this.busy;
     const actions = composer.createDiv({ cls: 'auto-scheduler-actions' });
     const send = actions.createEl('button', { text: 'Send', cls: 'mod-cta' }); send.disabled = this.busy || !this.plugin.byok.providers.length;
@@ -118,7 +164,7 @@ export class ChatView extends ItemView {
     if (!current()) return;
     if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
     const userMessage: ChatMessage & { failed?: boolean } = { role: 'user', content: message };
-    this.draftText = ''; this.messages.push(userMessage); this.busy = true; this.render();
+    this.draftText = ''; this.pendingUser=userMessage; this.messages.push(userMessage); this.busy = true; this.render();
     let modelFinished = false;
     try {
       const reads = new Map<string, DailySnapshot>(); let habitRead:HabitIndexSnapshot|undefined;
@@ -141,7 +187,7 @@ export class ChatView extends ItemView {
       this.requestStatus = ''; this.render();
       if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
       if (reply.scheduleExistingHabits || reply.revision || reply.guidelines?.length || reply.tasks.length || reply.habits.length || reply.events.length) {
-        this.applying = true;
+        this.applying = true; this.render();
         const mixed = [reply.tasks, reply.habits, reply.events].filter(a => a.length).length > 1;
         const result = reply.scheduleExistingHabits ? await this.plugin.scheduleExistingHabits(habitRead!,settingsKey) : reply.revision ? await this.plugin.revisePlan(reads.get(reply.revision.date)!, reply.revision.edits, settingsKey, reply.guidelines, reply.guidelineFiles) : mixed || reply.guidelines?.length ? await this.plugin.schedulePlan(reply.tasks, reply.habits, reply.events, settingsKey, reply.guidelines, reply.guidelineFiles) : reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
         for (const task of reply.tasks) if(task.estimateBasis&&!task.rollingMinutes) result.text += `\n${task.title}: ${task.minutes} min — ${task.estimateBasis}`;
@@ -158,7 +204,7 @@ export class ChatView extends ItemView {
         this.messages.push({ role: 'assistant', content: `Request failed: ${(error as Error).message}`, failed: true });
       }
     } finally {
-      if (this.activeJob === job) { this.activeJob = null; this.busy = false; this.applying = false; this.requestStatus = ''; if (this.requestAbort === controller) this.requestAbort = undefined; this.render(); }
+      if (this.activeJob === job) { this.activeJob = null; this.pendingUser=undefined; this.busy = false; this.applying = false; this.requestStatus = ''; if (this.requestAbort === controller) this.requestAbort = undefined; this.render(); }
     }
   }
 }
