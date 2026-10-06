@@ -49,7 +49,7 @@ export async function readDailyPlan(vault: VaultPort, settings: Settings, tracki
   checkReadDate(date, now);
   const path = `${settings.dailyFolder}/${date}.md`;
   if (!safeVaultPath(path)) throw new Error('Configure a safe daily-note folder');
-  const original = await vault.read(path), annotated = rehydrate(original, tracking[path]);
+  const original = await vault.read(path), annotated = rehydrate(original, tracking[path], path);
   const habitSourcePath = guidelinePath(settings), habitSource = await vault.read(habitSourcePath);
   const indexed=await readHabitIndex(vault,settings);
   const indexedContext=indexed.index.files.flatMap(f=>f.guidelines).join('\n');
@@ -57,7 +57,7 @@ export async function readDailyPlan(vault: VaultPort, settings: Settings, tracki
   const historyBlocks=[...document.blocks];
   for(const historyPath of Object.keys(tracking))if(historyPath!==path){
     const content=await vault.read(historyPath);
-    historyBlocks.push(...dailyDocument(rehydrate(content,tracking[historyPath])).blocks);
+    historyBlocks.push(...dailyDocument(rehydrate(content,tracking[historyPath],historyPath)).blocks);
   }
   for (const id of new Set(document.blocks.map(b => b.taskId))) {
     const blocks = document.blocks.filter(b => b.taskId === id), task = aiTasks.find(t => t.id === id);

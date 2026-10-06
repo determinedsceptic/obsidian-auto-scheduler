@@ -32,3 +32,7 @@ it('replans after explicit recovery without altering handwritten rows, then undo
   expect(v.files[path]).not.toContain('auto-scheduler:start');
   await undoLast(v,v,v.undo);expect(v.files[path]).toBe(edited);
 });
+
+it('attributes a tracking conflict to its actual note',()=>{
+  expect(()=>rehydrate(edited,tracking[path],path)).toThrow(`${path}: Generated blocks were edited`);
+});

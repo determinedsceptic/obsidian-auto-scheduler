@@ -4,7 +4,7 @@ import { readHabitIndex } from './habit-index';
 import type { HabitIndexSnapshot } from './habit-index';
 import { appendGuidelines } from './habit-guidelines';
 import { deadlineLabel } from './calendar-format';
-import { readDailyPlan, previewDailyEdits } from './daily-edit';
+import { checkReadDate, readDailyPlan, previewDailyEdits } from './daily-edit';
 import type { DailySnapshot, DailyEdit } from './daily-edit';
 import { appendHabits, habitPath } from './habit-tool';
 import { resolveEvents } from './event-tool';
@@ -22,7 +22,7 @@ import { requestLlm } from './llm-request';
 import { describeAiSchedule, planningDetails } from './ai-result';
 import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
-import { validTracking } from './tracking';
+import { rehydrate, validTracking } from './tracking';
 import { releaseEditedTracking } from './tracking-recovery';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
@@ -152,11 +152,13 @@ export default class AutoScheduler extends Plugin {
       if (file instanceof TFile) await this.app.workspace.getLeaf('tab').openFile(file);
     }); } });
     this.addCommand({ id: 'preview-week', name: 'Preview weekly schedule', callback: () => { void this.action(async () => {
+      await this.recoverTrackingConflicts();
       const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, false, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
     }); } });
     this.addCommand({ id: 'clean-daily-output', name: 'Clean daily schedule format', callback: () => { void this.action(async () => {
       if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('Enable daily-note output and clean daily lists first');
+      await this.recoverTrackingConflicts();
       const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true, this.state.aiTasks);
       new PreviewModal(this.app, preview, this).open();
     }); } });
@@ -237,6 +239,8 @@ export default class AutoScheduler extends Plugin {
   async readPlan(date: string, expectedSettingsKey: string): Promise<DailySnapshot> {
     return this.operations.run(async () => {
       if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
+      checkReadDate(date, new Date());
+      await this.recoverTrackingConflicts();
       return readDailyPlan(this.vaultPort, this.state.settings, this.state.tracking, this.state.aiTasks, date, new Date());
     });
   }
@@ -253,6 +257,7 @@ export default class AutoScheduler extends Plugin {
       if(JSON.stringify(current.contents)!==JSON.stringify(read.contents))throw Error('Habit templates changed. Read them again.');
       if(!current.index.files.some(f=>f.habits.some(h=>h.enabled)))throw Error('No enabled fixed-time habits found. Read the action list and confirm its start times before scheduling.');
       const settings={...this.state.settings,outputLocation:'daily' as const,cleanDaily:true,balanceLoad:true,outputMode:this.state.settings.outputMode==='plain'?'day-planner' as const:this.state.settings.outputMode};
+      await this.recoverTrackingConflicts();
       const now=new Date();const preview=await createPreview(this.vaultPort,settings,now,this.state.tracking,false,this.state.aiTasks);
       for(const [path,content] of Object.entries(read.contents))if(preview.snapshot[path]!==content)throw Error('Habit templates changed. Read them again.');
       if(JSON.stringify(Object.keys(preview.snapshot).filter(p=>p.startsWith(settings.habitFolder+'/')).sort())!==JSON.stringify(Object.keys(read.contents).sort()))throw Error('Habit templates changed. Read them again.');
@@ -306,6 +311,7 @@ export default class AutoScheduler extends Plugin {
       if (this.state.aiTasks.length + drafts.length > 10000) throw new Error('AI task limit reached');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      await this.recoverTrackingConflicts();
       const added = materializeTasks(drafts, settings, new Date(), crypto.randomUUID().replace(/-/g, ''));
       const preview = await createPreview(this.vaultPort, settings, new Date(), this.state.tracking, false, this.state.aiTasks, added);
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}${e.line ? ':' + e.line : ''}: ${e.message}`).join('\n'));
@@ -340,6 +346,7 @@ export default class AutoScheduler extends Plugin {
       if (this.state.aiTasks.length + tasks.length > 10000) throw new Error('AI task limit reached');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      await this.recoverTrackingConflicts();
       const now = new Date(), events = drafts.length ? resolveEvents(drafts, settings, now) : [];
       const added = tasks.length ? materializeTasks(tasks, settings, now, crypto.randomUUID().replace(/-/g, '')) : [];
       const staged=await stageHabitFiles(this.vaultPort,settings,habits,guidelines,guidelineFiles);
@@ -379,6 +386,7 @@ export default class AutoScheduler extends Plugin {
       if (expectedSettingsKey !== undefined && JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
       const settings = { ...this.state.settings, outputLocation: 'daily' as const, cleanDaily: true, balanceLoad: true,
         outputMode: this.state.settings.outputMode === 'plain' ? 'day-planner' as const : this.state.settings.outputMode };
+      await this.recoverTrackingConflicts();
       const now = new Date(), events = resolveEvents(drafts, settings, now);
       const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], {}, events);
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
@@ -403,6 +411,24 @@ export default class AutoScheduler extends Plugin {
         throw error;
       }
     });
+  }
+
+  /** Adopt manual edits only after a verified backup, before taking request snapshots. */
+  async recoverTrackingConflicts(): Promise<string[]> {
+    if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) return [];
+    const recovered: string[] = [];
+    for (const path of Object.keys(this.state.tracking)) {
+      const text = await this.vaultPort.read(path);
+      if (text === null) continue;
+      try { rehydrate(text, this.state.tracking[path], path); }
+      catch {
+        try { await this.recoverEditedDaily(path); }
+        catch (error) { throw Error(`${path}: ${(error as Error).message}`); }
+        recovered.push(path);
+      }
+    }
+    if (recovered.length) new Notice(`Manual edits preserved and tracking backed up: ${recovered.join(', ')}. Existing rows are now handwritten events; saved AI goals remain active.`, 15000);
+    return recovered;
   }
 
   async recoverEditedDaily(path: string): Promise<string> {
