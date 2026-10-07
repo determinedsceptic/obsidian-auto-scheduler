@@ -12,3 +12,9 @@ local-test-vaults/
 __pycache__/
 *.pyc
 examples/vault/.obsidian/
+
+# Private vault data is separate from the plugin repository.
+/DailyNotes/
+/Daily-Record/
+**/.obsidian/
+/data.json

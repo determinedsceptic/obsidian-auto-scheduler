@@ -25,7 +25,7 @@ function isUntimedTask(text:string):boolean {
 function taskBlocks(note:string):SourceBlock[] { return outsideCalendar(note).filter(block=>isUntimedTask(block.text)); }
 
 /** Bind to a visible goal, never to a calendar session or to inferred heading names. */
-export function bindTaskSource(source:ResolvedNoteReference,changeSetRef?:string|null):Pick<Task,'path'|'line'|'sourceText'|'sourceOccurrence'|'sourceCount'|'sourceStatus'|'completed'|'sourceRetired'> {
+export function bindTaskSource(source:ResolvedNoteReference,changeSetRef?:string|null):Pick<Task,'path'|'line'|'sourceText'|'sourceOccurrence'|'sourceCount'|'sourceStatus'|'completed'|'sourceRetired'|'sourceDetached'> {
   if(source.kind!=='block')throw Error('Task sourceRef must select a block returned by read_note');
   if(source.changeSetRef&&source.changeSetRef!==changeSetRef)throw Error('A staged task source must be composed with its exact changeSetRef');
   if(source.text.length>20_000)throw Error('Task source block exceeds the saved-source size budget');
@@ -33,7 +33,7 @@ export function bindTaskSource(source:ResolvedNoteReference,changeSetRef?:string
   const matches=blocks.filter(block=>block.fingerprint===fingerprint),occurrence=matches.findIndex(block=>block.start===source.start);
   if(occurrence<0)throw Error('A task requires an untimed checkbox source outside Day planner. Read or stage its persistent source before scheduling.');
   const status=matches[occurrence].status;
-  return {path:source.path,line:0,sourceText:source.text,sourceOccurrence:occurrence,sourceCount:matches.length,sourceStatus:status,completed:status!=='open',sourceRetired:false};
+  return {path:source.path,line:0,sourceText:source.text,sourceOccurrence:occurrence,sourceCount:matches.length,sourceStatus:status,completed:status!=='open',sourceRetired:false,sourceDetached:false};
 }
 
 function matchSource(task:Task,note:string):SourceBlock|undefined {
@@ -45,27 +45,37 @@ function matchSource(task:Task,note:string):SourceBlock|undefined {
   return matches.length===1?matches[0]:undefined;
 }
 function updateSource(task:Task,source:SourceBlock,path=task.path,count=task.sourceCount,occurrence=task.sourceOccurrence):Task {
-  return {...task,path,sourceText:source.text,sourceStatus:source.status,completed:source.status!=='open',
+  return {...task,path,sourceText:source.text,sourceStatus:source.status,completed:source.status!=='open',sourceDetached:false,
     ...(count!==undefined?{sourceCount:count,sourceOccurrence:occurrence}:{}),...(source.status!=='open'?{needsReview:false}:{})};
 }
 
-/** Re-run at commit: note tools cannot exchange a pending goal for calendar blocks. */
-export async function prepareTaskChanges(changes:ExternalChanges,phase:'stage'|'commit',vault:VaultPort,state:StatePort):Promise<ExternalChanges> {
-  const beforeCounts=new Map<string,number>(),afterCounts=new Map<string,number>();
-  const count=(map:Map<string,number>,key:string)=>map.set(key,(map.get(key)??0)+1);
-  for(const entry of changes.entries){
-    for(const block of taskBlocks(entry.before??''))if(block.status==='open')count(beforeCounts,block.fingerprint);
-    for(const block of taskBlocks(entry.after))count(afterCounts,block.fingerprint);
-  }
-  let removed=0,added=0;
-  for(const [key,n] of beforeCounts)removed+=Math.max(0,n-(afterCounts.get(key)??0));
-  // Only genuinely new rows can represent a rename; checking an existing row
-  // cannot be used as permission to remove another pending goal.
-  const allBefore=new Map<string,number>();
-  for(const entry of changes.entries)for(const block of taskBlocks(entry.before??''))count(allBefore,block.fingerprint);
-  for(const [key,n] of afterCounts)added+=Math.max(0,n-(allBefore.get(key)??0));
-  if(removed>added)throw Error('Pending task sources cannot be removed or replaced by calendar sessions. Preserve the source, or explicitly mark it completed/cancelled before deleting it.');
+/** Explicit note edits are authoritative; obsolete source bindings never lock a note. */
+export function prepareEditableTaskChanges(changes:ExternalChanges,state:StatePort):ExternalChanges {
+  const proposed=changes.state?.aiTasks??state.getAiTasks?.()??[],entries=new Map(changes.entries.map(entry=>[entry.path,entry]));
+  const updated=proposed.map(task=>{
+    if(!task.sourceText||!entries.has(task.path))return task;
+    const entry=entries.get(task.path)!;
+    try{
+      const found=matchSource(task,entry.after);
+      if(found)return updateSource(task,found);
+      const fingerprint=sourceFingerprint(task.sourceText);
+      const prior=matchSource(task,entry.before??'');
+      const moved=changes.entries.flatMap(candidate=>{
+        const before=taskBlocks(candidate.before??'').filter(block=>block.fingerprint===fingerprint);
+        const after=taskBlocks(candidate.after).filter(block=>block.fingerprint===fingerprint);
+        return before.length===0&&after.length===1?[{path:candidate.path,block:after[0]}]:[];
+      });
+      if(prior&&!taskBlocks(entry.after).some(block=>block.fingerprint===fingerprint)&&moved.length===1)return updateSource(task,moved[0].block,moved[0].path,1,0);
+      const status=prior?.status??task.sourceStatus??(task.completed?'completed':'open');
+      if(status!=='open')return {...task,sourceStatus:status,completed:true,needsReview:false,sourceRetired:true,sourceDetached:false,sourceText:undefined,sourceOccurrence:undefined,sourceCount:undefined};
+    }catch{ /* Ambiguous or edited structures detach; their bytes remain editable. */ }
+    return {...task,sourceText:undefined,sourceOccurrence:undefined,sourceCount:undefined,sourceRetired:false,sourceDetached:true,sourceStatus:'open' as const,completed:false,needsReview:true};
+  });
+  return JSON.stringify(updated)===JSON.stringify(proposed)?changes:{...changes,state:{...changes.state,aiTasks:updated}};
+}
 
+/** Scheduling must conserve every still-bound source; explicit note edits may detach it. */
+export async function prepareTaskChanges(changes:ExternalChanges,phase:'stage'|'commit',vault:VaultPort,state:StatePort):Promise<ExternalChanges> {
   const before=state.getAiTasks?.()??[],oldById=new Map(before.map(task=>[task.id,task]));
   const proposed=changes.state?.aiTasks??before,entries=new Map(changes.entries.map(entry=>[entry.path,entry]));
   const dependencies={...changes.dependencies};
@@ -122,7 +132,7 @@ export async function prepareTaskChanges(changes:ExternalChanges,phase:'stage'|'
 
 export function goalSummary(task:Task):Record<string,unknown> {
   const unknown=task.effort==='unknown'||!!task.rollingMinutes;
-  return {id:task.id,title:task.title,sourcePath:task.path,sourceBound:!!task.sourceText,sourceRetired:task.sourceRetired??false,sourceStatus:task.sourceStatus??(task.completed?'completed':'open'),effort:unknown?'unknown':'known',
+  return {id:task.id,title:task.title,sourcePath:task.path,sourceBound:!!task.sourceText,sourceRetired:task.sourceRetired??false,sourceDetached:task.sourceDetached??false,sourceStatus:task.sourceStatus??(task.completed?'completed':'open'),effort:unknown?'unknown':'known',
     totalMinutes:unknown?null:task.remaining,completedMinutes:task.completedMinutes??0,remainingEstimateMinutes:unknown?null:Math.max(0,task.remaining-(task.completedMinutes??0)),
     sessionBudgetMinutes:unknown?task.rollingMinutes??task.remaining:null,dailyMinutes:task.dailyMinutes??null,priority:task.priority,estimateBasis:task.estimateBasis??null,
     status:task.sourceStatus==='cancelled'?'cancelled':task.completed?'completed':task.needsReview?'needs-review':'active'};

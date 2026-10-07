@@ -2,7 +2,9 @@ import { parseBoundary } from './time';
 import { deadlineLabel } from './calendar-format';
 import { START, END, parseOutput, prioritySymbol } from './output';
 import type { DailyTracking, Tracking, TrackingPair } from './types';
-import { restoreEventMetadata, validEventRecords } from './event-tracking';
+import { reconcileEventMetadata, validEventRecords } from './event-tracking';
+import { dayPlannerSection } from './daily';
+import type { ExternalChanges } from './agent-types';
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Record only the generated span, so outside edits and original bytes survive. */
 export function cleanDaily(text: string, aiIds: Set<string> = new Set(), priorities: Map<string, number> = new Map(), format = true, deadlines: Map<string, number> = new Map()): { text: string; record: DailyTracking | null } {
@@ -22,7 +24,7 @@ export function cleanDaily(text: string, aiIds: Set<string> = new Set(), priorit
   return { text: parsed.prefix + visible + parsed.suffix,
     record: visible ? { visible, annotated } : null };
 }
-function restore(text: string, record: DailyTracking): string | undefined {
+function restore(text: string, record: DailyTracking): {text:string;record:DailyTracking} | undefined {
   // Permit checkbox changes and the standard Tasks completion-date marker only.
   const newline = record.visible.includes('\r\n') ? '\r\n' : '\n';
   const completion = /\s+✅\s*\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?$/u;
@@ -42,24 +44,41 @@ function restore(text: string, record: DailyTracking): string | undefined {
     return `- [${checked}] ${completed?cleaned.replace(/(\s+(?:<!-- as-block|%%\[as-block::))/,` ${completed}$1`):cleaned}`;
   });
   if(invalid)return undefined;
-  return text.slice(0, match.index) + annotated + text.slice(match.index! + match[0].length);
+  return {text:text.slice(0, match.index) + annotated + text.slice(match.index! + match[0].length),record:{visible:match[0],annotated}};
 }
-export function rehydrate(text: string | null, pair?: TrackingPair, path?: string): string | null {
-  if (text === null) return text;
-  if (!pair) return text;
-  text=restoreEventMetadata(text,pair.eventRecords??[]);
-  if (text.includes(START)) return text;
-  for (const record of [pair.after, pair.before]) {
-    if (!record) continue;
-    const restored = restore(text, record);
-    if (restored !== undefined) return restored;
+
+/** Metadata is a hint for unchanged rows, never ownership of the daily note. */
+export function reconcileDailyTracking(text:string|null,pair?:TrackingPair):{text:string|null;pair?:TrackingPair} {
+  if(text===null||!pair)return {text};
+  const events=reconcileEventMetadata(text,pair.eventRecords??[]);
+  let restoredText=events.text,after:DailyTracking|null=null;
+  if(!text.includes(START))try{
+    const section=dayPlannerSection(restoredText);
+    if(section)for(const record of [pair.after,pair.before]){
+      if(!record)continue;
+      const restored=restore(restoredText.slice(section.start,section.end),record);
+      if(restored){
+        restoredText=restoredText.slice(0,section.start)+restored.text+restoredText.slice(section.end);
+        after=restored.record;break;
+      }
+    }
+  }catch{ /* Current Markdown wins over malformed or obsolete metadata. */ }
+  return {text:restoredText,...(after||events.eventRecords.length?{pair:{before:null,after,...(events.eventRecords.length?{eventRecords:events.eventRecords}:{})}}:{})};
+}
+
+export function rehydrate(text:string|null,pair?:TrackingPair,_path?:string):string|null {
+  return reconcileDailyTracking(text,pair).text;
+}
+
+/** Drop obsolete hints in the same staged transaction as the requested edit. */
+export function prepareTrackingChanges(changes:ExternalChanges,current:Tracking):ExternalChanges {
+  const proposed=changes.state?.tracking??current,next=structuredClone(proposed);
+  for(const entry of changes.entries){
+    if(!next[entry.path])continue;
+    const reconciled=reconcileDailyTracking(entry.after,next[entry.path]).pair;
+    if(reconciled)next[entry.path]=reconciled;else delete next[entry.path];
   }
-  if (!pair.after || !pair.before) {
-    // A partially applied new note or a successfully emptied region needs no owner.
-    const protectedRecord = pair.after ?? pair.before;
-    if (!protectedRecord || !/^\s*- \[[ xX]\].*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}/m.test(text)) return text;
-  }
-  throw new Error((path ? `${path}: ` : '') + 'Generated blocks were edited or the tracked region is not unique; refusing to overwrite. Undo or open this note and run Recover edited daily schedule tracking to preserve manual edits, then send again.');
+  return JSON.stringify(next)===JSON.stringify(proposed)?changes:{...changes,state:{...changes.state,tracking:next}};
 }
 export function validTracking(value: unknown): value is Tracking {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;

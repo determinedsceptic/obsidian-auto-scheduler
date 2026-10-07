@@ -7,6 +7,7 @@ Desktop only; minimum Obsidian version **1.6.6**.
 ## What it does
 
 - **Edit ordinary Markdown without prescribing its layout.** Chat can discover authorized notes, read a document, heading or block, stage exact changes, inspect them, and commit them. A heading such as `## Research`, `# Tasks`, or `## 待办` is user data rather than a host requirement.
+- **Keep daily notes editable.** Every authorized section, including Day planner, can be edited directly. Old schedule metadata never locks the note; changed or ambiguous rows are authoritative and lose obsolete bindings.
 - **Schedule only when requested.** `plan_schedule` turns explicit task constraints, exact events and selected habit rows into compatible `# Day planner` clock entries. Active chat does not create a `# Tasks` section, move ordinary checkboxes, or reorganize source notes.
 - **Fixed appointments take precedence.** Exact events and their own before/after buffers override unfinished habits and movable sessions. Habit templates and task sources remain intact; completed records and other fixed commitments remain protected.
 - **Return verifiable results.** The host reports staged changes and durable commit receipts. A model's prose cannot mark an operation successful. If a later model request fails after a commit, the committed receipt remains visible.
@@ -43,7 +44,7 @@ discover -> read -> stage -> commit -> host receipt
                           plan_schedule -> same change set and receipt
 ```
 
-Discovery does not send an entire vault to the model. Content leaves the vault only when an authorized note or structure is read. References are tied to the bytes read, so stale edits are rejected.
+Discovery does not send an entire vault to the model. Host context includes saved task summaries and matching event rows/buffers; other note bodies are sent through authorized read tools. References are tied to the bytes read, so edits based on an outdated read are rejected.
 
 ## Runtime skills
 
@@ -89,7 +90,8 @@ When an operation created a note that did not exist, undo restores an empty note
 | Clear AI conversation | Cancel local waiting and clear the selected messages and draft. |
 | Preview weekly schedule | Preview the offline scheduler's seven-day result. |
 | Clean daily schedule format | Remove legacy display metadata from tracked daily output. |
-| Recover edited daily schedule tracking | Preserve current rows as handwritten occupied time after a verified backup. |
+| Clean event display in current daily note | Hide old inline event markers while retaining matching buffer metadata. |
+| Clear optional schedule metadata in current daily note | Reset matching hints with an undo journal; ordinary edits need no reset. |
 | Undo last operation | Restore the latest durable file and state transaction when safe. |
 
 ## Privacy and provider access

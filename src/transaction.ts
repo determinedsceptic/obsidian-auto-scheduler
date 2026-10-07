@@ -1,5 +1,5 @@
 import { ensureStudyGoal, studyGoal } from './study-goals';
-import { cleanDaily, rehydrate } from './tracking';
+import { cleanDaily, rehydrate, reconcileDailyTracking } from './tracking';
 import { dailyDocument, dailyInputs, dailyPaths, renderDaily, organizeDailyTasks, dayPlannerSection, isFlexibleDailyRow } from './daily';
 import { parseFixed, parseTasks } from './parser';
 import { parseMarkdownStructure } from './markdown-structure';
@@ -68,7 +68,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     ...taskState.flatMap(task=>task.sessionPaths??[]).filter(path=>datedPath(path,frozen)&&path.slice(-13,-3)<today),
   ])] : [];
   const dailyUpdates = revision?.dailyUpdates ?? {};
-  const goalPaths = !options.preserveLayout&&!formatOnly&&frozen.outputLocation==='daily' ? [...(revision?.aiTasksAfter??aiTasks),...addedTasks].filter(t=>!t.sourceRetired).map(t=>t.path) : [];
+  const goalPaths = !options.preserveLayout&&!formatOnly&&frozen.outputLocation==='daily' ? [...(revision?.aiTasksAfter??aiTasks),...addedTasks].filter(t=>!t.sourceRetired&&!t.sourceDetached).map(t=>t.path) : [];
   if(goalPaths.some(p=>!safeVaultPath(p)||!p.startsWith(frozen.dailyFolder+'/')||!/^\d{4}-\d{2}-\d{2}\.md$/.test(p.slice(frozen.dailyFolder.length+1))))throw Error('Study goals require a dated note inside the configured daily folder');
   // Declared templates identify existing plain habits; this does not authorize
   // adding unselected template occurrences through the explicit-source adapter.
@@ -81,11 +81,16 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   const inputs = await snapshot(vault, frozen, today, historyPaths, sourcePaths, options.explicitSources);
   const targets = frozen.outputLocation === 'daily' ? dailyPaths(frozen, today) : [frozen.outputFile];
   const trackingSnapshot: Tracking = JSON.parse(JSON.stringify(tracking));
+  const reconciledTracking:Tracking=structuredClone(trackingSnapshot);
   const virtual = { ...inputs };
   const trackingErrors: ScheduleResult['errors'] = [];
   if (frozen.outputLocation === 'daily') for (const path of Object.keys(inputs)) {
     if (!path.startsWith(frozen.dailyFolder + '/')) continue;
-    try { virtual[path] = rehydrate(inputs[path], trackingSnapshot[path]); }
+    try {
+      const reconciled=reconcileDailyTracking(inputs[path],trackingSnapshot[path]);
+      virtual[path]=reconciled.text;
+      if(reconciled.pair)reconciledTracking[path]=reconciled.pair;else delete reconciledTracking[path];
+    }
     catch (error) { trackingErrors.push({ path, line: 0, message: (error as Error).message }); virtual[path] = ''; }
   }
   const originals = { ...virtual };
@@ -119,7 +124,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
   }
   const parsed = parseTasks(Object.entries(inputs).filter(([path]) => !options.explicitSources && !path.startsWith(frozen.habitFolder + '/') && path !== frozen.fixedFile && (frozen.outputLocation === 'daily' || path !== frozen.outputFile)).map(([path, content]) => ({ path, content: daily.get(path)?.content ?? content ?? '' })));
   const allAiTasks: Task[] = taskState;
-  const activeLegacyTasks=allAiTasks.filter(t=>!t.sourceRetired);
+  const activeLegacyTasks=allAiTasks.filter(t=>!t.sourceRetired&&!t.sourceDetached);
   if (!options.preserveLayout && frozen.outputLocation === 'daily' && new Set(activeLegacyTasks.map(t => JSON.stringify([t.path,t.title]))).size !== activeLegacyTasks.length) throw new Error('Duplicate task titles in the same Tasks note; use distinct titles');
   if (new Set([...parsed.tasks, ...allAiTasks].map(t => t.id)).size !== parsed.tasks.length + allAiTasks.length) throw new Error('Duplicate task IDs');
   const observed=new Map<string,Array<{path:string;block:ReturnType<typeof dailyDocument>['blocks'][number]}>>();
@@ -138,6 +143,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     for(const {block} of observed.get(t.id)??[]){if(block.completed)sessions[block.id]=block.end-block.start;else delete sessions[block.id];}
     const completedMinutes=Object.values(sessions).reduce((sum,minutes)=>sum+minutes,0);
     const currentCompleted=(observed.get(t.id)??[]).filter(({block})=>block.completed&&block.date>=today&&block.date<addDays(today,7)).reduce((sum,{block})=>sum+block.end-block.start,0);
+    if(t.sourceDetached){Object.assign(t,{completedSessions:sessions,completedMinutes,needsReview:true});return {...t};}
     let sourceStatus=t.sourceStatus??(t.completed?'completed':'open');
     if(t.sourceRetired){
       /* A retired source is a tombstone. Its path remains provenance only. */
@@ -174,7 +180,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
     explicitSources: options.explicitSources,
     eventStarts: events.map(e => e.start),
     sourcePaths, historyPaths, aiTasksBefore: JSON.parse(JSON.stringify(aiTasks)), aiTasksAfter: allAiTasks, settings: frozen, settingsKey: settingKey(frozen), timezone: timezone(), today: dateKey(now),
-    tracking: trackingSnapshot, nextTracking: { ...trackingSnapshot }, snapshot: inputs, result: { blocks: [], unscheduled: [], days: [], errors: [...parsed.errors, ...fixed.errors] },
+    tracking: trackingSnapshot, nextTracking: reconciledTracking, snapshot: inputs, result: { blocks: [], unscheduled: [], days: [], errors: [...parsed.errors, ...fixed.errors] },
     output: null, diff: { added: [], removed: [], retained: [] },
   };
   try {
@@ -205,6 +211,10 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
       const paths=new Set(task.sessionPaths??[]);
       for(const block of result.blocks.filter(block=>block.taskId===task.id))paths.add(frozen.outputLocation==='daily'?`${frozen.dailyFolder}/${block.date}.md`:frozen.outputFile);
       task.sessionPaths=[...paths].sort();
+      if(task.sourceDetached){
+        (result.notes??=[]).push(`${task.title}: its source was edited; existing sessions may remain, but no new time is allocated until explicitly rebound`);
+        continue;
+      }
       if(reviewIds.has(task.id)&&!result.unscheduled.some(item=>item.taskId===task.id))result.unscheduled.push({taskId:task.id,title:task.title,remaining:0,reason:'Estimated effort is exhausted while the source goal remains open; review or revise the estimate'});
       if((task.effort==='unknown'||task.rollingMinutes!==undefined)&&task.sourceStatus==='open'){
         (result.notes??=[]).push(`${task.title}: total effort is unknown; scheduled sessions represent only the current rolling budget`);
@@ -244,7 +254,7 @@ export async function createPreview(vault: VaultPort, settings: Settings, now = 
         } else preview.outputs[path] = output;
       }
       if(!options.preserveLayout&&!formatOnly&&frozen.outputLocation==='daily')for(const task of allAiTasks){
-        if(task.sourceRetired)continue;
+        if(task.sourceRetired||task.sourceDetached)continue;
         const text=organizeDailyTasks(preview.outputs![task.path]??inputs[task.path]??'# Day planner\n',frozen.defaultEventDuration);
         preview.outputs![task.path]=ensureStudyGoal(text,task,aiTasks.find(t=>t.id===task.id));
       }

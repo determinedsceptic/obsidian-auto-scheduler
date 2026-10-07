@@ -49,8 +49,8 @@ export class NoteWorkspace implements AgentRuntime {
   private refs=new Map<string,StoredRef>(); private stages=new Map<string,StagedChangeSet>(); private dependencies=new Map<string,string|null>();
   private serial=0; private currentUndo:UndoRecord|null; private recoveryRequired:boolean;
   private readonly now:()=>Date; private readonly validateEdit?: (path:string,before:string|null,after:string)=>void|Promise<void>;
-  private readonly prepareChanges?: (changes:ExternalChanges,phase:'stage'|'commit')=>Promise<ExternalChanges>|ExternalChanges;
-  constructor(private readonly vault:VaultPort,private readonly state:StatePort,private readonly scope:AgentScope,options:{now?:()=>Date;validateEdit?:(path:string,before:string|null,after:string)=>void|Promise<void>;prepareChanges?:(changes:ExternalChanges,phase:'stage'|'commit')=>Promise<ExternalChanges>|ExternalChanges}={}) {
+  private readonly prepareChanges?: (changes:ExternalChanges,phase:'stage'|'commit',context:{trusted:boolean})=>Promise<ExternalChanges>|ExternalChanges;
+  constructor(private readonly vault:VaultPort,private readonly state:StatePort,private readonly scope:AgentScope,options:{now?:()=>Date;validateEdit?:(path:string,before:string|null,after:string)=>void|Promise<void>;prepareChanges?:(changes:ExternalChanges,phase:'stage'|'commit',context:{trusted:boolean})=>Promise<ExternalChanges>|ExternalChanges}={}) {
     this.now=options.now??(()=>new Date()); this.validateEdit=options.validateEdit; this.prepareChanges=options.prepareChanges; this.currentUndo=stateUndo(state); this.recoveryRequired=this.currentUndo?.status==='partial';
   }
 
@@ -118,7 +118,7 @@ export class NoteWorkspace implements AgentRuntime {
   private async prepare(changes:ExternalChanges,trusted:boolean,phase:'stage'|'commit',preserveValidate?:()=>void|Promise<void>):Promise<ExternalChanges> {
     const normalized=this.normalizeChanges(changes,trusted,preserveValidate);
     if(!this.prepareChanges)return normalized;
-    const prepared=await this.prepareChanges({entries:clone(normalized.entries),dependencies:clone(normalized.dependencies),...(normalized.state?{state:clone(normalized.state)}:{}),summary:normalized.summary,...(normalized.validate?{validate:normalized.validate}:{})},phase);
+    const prepared=await this.prepareChanges({entries:clone(normalized.entries),dependencies:clone(normalized.dependencies),...(normalized.state?{state:clone(normalized.state)}:{}),summary:normalized.summary,...(normalized.validate?{validate:normalized.validate}:{})},phase,{trusted});
     return this.normalizeChanges(prepared,trusted,preserveValidate??normalized.validate);
   }
   private mergeDependencies(dependencies:Record<string,string|null>,entries:FileChange[],fixed:Record<string,string|null>={}):Record<string,string|null> {

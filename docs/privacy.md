@@ -6,11 +6,13 @@ Markdown parsing, scheduling, tracking, staging, commit, and undo run locally. O
 
 Plugin `data.json` holds settings, AI task records, clean-list tracking, and the latest before/after recovery journal. Recovery snapshots can contain note text. Protect and back up this file with your vault; do not attach it unredacted to a public issue. It is not an API-key store.
 
+The plugin does not use Git or submit vault notes to GitHub. The development repository contains plugin code, documentation and synthetic compatibility fixtures; personal daily folders, hidden vault configuration and plugin state are separate. Schedule metadata is an optional local hint, not a content lock. Current note bytes take precedence over obsolete records, and ordinary edits require no tracking recovery.
+
 Conversations and drafts are held in memory until the plugin reloads. Closing and reopening the sidebar preserves them; **Clear** clears the selected conversation. There is no telemetry or background inference. Opening configuration or the assistant can query provider model metadata. Temporary rate limits can retry at most twice, within the request budget.
 
 ## Optional AI requests
 
-The selected provider receives chat messages, local date/time, the available tools, execution context, scheduling settings, and selected skill instructions. Context includes saved AI task summaries, current-horizon tracked event rows and their buffers in the authorized daily folder, and the latest operation's ID and vault-relative paths.
+The selected provider receives chat messages, local date/time, the available tools, execution context, scheduling settings, and selected skill instructions. Context includes saved AI task summaries, current-horizon event rows and buffers that still match actual notes in the authorized daily folder, and the latest operation's ID and vault-relative paths. Obsolete event rows are filtered out through local reads without sending their changed note bodies as context.
 
 By default, note tools can access the current open Markdown note and dated notes in the configured daily folder. **Additional note folders** explicitly expands that scope. Hidden paths, including plugin configuration and credentials, are unavailable to these tools. Discovery returns paths and references; `read_note` can return an outline, section, block, or complete authorized note. Unlike the older daily-summary interface, complete requested note bodies can now be sent. Staging results include the concrete before/after content of changed files. Subsequent tool rounds send those results to the provider for the same request.
 
@@ -24,7 +26,7 @@ Keys are bound to plugin namespace, provider, protocol, and endpoint. Host Secre
 
 ## Writes and recovery
 
-Tool parameters are input data, not executable code. Reads and writes are scope checked. References identify the actual read snapshot; changes to source files, destinations, or plugin state invalidate staged work. Calendar output is updated through the scheduling adapter.
+Tool parameters are input data, not executable code. Reads and writes are scope checked. References identify the actual read snapshot; changes to source files, destinations, or plugin state invalidate staged work. Generic tools can edit every authorized section, including calendar rows; explicit time allocation uses the scheduling adapter.
 
 The host saves recovery data before modifying notes. Multi-file writes can be interrupted. A partial operation locks further commits until recovery; that lock survives restart, including interrupted undo. The sidebar shows actual host receipts independently of model prose and retains them even if the next provider request fails or the view closes during commit.
 

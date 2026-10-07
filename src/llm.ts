@@ -87,6 +87,8 @@ export function validAiTasks(value: unknown): value is Task[] {
     && ((t.sourceOccurrence===undefined&&t.sourceCount===undefined)||(Number.isInteger(t.sourceOccurrence)&&Number.isInteger(t.sourceCount)&&t.sourceOccurrence>=0&&t.sourceCount>0&&t.sourceOccurrence<t.sourceCount))
     && (t.sourceStatus===undefined || ['open','completed','cancelled'].includes(t.sourceStatus))
     && (t.sourceRetired===undefined || typeof t.sourceRetired==='boolean')
+    && (t.sourceDetached===undefined || typeof t.sourceDetached==='boolean')
+    && (!t.sourceDetached || (t.sourceText===undefined&&t.sourceOccurrence===undefined&&t.sourceCount===undefined&&!t.sourceRetired))
     && (!t.sourceRetired || (t.sourceText===undefined&&t.sourceOccurrence===undefined&&t.sourceCount===undefined&&t.completed&&(t.sourceStatus==='completed'||t.sourceStatus==='cancelled')))
     && (t.sessionPaths===undefined || (Array.isArray(t.sessionPaths)&&t.sessionPaths.length<=10000&&new Set(t.sessionPaths).size===t.sessionPaths.length&&t.sessionPaths.every((path:unknown)=>typeof path==='string'&&safeVaultPath(path)&&path.endsWith('.md'))))
     && (t.completedSessions===undefined || (t.completedSessions!==null&&typeof t.completedSessions==='object'&&!Array.isArray(t.completedSessions)&&Object.keys(t.completedSessions).length<=10000&&Object.entries(t.completedSessions).every(([id,minutes])=>/^[A-Za-z0-9_-]+$/.test(id)&&Number.isSafeInteger(minutes)&&Number(minutes)>0&&Number(minutes)<=10080)))

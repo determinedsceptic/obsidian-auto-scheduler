@@ -5,7 +5,7 @@ export interface Task {
   id: string; title: string; path: string; line: number; remaining: number;
   priority: number; due?: number; earliest?: number; split: boolean; min: number; completed: boolean; dailyMinutes?: number; estimateBasis?: string; rollingMinutes?: number; sourceText?:string;
   /** Optional migration-safe fields used by source-linked tasks. */
-  effort?:'known'|'unknown'; sourceOccurrence?:number; sourceCount?:number; sourceStatus?:'open'|'completed'|'cancelled'; sourceRetired?:boolean;
+  effort?:'known'|'unknown'; sourceOccurrence?:number; sourceCount?:number; sourceStatus?:'open'|'completed'|'cancelled'; sourceRetired?:boolean; sourceDetached?:boolean;
   sessionPaths?:string[]; completedSessions?:Record<string,number>; completedMinutes?:number; needsReview?:boolean;
 }
 export interface Block extends Interval {

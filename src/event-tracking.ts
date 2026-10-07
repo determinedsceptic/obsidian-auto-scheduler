@@ -36,12 +36,6 @@ function clearEventComment(line: string): string {
   return line.slice(0, start) + separator + line.slice(end);
 }
 
-function eventAnnotation(line: string): string {
-  const match = EVENT_COMMENT.exec(line);
-  if (!match) throw new Error('Missing event buffer metadata');
-  return (match.index > 0 && line[match.index - 1] === '\\' ? '\\' : '') + match[0];
-}
-
 function diagnosticError(path: string, errors: ReturnType<typeof dailyInputs>['errors']): Error {
   return new Error(errors.map(error => `${error.path || path}:${error.line}: ${error.message}`).join('\n'));
 }
@@ -124,44 +118,91 @@ function eventRows(text: string): VisibleRow[] {
   return rows;
 }
 
-/** Restore hidden metadata only where a tracked visible row remains unique. */
-export function restoreEventMetadata(text: string, eventRecords: DailyTracking[]): string {
-  if (!validEventRecords(eventRecords)) throw new Error('Invalid event tracking records');
-  if (!eventRecords.length) return text;
+interface ReconcileRow extends VisibleRow {
+  visible: string;
+  key: string;
+  metadata: ReturnType<typeof parseEventMetadata>;
+}
 
-  const rows = eventRows(text);
-  const replacements: Array<{ start: number; end: number; text: string }> = [];
-  const claimed = new Set<number>();
-  for (const record of eventRecords) {
-    const expected = anchor(record.visible);
-    const candidates: Array<{ row: VisibleRow; annotated: boolean }> = [];
-    for (const row of rows) {
-      let visible = row.text;
-      let annotated = false;
-      if (EVENT_MARKER.test(row.text)) {
-        parseEventMetadata(row.text);
-        visible = clearEventComment(row.text);
-        annotated = true;
-      }
-      if (anchor(visible) === expected) candidates.push({ row, annotated });
-    }
-    if (candidates.length !== 1) throw new Error('Tracked event row was edited or is not unique; refusing to guess where its buffer metadata belongs');
-    const candidate = candidates[0];
-    if (claimed.has(candidate.row.start)) throw new Error('Event tracking records resolve to the same visible row');
-    claimed.add(candidate.row.start);
-    const restored = withCurrentStatus(record.annotated, candidate.row.text);
-    if (candidate.annotated) {
-      if (eventAnnotation(candidate.row.text) !== eventAnnotation(record.annotated)) throw new Error('Tracked event buffer metadata changed; refusing to overwrite it');
-      continue;
-    }
-    replacements.push({ start: candidate.row.start, end: candidate.row.end, text: restored });
+function reconcileRow(row: VisibleRow): ReconcileRow | undefined {
+  try {
+    const metadata = EVENT_MARKER.test(row.text) ? parseEventMetadata(row.text) : null;
+    const visible = metadata ? clearEventComment(row.text) : row.text;
+    const status = completion(visible);
+    if (status.marker && CHECKBOX.exec(visible)?.[2] === ' ') return undefined;
+    return { ...row, visible, key: anchor(visible), metadata };
+  } catch {
+    return undefined;
+  }
+}
+
+function sameMetadata(left: NonNullable<ReconcileRow['metadata']>, right: NonNullable<ReconcileRow['metadata']>): boolean {
+  return left.beforeMinutes === right.beforeMinutes && left.afterMinutes === right.afterMinutes;
+}
+
+/**
+ * Best-effort reconciliation for hidden event metadata. The note is
+ * authoritative: stale or ambiguous sidecar rows are discarded independently,
+ * while uniquely matching rows are restored only in the returned virtual text.
+ */
+export function reconcileEventMetadata(text: string, eventRecords: DailyTracking[]): { text: string; eventRecords: DailyTracking[] } {
+  if (!validEventRecords(eventRecords) || !eventRecords.length) return { text, eventRecords: [] };
+
+  let rows: ReconcileRow[];
+  try {
+    rows = eventRows(text).map(reconcileRow).filter((row): row is ReconcileRow => row !== undefined);
+  } catch {
+    return { text, eventRecords: [] };
   }
 
+  const replacements: Array<{ start: number; end: number; text: string }> = [];
+  const surviving: DailyTracking[] = [];
+  const claimed = new Set<number>();
+  for (const record of eventRecords) {
+    let expected: string;
+    let trackedMetadata: NonNullable<ReconcileRow['metadata']>;
+    try {
+      expected = anchor(record.visible);
+      trackedMetadata = parseEventMetadata(record.annotated)!;
+    } catch {
+      continue;
+    }
+
+    const candidates = rows.filter(row => row.key === expected);
+    if (candidates.length !== 1 || claimed.has(candidates[0].start)) continue;
+    const candidate = candidates[0];
+
+    // Inline metadata belongs to the current note. Retain the record only when
+    // its buffer values still agree; formatting and placement remain untouched.
+    if (candidate.metadata && !sameMetadata(candidate.metadata, trackedMetadata)) continue;
+
+    let annotated = candidate.text;
+    if (!candidate.metadata) {
+      try {
+        annotated = withCurrentStatus(record.annotated, candidate.text);
+      } catch {
+        continue;
+      }
+    }
+    const current = { visible: candidate.visible, annotated };
+    if (!validEventRecords([current])) continue;
+
+    claimed.add(candidate.start);
+    surviving.push(current);
+    if (!candidate.metadata) replacements.push({ start: candidate.start, end: candidate.end, text: annotated });
+  }
+
+  if (!validEventRecords(surviving)) return { text, eventRecords: [] };
   let restored = text;
   for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
     restored = restored.slice(0, replacement.start) + replacement.text + restored.slice(replacement.end);
   }
-  return restored;
+  return { text: restored, eventRecords: surviving };
+}
+
+/** Restore only event metadata that still reconciles with the current note. */
+export function restoreEventMetadata(text: string, eventRecords: DailyTracking[]): string {
+  return reconcileEventMetadata(text, eventRecords).text;
 }
 
 /** Strict persisted-state validator for the optional TrackingPair sidecar. */

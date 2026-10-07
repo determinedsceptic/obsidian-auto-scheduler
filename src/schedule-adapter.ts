@@ -94,7 +94,7 @@ export async function rebindTaskSource(workspace:NoteWorkspace,state:StatePort,v
     const tasks=copyTasks(prior?.state?.aiTasks??state.getAiTasks?.()??[]),index=tasks.findIndex(task=>task.id===args.taskId);
     if(index<0)throw Error('Unknown task ID');
     const source=taskSource(workspace,args.sourceRef,new Map((prior?.entries??[]).map(entry=>[entry.path,entry])),args.changeSetRef as string|null|undefined);
-    tasks[index]={...tasks[index],...source,...(typeof args.title==='string'?{title:args.title.trim()}:{}),needsReview:source.completed?false:tasks[index].needsReview};
+    tasks[index]={...tasks[index],...source,...(typeof args.title==='string'?{title:args.title.trim()}:{}),needsReview:source.completed||tasks[index].sourceDetached?false:tasks[index].needsReview};
     const staged=await workspace.stageExternalChanges({entries:prior?.entries??[],dependencies:{...(prior?.dependencies??{}),...workspace.getReadDependencies()},state:{...prior?.state,aiTasks:tasks},summary:prior?`${prior.summary}; Rebind task source`:'Rebind task source',validate:prior?.validate});
     return {ok:true,value:{...staged,goal:goalSummary(tasks[index])}};
   }catch(error){return {ok:false,error:(error as Error).message};}
@@ -255,7 +255,7 @@ export async function planSchedule(workspace: NoteWorkspace, vault: VaultPort, s
     }
 
     const aiTasksAfter = before.map(task => replacements.get(task.id) ?? task).concat(created);
-    const unbound=aiTasksAfter.find(task=>!task.completed&&!task.sourceText);
+    const unbound=aiTasksAfter.find(task=>!task.completed&&!task.sourceText&&!task.sourceDetached);
     if(unbound)throw Error(`Task has no persistent source: ${unbound.title}. Read or stage its source and use bind_task_source before replanning.`);
     const bindings=aiTasksAfter.filter(task=>task.sourceText).map(task=>JSON.stringify([task.path,sourceFingerprint(task.sourceText!),task.sourceOccurrence??null]));
     if(new Set(bindings).size!==bindings.length)throw Error('A source is already bound to a task. Replan or revise that task ID instead of creating a duplicate.');

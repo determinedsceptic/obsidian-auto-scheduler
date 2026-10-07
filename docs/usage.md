@@ -20,7 +20,7 @@ Headings, filenames, lists, checkboxes, and paragraphs are arbitrary user organi
 
 A task or goal that will be scheduled has one persistent, user-visible unchecked, untimed checkbox (`[ ]`) in the section the user chooses. The checkbox remains there while dated Day planner rows represent work sessions. Scheduling alone never moves, deletes, or completes the source. A Day planner section cannot hold that untimed checkbox because the active adapter rejects source bindings there.
 
-The host also protects this invariant during generic note editing: an open task's source cannot disappear. The user can explicitly edit or move it, complete it with `[x]`, or cancel it with `[-]`. Deleting a source with pending work requires first saving one of those terminal states, followed by an explicit deletion request. Scheduled sessions by themselves never justify removing the source.
+Every authorized daily-note section, including Day planner, can be edited directly. Saved schedule metadata does not lock a note or require its old content to remain unchanged. An explicit source rename or deletion may detach its scheduling binding; the task's ID, estimate and history remain available for review. New time allocation for that goal pauses until it is explicitly rebound to a read source. Scheduling itself still preserves every bound source and never deletes it because sessions or estimated minutes are exhausted.
 
 To copy content, ask the assistant to read the source and stage insertions at the requested destinations. To move content, it must stage both destination insertion and source deletion. Either operation can be reviewed and undone as one transaction.
 
@@ -31,7 +31,7 @@ The default chat scope contains:
 - the currently open Markdown note, when one is open;
 - valid `YYYY-MM-DD.md` notes in the configured daily-note folder.
 
-Use **Additional note folders** to grant access to other folders. Paths remain vault-relative; hidden paths and `..` are rejected. A folder setting grants discovery/read/write scope, but the model receives note content only after a read tool call. Merely opening a note or discovering its path does not send the body.
+Use **Additional note folders** to grant access to other folders. Paths remain vault-relative; hidden paths and `..` are rejected. A folder setting grants discovery/read/write scope. Host context includes saved task summaries and matching event rows/buffers; other note content requires a read tool call. Merely opening a note or discovering its path does not send the body.
 
 The configured task and habit folders remain inputs to the manual scheduler. Active scheduling still checks its fixed-event and daily-note dependencies locally. None of these paths automatically expands model-visible scope, and trusted dependency bytes are not returned by a tool.
 
@@ -70,7 +70,7 @@ An unfinished habit's displayed time is a preference. A fixed appointment and it
 
 For a train departing at 14:00 and arriving at 17:00 with one hour on both sides, the event keeps its actual `14:00 - 17:00` row and reserves `13:00 - 18:00`. With clean daily lists enabled, resolved buffers are retained in plugin tracking rather than displayed in the note. Later planning, restarts, and undo preserve them. Metadata mode retains the inline comments. Missing or null buffers use **Buffer around fixed events**; explicit `0` is supported.
 
-Use **Clean event display in current daily note** to remove old inline event markers from the open dated note while retaining their buffers and an undo journal. This command changes only validated event markers. Clean tracked event rows support checkbox changes; after manually changing their times or titles, use the existing tracking recovery command before planning again.
+Use **Clean event display in current daily note** to remove old inline event markers from the open dated note while retaining their buffers and an undo journal. This command changes only validated event markers. Matching rows retain their buffers and current checkbox/completion state. Manually changed, removed, or duplicated event rows discard their obsolete hidden records without rejecting unrelated edits or guessing new buffer ownership. The actual clocks in the note become authoritative; old buffers are not transferred onto a changed row. Ordinary edits and planning need no tracking recovery command.
 
 For other handwritten approximate plans, the assistant passes previously read `flexibleRefs` only when the user declared them movable. If a hard appointment overlaps one, its clock reservation is released and its unchecked reminder remains in the note. No task heading name or activity keyword determines certainty.
 

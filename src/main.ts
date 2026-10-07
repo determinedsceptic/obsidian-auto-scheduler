@@ -167,11 +167,11 @@ export default class AutoScheduler extends Plugin {
       new PreviewModal(this.app, preview, this).open();
     }); } });
     this.addCommand({id:'clean-event-metadata',name:'Clean event display in current daily note',callback:()=>{void this.action(()=>this.cleanEventDisplay());}});
-    this.addCommand({ id: 'recover-edited-daily', name: 'Recover edited daily schedule tracking', callback: () => { void this.action(async () => {
+    this.addCommand({ id: 'recover-edited-daily', name: 'Clear optional schedule metadata in current daily note', callback: () => { void this.action(async () => {
       const file = this.app.workspace.getActiveFile();
       if (!(file instanceof TFile)) throw Error('Open the edited daily note first');
-      const backup = await this.recoverEditedDaily(file.path);
-      new Notice(`Tracking recovered; existing rows are preserved as handwritten events. Saved AI goals and habits remain active. Backup: ${backup}`, 15000);
+      await this.recoverEditedDaily(file.path);
+      new Notice('Optional schedule metadata cleared; note contents are unchanged. Use Undo last operation to restore it.', 15000);
     }); } });
     this.addCommand({ id: 'undo-last', name: 'Undo last operation', callback: () => { void this.action(async () => {
       await undoLast(this.vaultPort, this.storage, this.state.undo); this.refreshChats(); new Notice('Last operation undone');
@@ -468,23 +468,9 @@ export default class AutoScheduler extends Plugin {
     });
   }
 
-  /** Adopt manual edits only after a verified backup, before taking request snapshots. */
+  /** Compatibility hook: note edits no longer need a separate recovery operation. */
   async recoverTrackingConflicts(): Promise<string[]> {
-    if (this.state.undo?.status === 'partial') throw Error('A partial write must be undone before tracking recovery or another commit');
-    if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) return [];
-    const recovered: string[] = [];
-    for (const path of Object.keys(this.state.tracking)) {
-      const text = await this.vaultPort.read(path);
-      if (text === null) continue;
-      try { rehydrate(text, this.state.tracking[path], path); }
-      catch {
-        try { await this.recoverEditedDaily(path); }
-        catch (error) { throw Error(`${path}: ${(error as Error).message}`); }
-        recovered.push(path);
-      }
-    }
-    if (recovered.length) new Notice(`Manual edits preserved and tracking backed up: ${recovered.join(', ')}. Existing rows are now handwritten events; saved AI goals remain active.`, 15000);
-    return recovered;
+    return [];
   }
 
   async recoverEditedDaily(path: string): Promise<string> {
@@ -492,16 +478,12 @@ export default class AutoScheduler extends Plugin {
     const text = await this.vaultPort.read(path);
     if (text === null) throw Error('Daily note not found');
     const nextTracking = releaseEditedTracking(path, text, this.state.tracking, this.state.settings);
-    const stateKey = JSON.stringify(this.state);
-    const backup = `${this.app.vault.configDir}/plugins/${this.manifest.id}/tracking-recovery-${crypto.randomUUID()}.json`;
-    const payload = JSON.stringify({version:1,createdAt:new Date().toISOString(),path,note:text,tracking:this.state.tracking[path],aiTasks:this.state.aiTasks,undo:this.state.undo},null,2);
-    // Save and verify recovery evidence before changing ownership. No note write.
-    await this.app.vault.adapter.write(backup,payload);
-    if (await this.app.vault.adapter.read(backup) !== payload) throw Error('Recovery backup verification failed; tracking was not changed');
-    if (await this.vaultPort.read(path) !== text || JSON.stringify(this.state) !== stateKey) throw Error('Daily note or plugin state changed during recovery; retry');
-    const next = {...this.state,tracking:nextTracking};
-    await this.saveData(next); this.state = next;
-    return backup;
+    const workspace=new NoteWorkspace(this.vaultPort,this.storage,{files:[path],folders:[]});
+    const staged=await workspace.stageExternalChanges({entries:[],dependencies:{[path]:text},state:{tracking:nextTracking},summary:'Clear optional schedule metadata without editing the note'});
+    const committed=await workspace.execute('commit_changes',{changeSetRef:staged.changeSetRef});
+    if(!committed.ok)throw Error(committed.error??'Metadata reset did not commit');
+    this.refreshChats();
+    return committed.receipt!.operationId;
   }
 
   async openScheduledNote(path: string): Promise<void> {
