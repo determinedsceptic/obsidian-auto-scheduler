@@ -1,31 +1,31 @@
 # Privacy and recovery
 
-## What stays local
+## Local data
 
-Markdown parsing, task priorities, fixed events, habits, available-time calculation, scheduling, preview, tracking, and undo run locally. Offline commands need no provider account or network. The runtime uses public Obsidian APIs and does not read outside the vault.
+Markdown parsing, scheduling, tracking, staging, commit, and undo run locally. Offline commands need no provider account. The runtime uses public Obsidian APIs and does not access files outside the vault.
 
-Plugin `data.json` contains settings, AI task records, clean-list tracking, and the latest before/after recovery snapshots. Those snapshots can include note text. Back up and protect this file with your vault. It is not an API-key store. It is not safe to attach an unredacted copy to a public issue.
+Plugin `data.json` holds settings, AI task records, clean-list tracking, and the latest before/after recovery journal. Recovery snapshots can contain note text. Protect and back up this file with your vault; do not attach it unredacted to a public issue. It is not an API-key store.
 
-Chat messages are held in memory and clear when the chat view closes. There is no telemetry, advertising, background inference, or automatic retry. Opening AI configuration or the assistant can query provider model metadata.
+Conversations and drafts are held in memory until the plugin reloads. Closing and reopening the sidebar preserves them; **Clear** clears the selected conversation. There is no telemetry or background inference. Opening configuration or the assistant can query provider model metadata. Temporary rate limits can retry at most twice, within the request budget.
 
 ## Optional AI requests
 
-Chat sends contact the inference endpoint. Model discovery contacts the configured provider automatically when opening the assistant, editing a saved provider, or leaving a newly entered key field; sidebar/configuration refresh buttons can also request it. The selected provider receives the chat, local date/time, working-day/hour/capacity settings, bundled habits skill, and configured vault-relative habit and daily-note paths. Existing task lists are not included automatically in every request. When the model calls `read_daily_plan`, the plugin reads the requested dated note and sends only checkbox summaries under its `Day planner` section: titles, completion, duration, deadlines, priority and local edit references. The named habit action/rule lists from the Markdown files in the configured habits folder is included as bounded context; an explicitly named habit section in the requested daily note can also be included. Unrelated sections, whole note bodies, the tracking store and absolute filesystem paths stay local. Reading is bounded to the past 30 days and next seven local dates. These summaries are included in subsequent tool rounds for that send and are not saved in chat history. Anything you type into chat is sent to that provider.
+The selected provider receives chat messages, local date/time, the available tools, execution context, scheduling settings, and selected skill instructions. Context includes saved AI task summaries, current-horizon tracked event rows and their buffers in the authorized daily folder, and the latest operation's ID and vault-relative paths.
 
-The plugin uses Obsidian `requestUrl`. Hosted addresses must use HTTPS; HTTP is permitted only for localhost. Model discovery requests `/models`, not an inference. Provider errors are reported without reflecting keys or raw server bodies into user-facing messages. A successful discovery request does not prove that a selected model supports tool calling.
+By default, note tools can access the current open Markdown note and dated notes in the configured daily folder. **Additional note folders** explicitly expands that scope. Hidden paths, including plugin configuration and credentials, are unavailable to these tools. Discovery returns paths and references; `read_note` can return an outline, section, block, or complete authorized note. Unlike the older daily-summary interface, complete requested note bodies can now be sent. Staging results include the concrete before/after content of changed files. Subsequent tool rounds send those results to the provider for the same request.
 
-Providers may require accounts, retain requests, and charge for API calls. Check your selected service's current terms and privacy policy. This plugin does not proxy requests through its maintainer or bundle a subscription.
+**Runtime skill files** are explicitly selected Markdown files. Their contents are sent as instructions on every send; configured files replace the bundled defaults. Skills cannot expand note permissions. The provider does not receive raw recovery journals, tracking records, or private scheduler dependency snapshots through the generic tools.
 
-## Keys
+The plugin uses Obsidian `requestUrl`. Hosted endpoints require HTTPS; HTTP is permitted only for localhost. Provider errors are summarized without reflecting keys or raw error bodies. Model discovery does not establish that every listed model supports tool calling. Providers may retain requests and bill API use; their policies apply.
 
-Keys are scoped by plugin namespace, provider, protocol, and endpoint binding. The host Keychain API is used when available; on older hosts keys live in session memory and must be re-entered after reload. Keys are not written to notes, data.json, logs, or source control. Changing the address or protocol does not reuse the old key at the new destination. Keychain entries stay on the device rather than syncing with the vault.
+## Credentials
 
-## Writes and undo
+Keys are bound to plugin namespace, provider, protocol, and endpoint. Host SecretStorage/Keychain is used when available; otherwise keys stay in session memory and must be entered after reload. Keys are not written to notes, plugin data, logs, or source control. Changing endpoint or protocol does not forward an old key to the new destination.
 
-Model tool parameters are strict input data, not executable code. The host chooses output paths and rejects unknown fields, invalid estimates, ambiguous note tracking, conflicts, and concurrent changes. Before writing, it saves recovery data durably. Multi-file writes can still be interrupted; the latest undo record is kept for recovery. Undo checks current contents and refuses to overwrite unrelated edits.
+## Writes and recovery
 
-The plugin keeps one undo operation, not a full version history. Maintain independent backups of notes and plugin data.
+Tool parameters are input data, not executable code. Reads and writes are scope checked. References identify the actual read snapshot; changes to source files, destinations, or plugin state invalidate staged work. Calendar output is updated through the scheduling adapter.
 
-AI revisions use references from a fresh read, not arbitrary paths or model-written Markdown. The host validates changes, compares the source and task state, saves a recovery backup, then writes source/destination notes. Edits after the read or preview invalidate the operation. A partial write retains the backup; **Undo last schedule** restores note contents and task state, including after a restart.
+The host saves recovery data before modifying notes. Multi-file writes can be interrupted. A partial operation locks further commits until recovery; that lock survives restart, including interrupted undo. The sidebar shows actual host receipts independently of model prose and retains them even if the next provider request fails or the view closes during commit.
 
-When you ask to apply existing habits, `read_habits` sends parsed fixed-time habit fields and recognized guideline lists from all Markdown files in the configured habits folder to the selected provider, with vault-relative paths. It does not scan journals or unrelated folders. `schedule_existing_habits` applies the read templates locally and refuses stale template reads.
+**Undo last operation**, `/undo`, and exact `undo` work without an API call. Natural-language undo uses `undo_operation` through the tool loop. Undo refuses to overwrite later manual edits or changed task/tracking state. The plugin retains one undoable operation; it is not a version-history replacement. Newly created notes are restored to empty contents on undo rather than removed. Maintain independent backups.

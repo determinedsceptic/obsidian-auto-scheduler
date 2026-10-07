@@ -73,3 +73,45 @@ describe('task layout and rolling learning goals',()=>{
   await expect(createPreview(v,settings,now,v.tracking,false,v.aiTasks)).rejects.toThrow('Duplicate study goal');
  });
 });
+
+describe('ordinary task master rows',()=>{
+ it('writes ordinary tasks in Tasks, reads one identity, revises the master and restores both on undo',async()=>{
+  const v=new StudyVault();const original='---\ntags: [daily]\n---\n# Journal\n- [ ] Report\n';v.files={[source]:original};
+  const tasks=materializeTasks([{...draft,title:'Report',rollingMinutes:null,dailyMinutes:null,estimateBasis:null,minutes:120}],settings,now,'ordinary');
+  const p=await createPreview(v,settings,now,{},false,[],tasks);await applyPreview(v,v,p,settings,now);
+  expect(v.files[source].startsWith('---\ntags: [daily]\n---\n# Tasks')).toBe(true);
+  expect(v.files[source]).toContain('- [ ] 🔼 Report');
+  const before=structuredClone(v.files),read=await readDailyPlan(v,settings,v.tracking,v.aiTasks,'2026-10-01',now);
+  expect(read.read.items.filter(i=>i.ref===tasks[0].id)).toHaveLength(1);expect(read.read.items).toHaveLength(1);
+  expect(read.read.items[0].totalMinutes).toBe(120);expect(read.read.items[0].defaulted).toBe(false);
+  const {preview}=await previewDailyEdits(v,settings,v.tracking,v.aiTasks,read,[{ref:tasks[0].id,title:'Final report',minutes:null,priority:4,targetDate:'2026-10-02'}],now,'revise');
+  expect(preview.result.errors).toEqual([]);await applyPreview(v,v,preview,settings,now);
+  expect(v.files[source]).toContain('- [ ] ⏫ Final report');expect(v.files[source]).toContain('# Journal\n- [ ] Report');
+  expect(v.aiTasks.map(t=>t.id)).toEqual([tasks[0].id]);
+  await undoLast(v,v,v.undo);for(const [path,text] of Object.entries(before))expect(v.files[path]).toBe(text);
+ });
+ it('checking an ordinary master stops sessions and retains the old source in today’s index',async()=>{
+  const v=new StudyVault();v.files={};const tasks=materializeTasks([{...draft,title:'Report',rollingMinutes:null,minutes:120}],settings,now,'master');
+  const p=await createPreview(v,settings,now,{},false,[],tasks);await applyPreview(v,v,p,settings,now);
+  v.files[source]=v.files[source].replace('- [ ] 🔼 Report','- [x] 🔼 Report');
+  const next=await createPreview(v,settings,now,v.tracking,false,v.aiTasks);expect(next.result.errors).toEqual([]);expect(next.result.blocks.filter(b=>!b.completed)).toEqual([]);
+  const future=new Date('2026-10-08T08:00:00+08:00'),read=await readDailyPlan(v,settings,v.tracking,v.aiTasks,'2026-10-08',future);
+  expect(read.read.items.find(i=>i.ref===tasks[0].id)).toMatchObject({completed:true,editable:false,goalDate:'2026-10-01'});
+ });
+ it('migrates legacy ordinary tasks without a master row exactly once and keeps history out of the current week',async()=>{
+  const v=new StudyVault();v.files={};const tasks=materializeTasks([{...draft,title:'Legacy',rollingMinutes:null,minutes:120}],settings,now,'legacy');
+  const p=await createPreview(v,settings,now,{},false,[],tasks);await applyPreview(v,v,p,settings,now);
+  v.files[source]=v.files[source].replace('# Tasks\n\n- [ ] 🔼 Legacy\n\n','');
+  const before=v.files[source],next=await createPreview(v,settings,now,v.tracking,false,v.aiTasks);expect(next.result.errors).toEqual([]);await applyPreview(v,v,next,settings,now);
+  expect(v.files[source].match(/^- \[ \] 🔼 Legacy$/gm)).toHaveLength(1);
+  const repeat=await createPreview(v,settings,now,v.tracking,false,v.aiTasks);expect(repeat.outputs![source]).toBe(v.files[source]);
+  await undoLast(v,v,v.undo);expect(v.files[source]).toBe(before);
+ });
+ it('rejects duplicate identities and does not overwrite a handwritten task with the same title',async()=>{
+  const v=new StudyVault();v.files={[source]:'# Tasks\n- [ ] 🔼 Report 📅 2026-10-20\n# Day planner\n'};
+  const tasks=materializeTasks([{...draft,title:'Report',rollingMinutes:null}],settings,now,'duplicate');
+  const p=await createPreview(v,settings,now,{},false,[],tasks);expect(p.result.errors.map(e=>e.message).join()).toContain('already exists');
+  await expect(applyPreview(v,v,p,settings,now)).rejects.toThrow('contains errors');expect(v.writes).toBe(0);
+  await expect(createPreview(v,settings,now,{},false,[],[tasks[0],{...tasks[0],id:'different-id'}])).rejects.toThrow('Duplicate task titles');
+ });
+});

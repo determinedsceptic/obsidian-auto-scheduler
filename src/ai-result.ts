@@ -2,9 +2,10 @@ import { deadlineLabel } from './calendar-format';
 import type { Preview } from './transaction';
 import { clock, dateKey, workWindows } from './time';
 import { endClock } from './output';
+import type { OperationReceipt } from './agent-types';
 
 export interface ScheduledNote { date: string; path: string }
-export interface AiScheduleReply { text: string; notes: ScheduledNote[] }
+export interface AiScheduleReply { text: string; notes: ScheduledNote[]; receipt?: OperationReceipt }
 
 /** Explain project pace and why an unconstrained task could not start today. */
 export function planningDetails(preview:Preview,ids:Set<string>,now=new Date()):string[]{
@@ -26,7 +27,7 @@ export function describeAiSchedule(preview: Preview, warning?: string): AiSchedu
   const previous = new Set(preview.aiTasksBefore.map(t => t.id));
   const created = new Set(preview.aiTasksAfter.filter(t => !previous.has(t.id)).map(t => t.id));
   const blocks = preview.result.blocks.filter(b => created.has(b.taskId)).sort((a, b) => a.start - b.start || a.taskId.localeCompare(b.taskId));
-  const notes: ScheduledNote[] = [...new Set(blocks.map(b => b.date))].map(date => ({ date, path: `${preview.settings.dailyFolder}/${date}.md` }));
+  const notes: ScheduledNote[] = [...new Set([...blocks.map(b => b.date), ...preview.aiTasksAfter.filter(t=>created.has(t.id)).map(t=>t.path.slice(-13,-3))])].map(date => ({ date, path: `${preview.settings.dailyFolder}/${date}.md` }));
   const lines = [...planningDetails(preview,created), 'Saved to daily notes:'];
   for (const block of blocks) lines.push(`• ${block.date} ${clock(block.start)}–${endClock(block)}: ${block.title} (priority ${block.priority ?? 3}/5)${preview.aiTasksAfter.find(t=>t.id===block.taskId)?.due === undefined ? '' : `; deadline ${deadlineLabel(preview.aiTasksAfter.find(t=>t.id===block.taskId)!.due!)}`}`);
   const pending = preview.result.unscheduled.filter(t => created.has(t.taskId));

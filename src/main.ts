@@ -1,3 +1,11 @@
+import { createAgentSession } from './plugin-agent';
+import { agentSettings } from './agent-settings';
+import type { AgentSession } from './plugin-agent';
+import type { AgentSettings } from './types';
+import { validUndoRecord } from './undo-record';
+import { undoOperationId, NoteWorkspace } from './note-workspace';
+import { copyDailyTasks } from './daily-copy';
+import type { DailyCopy } from './daily-copy';
 import { stageHabitFiles } from './habit-files';
 import type { GuidelineDocument } from './habit-files';
 import { readHabitIndex } from './habit-index';
@@ -23,6 +31,7 @@ import { describeAiSchedule, planningDetails } from './ai-result';
 import type { AiScheduleReply } from './ai-result';
 import type { TaskDraft } from './llm';
 import { rehydrate, validTracking } from './tracking';
+import { cleanEventMetadata } from './event-tracking';
 import { releaseEditedTracking } from './tracking-recovery';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, normalizePath, requestUrl } from 'obsidian';
 import { applyPreview, createPreview, timezone, undoLast } from './transaction';
@@ -75,16 +84,6 @@ function habitAnchorQuestion(items: string[]): string {
   if (/(?:after )?(?:lunch|dinner)|午饭|午餐|晚饭|晚餐/.test(text)) return 'Relative-time items are not scheduled until their anchor times are confirmed. What time do lunch and dinner usually end, and which duration in the 10–20 minute rest range should I use?';
   return 'Relative-time items are not scheduled until their clock anchors are confirmed. What start times should I use for the listed actions?';
 }
-function validUndo(value: unknown): value is UndoRecord {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as UndoRecord;
-  const validEntry = (entry: import('./types').FileChange): boolean => safeVaultPath(entry.path) && entry.path.endsWith('.md')
-    && (entry.before === null || typeof entry.before === 'string') && typeof entry.after === 'string'
-    && (entry.restored === undefined || typeof entry.restored === 'string');
-  return validEntry(record) && typeof record.createdAt === 'string'
-    && (record.aiTasksBefore === undefined || validAiTasks(record.aiTasksBefore)) && (record.aiTasksAfter === undefined || validAiTasks(record.aiTasksAfter))
-    && (record.entries === undefined || (Array.isArray(record.entries) && record.entries.length > 0 && record.entries.every(e => !!e && typeof e === 'object' && validEntry(e)) && new Set(record.entries.map(e => e.path)).size === record.entries.length));
-}
 export default class AutoScheduler extends Plugin {
   state: PluginState = { settings: { ...DEFAULT_SETTINGS }, undo: null, tracking: {}, aiTasks: [], llm: { ...DEFAULT_LLM } };
   chatHistory:{activeId:string;sessions:ChatConversation[]}={activeId:crypto.randomUUID(),sessions:[]};
@@ -108,9 +107,13 @@ export default class AutoScheduler extends Plugin {
   private operations = new OperationQueue();
   private vaultPort!: VaultPort;
   private storage: StatePort = {
+    getUndo: () => this.state.undo,
     getTracking: () => this.state.tracking,
     getAiTasks: () => this.state.aiTasks,
     saveUndo: async (record, tracking, aiTasks) => {
+      const previous = this.state.undo;
+      const plan = (undo: UndoRecord) => JSON.stringify((undo.entries ?? [undo]).map(entry => [entry.path, entry.before, entry.after, entry.restored]));
+      if (previous?.status === 'partial' && record && ((record.operationId ?? record.createdAt) !== (previous.operationId ?? previous.createdAt) || plan(record) !== plan(previous))) throw Error('A partial write must be undone before another commit');
       const next = { ...this.state, undo: record, aiTasks: aiTasks ?? this.state.aiTasks, tracking: tracking ?? this.state.tracking };
       await this.saveData(next); this.state = next;
     },
@@ -118,7 +121,8 @@ export default class AutoScheduler extends Plugin {
   async onload(): Promise<void> {
     const saved = await this.loadData() as Partial<PluginState> | null;
     this.state.settings = { ...DEFAULT_SETTINGS, ...(saved?.settings ?? {}) };
-    if (saved?.undo && validUndo(saved.undo)) this.state.undo = saved.undo;
+    this.state.agent=agentSettings(saved?.agent);
+    if (saved?.undo && validUndoRecord(saved.undo)) this.state.undo = saved.undo;
     else if (saved?.undo) new Notice('Invalid undo record; automatic recovery is disabled. Keep a backup of the plugin data.json.');
     if (saved?.tracking) {
       if (!validTracking(saved.tracking)) throw new Error('Invalid tracking data. Keep a backup of data.json.');
@@ -153,23 +157,24 @@ export default class AutoScheduler extends Plugin {
     }); } });
     this.addCommand({ id: 'preview-week', name: 'Preview weekly schedule', callback: () => { void this.action(async () => {
       await this.recoverTrackingConflicts();
-      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, false, this.state.aiTasks);
+      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, false, this.state.aiTasks, [], {}, [], undefined, {preserveLayout:true});
       new PreviewModal(this.app, preview, this).open();
     }); } });
     this.addCommand({ id: 'clean-daily-output', name: 'Clean daily schedule format', callback: () => { void this.action(async () => {
       if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) throw new Error('Enable daily-note output and clean daily lists first');
       await this.recoverTrackingConflicts();
-      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true, this.state.aiTasks);
+      const preview = await createPreview(this.vaultPort, this.state.settings, new Date(), this.state.tracking, true, this.state.aiTasks, [], {}, [], undefined, {preserveLayout:true});
       new PreviewModal(this.app, preview, this).open();
     }); } });
+    this.addCommand({id:'clean-event-metadata',name:'Clean event display in current daily note',callback:()=>{void this.action(()=>this.cleanEventDisplay());}});
     this.addCommand({ id: 'recover-edited-daily', name: 'Recover edited daily schedule tracking', callback: () => { void this.action(async () => {
       const file = this.app.workspace.getActiveFile();
       if (!(file instanceof TFile)) throw Error('Open the edited daily note first');
       const backup = await this.recoverEditedDaily(file.path);
       new Notice(`Tracking recovered; existing rows are preserved as handwritten events. Saved AI goals and habits remain active. Backup: ${backup}`, 15000);
     }); } });
-    this.addCommand({ id: 'undo-last', name: 'Undo last schedule', callback: () => { void this.action(async () => {
-      await undoLast(this.vaultPort, this.storage, this.state.undo); new Notice('Last schedule undone');
+    this.addCommand({ id: 'undo-last', name: 'Undo last operation', callback: () => { void this.action(async () => {
+      await undoLast(this.vaultPort, this.storage, this.state.undo); this.refreshChats(); new Notice('Last operation undone');
     }); } });
     this.addRibbonIcon('calendar-clock', 'Open AI assistant', () => { void this.action(() => this.openChat()); });
   }
@@ -180,6 +185,24 @@ export default class AutoScheduler extends Plugin {
     await this.app.workspace.revealLeaf(leaf);
   }
   refreshChats(): void { for (const leaf of this.app.workspace.getLeavesOfType(CHAT_VIEW)) if (leaf.view instanceof ChatView) leaf.view.refresh(); }
+  private async cleanEventDisplay():Promise<void> {
+    const file=this.app.workspace.getActiveFile(),settings=this.state.settings;
+    if(!(file instanceof TFile)||!safeVaultPath(file.path)||!file.path.startsWith(settings.dailyFolder+'/')||!/^\d{4}-\d{2}-\d{2}\.md$/.test(file.path.slice(settings.dailyFolder.length+1)))throw Error('Open a dated note in the configured daily folder');
+    const text=await this.vaultPort.read(file.path);
+    if(text===null)throw Error('Daily note not found');
+    const visible=cleanEventMetadata(file.path,text,settings.defaultEventDuration);
+    if(visible.text===text){new Notice('Event display is already clean');return;}
+    const annotated=rehydrate(text,this.state.tracking[file.path],file.path)!;
+    const restored=cleanEventMetadata(file.path,annotated,settings.defaultEventDuration);
+    const tracking=structuredClone(this.state.tracking);
+    tracking[file.path]={...(tracking[file.path]??{before:null,after:null}),eventRecords:restored.eventRecords};
+    if(!validTracking(tracking))throw Error('Event tracking is ambiguous; no note was changed');
+    const workspace=new NoteWorkspace(this.vaultPort,this.storage,{files:[file.path],folders:[]});
+    const staged=await workspace.stageExternalChanges({entries:[{path:file.path,before:text,after:visible.text}],dependencies:{[file.path]:text},state:{tracking},summary:'Clean event display while retaining its buffers'});
+    const result=await workspace.execute('commit_changes',{changeSetRef:staged.changeSetRef});
+    if(!result.ok)throw Error(result.error??'Event display cleanup did not complete');
+    this.refreshChats();new Notice('Event display cleaned. Buffers are retained; use undo to restore the change.');
+  }
   openProvider(existing?: ProviderConfig, done?: () => void): void { new ProviderModal(this, existing, done).open(); }
   async refreshModels(providerId: string): Promise<number> {
     return this.operations.run(async () => {
@@ -236,6 +259,38 @@ export default class AutoScheduler extends Plugin {
       this.state = next; this.refreshChats();
     });
   }
+  async undoSchedule(expectedUndoKey?: string): Promise<AiScheduleReply> {
+    return this.operations.run(async () => {
+      if (expectedUndoKey !== undefined && JSON.stringify(this.state.undo) !== expectedUndoKey) throw new Error('The last operation changed while processing your request. Request undo again.');
+      const record = this.state.undo;
+      const changedFiles:string[]=[];
+      for(const entry of record?.entries??(record?[record]:[]))if(await this.vaultPort.read(entry.path)===entry.after)changedFiles.push(entry.path);
+      await undoLast(this.vaultPort, this.storage, record);
+      const paths = (record!.entries ?? [record!]).map(entry => entry.path);
+      const notes = paths.filter(path => path.startsWith(this.state.settings.dailyFolder + '/') && /\/\d{4}-\d{2}-\d{2}\.md$/.test(path)).map(path => ({ path, date: path.slice(-13, -3) }));
+      this.refreshChats();
+      return { text: 'Last operation undone. Previous note contents and plugin state restored.', notes, receipt:{operationId:undoOperationId(record!),status:'committed',changedFiles,stateChanges:[...(record!.trackingAfterState&&JSON.stringify(record!.trackingAfterState)!==JSON.stringify(record!.trackingBeforeState)?['tracking']:[]),...(record!.aiTasksAfter&&JSON.stringify(record!.aiTasksAfter)!==JSON.stringify(record!.aiTasksBefore)?['aiTasks']:[])],warnings:[],undoAvailable:false,summary:'Last operation undone'} };
+    });
+  }
+  async copyTasks(read:DailySnapshot,request:DailyCopy,expectedSettingsKey:string):Promise<AiScheduleReply>{
+    return this.operations.run(async()=>{
+      if(JSON.stringify(this.state.settings)!==expectedSettingsKey)throw Error('Scheduling settings changed. Request copy again.');
+      const result=await copyDailyTasks(this.vaultPort,this.storage,this.state.settings,this.state.tracking,this.state.aiTasks,read,request,new Date());
+      return {text:result.changed?`Copied ${result.count} Tasks rows to ${result.dates.length} dates. Source Tasks and Day planner are unchanged.`:'Identical Tasks rows already exist on the requested dates; no changes made.',notes:result.dates.map(date=>({date,path:`${this.state.settings.dailyFolder}/${date}.md`}))};
+    });
+  }
+  async agentSession(expectedSettingsKey:string,cancelled?:()=>boolean):Promise<AgentSession>{
+    const settings=structuredClone(this.state.settings),config=agentSettings(this.state.agent);
+    const active=this.app.workspace.getActiveFile();
+    return createAgentSession(this.vaultPort,this.storage,settings,{folders:config.noteFolders,files:active?[active.path]:[],dailyFolder:settings.dailyFolder},config.skillFiles,work=>this.operations.run(async()=>{
+      if(cancelled?.())throw Error('Request cancelled before tool execution');
+      if(JSON.stringify(this.state.settings)!==expectedSettingsKey||JSON.stringify(agentSettings(this.state.agent))!==JSON.stringify(config))throw Error('AI settings changed during this request. Send it again.');
+      return work();
+    }));
+  }
+  async updateAgentSettings(patch:Partial<AgentSettings>):Promise<void>{
+    await this.action(async()=>{const next={...this.state,agent:agentSettings({...this.state.agent,...patch})};await this.saveData(next);this.state=next;this.refreshChats();});
+  }
   async readPlan(date: string, expectedSettingsKey: string): Promise<DailySnapshot> {
     return this.operations.run(async () => {
       if (JSON.stringify(this.state.settings) !== expectedSettingsKey) throw new Error('Scheduling settings changed. Send your message again.');
@@ -262,7 +317,7 @@ export default class AutoScheduler extends Plugin {
       for(const [path,content] of Object.entries(read.contents))if(preview.snapshot[path]!==content)throw Error('Habit templates changed. Read them again.');
       if(JSON.stringify(Object.keys(preview.snapshot).filter(p=>p.startsWith(settings.habitFolder+'/')).sort())!==JSON.stringify(Object.keys(read.contents).sort()))throw Error('Habit templates changed. Read them again.');
       if(preview.result.errors.length)throw Error(preview.result.errors.map(e=>`${e.path}:${e.line}: ${e.message}`).join('\n'));
-      const storage:StatePort={getTracking:this.storage.getTracking,getAiTasks:this.storage.getAiTasks,saveUndo:async(undo,tracking,aiTasks)=>{const next={...this.state,settings,undo,tracking:tracking??this.state.tracking,aiTasks:aiTasks??this.state.aiTasks};await this.saveData(next);this.state=next;}};
+      const storage:StatePort={getUndo: this.storage.getUndo, getTracking: this.storage.getTracking,getAiTasks:this.storage.getAiTasks,saveUndo:async(undo,tracking,aiTasks)=>{const next={...this.state,settings,undo,tracking:tracking??this.state.tracking,aiTasks:aiTasks??this.state.aiTasks};await this.saveData(next);this.state=next;}};
       const applied=await applyPreview(this.vaultPort,storage,preview,settings,now);
       const today=dateKey(now),blocks=preview.result.blocks.filter(b=>isHabit(b.taskId)&&b.date>=today&&b.date<addDays(today,7));
       const notes=[...new Set(blocks.map(b=>b.date))].sort().map(date=>({date,path:`${settings.dailyFolder}/${date}.md`}));
@@ -281,7 +336,7 @@ export default class AutoScheduler extends Plugin {
       const { preview, ids, defaults, unresolvedRules } = await previewDailyEdits(this.vaultPort, settings, this.state.tracking, this.state.aiTasks, read, edits, new Date(), crypto.randomUUID().replace(/-/g, ''), guidelines, guidelineFiles);
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
       let backupSaved = false;
-      const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+      const storage: StatePort = { getUndo: this.storage.getUndo, getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
         saveUndo: async (undo,tracking,aiTasks) => {
           const next = { ...this.state, settings, undo, tracking:tracking ?? this.state.tracking, aiTasks:aiTasks ?? this.state.aiTasks };
           await this.saveData(next); this.state = next; backupSaved = true;
@@ -319,7 +374,7 @@ export default class AutoScheduler extends Plugin {
       if (!preview.result.blocks.some(b => ids.has(b.taskId))) throw new Error('No time is available for these new tasks in the next seven days. No new tasks were created. Adjust working hours, capacity, or deadlines and try again.');
       let backupSaved = false;
       const storage: StatePort = {
-        getTracking: this.storage.getTracking,
+        getUndo: this.storage.getUndo, getTracking: this.storage.getTracking,
         getAiTasks: this.storage.getAiTasks,
         saveUndo: async (undo, tracking, aiTasks) => {
           const next = { ...this.state, settings, undo, tracking: tracking ?? this.state.tracking, aiTasks: aiTasks ?? this.state.aiTasks };
@@ -355,7 +410,7 @@ export default class AutoScheduler extends Plugin {
       for(const [path,original] of Object.entries(staged.originals))if(preview.snapshot[path]!==original)throw Error('Habits template changed. Send your message again.');
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
       let backupSaved = false;
-      const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+      const storage: StatePort = { getUndo: this.storage.getUndo, getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
         saveUndo: async (undo,tracking,aiTasks) => {
           const next = { ...this.state, settings, undo, tracking:tracking ?? this.state.tracking, aiTasks:aiTasks ?? this.state.aiTasks };
           await this.saveData(next); this.state = next; backupSaved = true;
@@ -391,7 +446,7 @@ export default class AutoScheduler extends Plugin {
       const preview = await createPreview(this.vaultPort, settings, now, this.state.tracking, false, this.state.aiTasks, [], {}, events);
       if (preview.result.errors.length) throw new Error(preview.result.errors.map(e => `${e.path}: ${e.message}`).join('\n'));
       let backupSaved = false;
-      const storage: StatePort = { getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
+      const storage: StatePort = { getUndo: this.storage.getUndo, getTracking: this.storage.getTracking, getAiTasks: this.storage.getAiTasks,
         saveUndo: async (undo, tracking, aiTasks) => {
           const next = { ...this.state, settings, undo, tracking: tracking ?? this.state.tracking, aiTasks: aiTasks ?? this.state.aiTasks };
           await this.saveData(next); this.state = next; backupSaved = true;
@@ -415,6 +470,7 @@ export default class AutoScheduler extends Plugin {
 
   /** Adopt manual edits only after a verified backup, before taking request snapshots. */
   async recoverTrackingConflicts(): Promise<string[]> {
+    if (this.state.undo?.status === 'partial') throw Error('A partial write must be undone before tracking recovery or another commit');
     if (this.state.settings.outputLocation !== 'daily' || !this.state.settings.cleanDaily) return [];
     const recovered: string[] = [];
     for (const path of Object.keys(this.state.tracking)) {
@@ -432,6 +488,7 @@ export default class AutoScheduler extends Plugin {
   }
 
   async recoverEditedDaily(path: string): Promise<string> {
+    if (this.state.undo?.status === 'partial') throw Error('A partial write must be undone before tracking recovery or another commit');
     const text = await this.vaultPort.read(path);
     if (text === null) throw Error('Daily note not found');
     const nextTracking = releaseEditedTracking(path, text, this.state.tracking, this.state.settings);
@@ -539,7 +596,7 @@ class SchedulerSettings extends PluginSettingTab {
     const { containerEl } = this; containerEl.empty();
     const settings = this.plugin.state.settings;
     // The host already displays the plugin name in the settings pane.
-    containerEl.createEl('p', { text: `Local time zone: ${timezone()}. Manual commands preview before writing. AI requests schedule directly. Handwritten daily time ranges count as occupied time.` });
+    containerEl.createEl('p', { text: `Local time zone: ${timezone()}. Manual commands preview before writing. AI tool results show actual committed changes; ordinary editing does not run the scheduler. Handwritten daily time ranges count as occupied time.` });
     const text = (name: string, description: string, value: string, update: (value: string) => Partial<Settings>): void => {
       new Setting(containerEl).setName(name).setDesc(description).addText(input => input.setValue(value).onChange(value => { void this.plugin.updateSettings(update(value.trim())); }));
     };
@@ -562,6 +619,14 @@ class SchedulerSettings extends PluginSettingTab {
           modal.contentEl.createEl('button', { text: 'Cancel' }).addEventListener('click', () => modal.close()); modal.open();
         }));
     }
+    containerEl.createEl('h3',{text:'AI note access and skills'});
+    containerEl.createEl('p',{text:'AI can access the current note and dated notes in the daily folder. Additional folders below expand that scope. Ordinary note edits preserve their headings; scheduling writes Day planner only.'});
+    const agent=agentSettings(this.plugin.state.agent);
+    new Setting(containerEl).setName('Additional note folders').setDesc('One vault-relative folder per line. Empty grants no additional folder access.').addTextArea(input=>input.setValue(agent.noteFolders.join('\n')).onChange(value=>{void this.plugin.updateAgentSettings({noteFolders:value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean)});}));
+    new Setting(containerEl).setName('Runtime skill files').setDesc('Optional Markdown paths, one per line. These replace the bundled default instructions and are reloaded on each send. No rebuild required.').addTextArea(input=>input.setValue(agent.skillFiles.join('\n')).onChange(value=>{void this.plugin.updateAgentSettings({skillFiles:value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean)});}));
+    new Setting(containerEl).setName('Tool round budget').setDesc('Maximum model turns per request.').addText(input=>input.setValue(String(agent.maxSteps)).onChange(value=>{const maxSteps=Number(value);if(Number.isInteger(maxSteps)&&maxSteps>=2&&maxSteps<=128)void this.plugin.updateAgentSettings({maxSteps});}));
+    new Setting(containerEl).setName('Context budget (characters)').setDesc('Maximum combined request context.').addText(input=>input.setValue(String(agent.maxContextChars)).onChange(value=>{const maxContextChars=Number(value);if(Number.isInteger(maxContextChars)&&maxContextChars>=20000&&maxContextChars<=1000000)void this.plugin.updateAgentSettings({maxContextChars});}));
+    new Setting(containerEl).setName('Request time budget (seconds)').setDesc('Stops further model and tool work when this budget expires. A started commit finishes safely.').addText(input=>input.setValue(String(agent.timeoutMs/1000)).onChange(value=>{const timeoutMs=Number(value)*1000;if(Number.isInteger(timeoutMs)&&timeoutMs>=15000&&timeoutMs<=600000)void this.plugin.updateAgentSettings({timeoutMs});}));
     text('Tasks folder', 'Vault-relative folder; scans Markdown files within it', settings.taskFolder, taskFolder => ({ taskFolder }));
     text('Habits folder', 'Read Markdown templates here before scheduling; use Create habits template for examples', settings.habitFolder, habitFolder => ({ habitFolder }));
     text('Fixed-events file', 'Format: - YYYY-MM-DD HH:mm-HH:mm Title. A missing file means no fixed events.', settings.fixedFile, fixedFile => ({ fixedFile }));

@@ -2,6 +2,7 @@ import { parseBoundary } from './time';
 import { deadlineLabel } from './calendar-format';
 import { START, END, parseOutput, prioritySymbol } from './output';
 import type { DailyTracking, Tracking, TrackingPair } from './types';
+import { restoreEventMetadata, validEventRecords } from './event-tracking';
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Record only the generated span, so outside edits and original bytes survive. */
 export function cleanDaily(text: string, aiIds: Set<string> = new Set(), priorities: Map<string, number> = new Map(), format = true, deadlines: Map<string, number> = new Map()): { text: string; record: DailyTracking | null } {
@@ -44,8 +45,10 @@ function restore(text: string, record: DailyTracking): string | undefined {
   return text.slice(0, match.index) + annotated + text.slice(match.index! + match[0].length);
 }
 export function rehydrate(text: string | null, pair?: TrackingPair, path?: string): string | null {
-  if (text === null || text.includes(START)) return text;
+  if (text === null) return text;
   if (!pair) return text;
+  text=restoreEventMetadata(text,pair.eventRecords??[]);
+  if (text.includes(START)) return text;
   for (const record of [pair.after, pair.before]) {
     if (!record) continue;
     const restored = restore(text, record);
@@ -61,5 +64,6 @@ export function rehydrate(text: string | null, pair?: TrackingPair, path?: strin
 export function validTracking(value: unknown): value is Tracking {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = (v: unknown): boolean => v === null || (!!v && typeof v === 'object' && typeof (v as DailyTracking).visible === 'string' && typeof (v as DailyTracking).annotated === 'string');
-  return Object.values(value).every(v => !!v && typeof v === 'object' && record((v as TrackingPair).before) && record((v as TrackingPair).after));
+  return Object.values(value).every(v => !!v && typeof v === 'object' && record((v as TrackingPair).before) && record((v as TrackingPair).after)
+    && ((v as TrackingPair).eventRecords===undefined||validEventRecords((v as TrackingPair).eventRecords)));
 }

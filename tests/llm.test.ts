@@ -20,7 +20,7 @@ describe('LLM adapters and host validation', () => {
   it('keeps the first scheduling request small and exposes one complete creation schema', async () => {
     await chat(DEFAULT_LLM, 'test-only', [{role:'user',content:'2个小时，软件工程安全课程PPT'}], config(), now, async (_, __, body) => {
       const data = JSON.parse(body);
-      expect(data.tools.map((t:any) => t.name)).toEqual(['create_plan','read_daily_plan','read_habits']);
+      expect(data.tools.map((t:any) => t.name)).toEqual(['create_plan','undo_last_schedule','read_daily_plan','read_habits']);
       expect(data.tools[0].parameters).toEqual(compactSchema(planTool.parameters));
       expect(data.instructions).not.toContain('# Recurring habits');
       expect(body.length).toBeLessThan(11000);
@@ -63,6 +63,16 @@ describe('LLM adapters and host validation', () => {
     expect(() => validateDrafts({ tasks: Array(21).fill(draft) })).toThrow();
     const tasks = materializeTasks([draft], config(), now, 'example'); expect(validAiTasks(tasks)).toBe(true);
     expect(validAiTasks([...tasks, ...tasks])).toBe(false); expect(validAiTasks([{ ...tasks[0], path: '../secret.md' }])).toBe(false);
+    expect(validAiTasks([{...tasks[0],sourceOccurrence:0}])).toBe(false);
+    expect(validAiTasks([{...tasks[0],sourceOccurrence:1,sourceCount:1}])).toBe(false);
+    expect(validAiTasks([{...tasks[0],completedSessions:{done:30},completedMinutes:15}])).toBe(false);
+    expect(validAiTasks([{...tasks[0],sourceRetired:'yes'}])).toBe(false);
+    expect(validAiTasks([{...tasks[0],sourceRetired:true,completed:true,sourceStatus:'completed'}])).toBe(true);
+    expect(validAiTasks([{...tasks[0],sourceRetired:true,completed:true,sourceStatus:'completed',sourceText:'- [ ] old'}])).toBe(false);
+    expect(validAiTasks([{...tasks[0],sourceRetired:true,completed:false,sourceStatus:'open'}])).toBe(false);
+  });
+  it('accepts a confirmed one-session rolling budget',()=>{
+    expect(validateDrafts({tasks:[{...draft,minutes:30,minMinutes:30,dailyMinutes:30,rollingMinutes:30}]})).toMatchObject([{minutes:30,dailyMinutes:30,rollingMinutes:30}]);
   });
   it.each(['http://example.test/v1', 'https://key@example.test/v1', 'https://example.test/v1?token=abc', 'https://example.test/v1#token'])('rejects unsafe endpoint %s', baseUrl => { expect(() => endpoint({ ...DEFAULT_LLM, baseUrl })).toThrow(); });
   it('permits local HTTP endpoints', () => { expect(endpoint({ ...DEFAULT_LLM, baseUrl: 'http://localhost:1234/v1' })).toContain('localhost:1234'); });
@@ -107,7 +117,7 @@ describe('AI tasks daily transaction', () => {
     const tasks = materializeTasks([draft], settings, now, 'history');
     const preview = await createPreview(vault, settings, now, {}, false, [], tasks);
     await applyPreview(vault, vault, preview, settings, now);
-    vault.files['DailyNotes/2026-10-01.md'] = vault.files['DailyNotes/2026-10-01.md'].replace('- [ ]', '- [x]');
+    vault.files['DailyNotes/2026-10-01.md'] = vault.files['DailyNotes/2026-10-01.md'].replace('- [ ] 09:00', '- [x] 09:00');
     const next = await createPreview(vault, settings, new Date('2026-10-02T08:00:00+08:00'), vault.tracking, false, vault.aiTasks);
     expect(next.result.errors).toEqual([]); expect(next.result.blocks).toEqual([]); expect(next.result.unscheduled).toEqual([]);
   });
@@ -118,14 +128,17 @@ describe('AI tasks daily transaction', () => {
     await expect(applyPreview(vault, vault, preview, settings, now)).rejects.toThrow('write failed'); expect(vault.aiTasks).toHaveLength(1); expect(vault.undo).not.toBeNull();
     vault.failWrite = false; await undoLast(vault, vault, vault.undo); expect(vault.aiTasks).toEqual([]);
   });
-  it('rejects changed AI state and a batch with no available capacity', async () => {
+  it('rejects changed AI state but saves unscheduled tasks in Tasks when capacity is unavailable', async () => {
     const vault = new AiVault(); vault.files = {};
     const tasks = materializeTasks([draft], settings, now, 'conflict');
     const preview = await createPreview(vault, settings, now, {}, false, [], tasks); vault.aiTasks = tasks;
     await expect(applyPreview(vault, vault, preview, settings, now)).rejects.toThrow('AI tasks changed'); vault.aiTasks = [];
     const noWork = { ...settings, weekdays: [0], periods: ['09:00-09:15'], dailyCapacity: 15 };
     const blocked = await createPreview(vault, noWork, now, {}, false, [], tasks);
-    await expect(applyPreview(vault, vault, blocked, noWork, now)).rejects.toThrow('No blocks can be written'); expect(vault.aiTasks).toEqual([]);
+    expect(blocked.result.blocks).toEqual([]);
+    await applyPreview(vault, vault, blocked, noWork, now); expect(vault.aiTasks).toEqual(tasks);
+    expect(vault.files['DailyNotes/2026-10-01.md']).toContain('- [ ] ⏫ 课程1复习');
+    await undoLast(vault,vault,vault.undo); expect(vault.aiTasks).toEqual([]);
   });
 });
 

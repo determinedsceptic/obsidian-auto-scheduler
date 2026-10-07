@@ -15,7 +15,8 @@ export const HABIT_TEMPLATE = `# Habits
 Add time-based list items outside code fences to enable habits. Without a recurrence suffix, a habit repeats every day.
 Use (every day), (weekdays), (weekends), or a list such as (Mon, Wed, Fri).
 Priority symbols: 🔺 highest, ⏫ high, 🔼 normal, 🔽 low, ⏬ lowest. Omit for normal priority.
-Times must increase within one day; exact minutes such as 12:40 are supported. Habits reserve time before ordinary tasks.
+Times must increase within one day; exact minutes such as 12:40 are supported. Habits reserve their preferred exact times before ordinary tasks.
+Fixed commitments and their requested preparation, travel, or recovery time take precedence. A conflicting habit occurrence is omitted rather than moved; its source template remains unchanged.
 Start-only rows use the configured Default duration (30 minutes initially).
 
 Examples below are inactive. Copy a line outside this code fence to enable it:

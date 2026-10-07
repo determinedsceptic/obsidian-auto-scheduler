@@ -1,13 +1,15 @@
-import type { HabitIndexSnapshot } from './habit-index';
-import type { DailySnapshot } from './daily-edit';
+import { isUndoCommand } from './chat-commands';
 import { ItemView, Notice, requestUrl, WorkspaceLeaf } from 'obsidian';
 import type AutoScheduler from './main';
-import { chat, endpoint } from './llm';
+import { endpoint } from './llm';
+import { runAgent } from './agent-harness';
+import { agentSettings } from './agent-settings';
+import type { OperationReceipt } from './agent-types';
 import { modelChoices } from './providers';
 import type { ChatMessage } from './llm';
 import type { ScheduledNote } from './ai-result';
 export const CHAT_VIEW = 'auto-scheduler-chat';
-type ChatEntry = ChatMessage & { notes?: ScheduledNote[]; failed?: boolean };
+type ChatEntry = ChatMessage & { notes?: ScheduledNote[]; failed?: boolean; receipt?:OperationReceipt };
 export interface ChatConversation { id:string; messages:ChatEntry[]; draft:string }
 export class ChatView extends ItemView {
   private messages: ChatEntry[] = [];
@@ -44,17 +46,17 @@ export class ChatView extends ItemView {
   private cancelPending(restoreDraft=false): void {
     if(restoreDraft && this.pendingUser){
       this.pendingUser.failed=true;
-      if(this.applying)this.messages.push({role:'assistant',content:'Schedule save was already in progress. Check daily notes before resending.',failed:true});
+      if(this.applying)this.messages.push({role:'assistant',content:'A commit is already in progress. Its host result will be kept in this conversation.',failed:true});
       else {this.draftText=this.pendingUser.content;this.messages.push({role:'assistant',content:'Request cancelled. The draft is available to resend.',failed:true});}
     }
     this.pendingUser=undefined;
     this.generation++;
     this.requestAbort?.abort(); this.requestAbort = undefined;
     if (!this.applying) { this.activeJob = null; this.busy = false; this.requestStatus = ''; }
-    else this.requestStatus = 'Finishing the current schedule save…';
+    else this.requestStatus = 'Finishing the current operation…';
   }
   newChat(): void {
-    if(this.applying){new Notice('Wait for the current schedule save to finish');return;}
+    if(this.applying){new Notice('Wait for the current operation to finish');return;}
     this.cancelPending(true);this.saveConversation();
     this.conversationId=crypto.randomUUID();this.messages=[];this.draftText='';this.render();
   }
@@ -84,6 +86,9 @@ export class ChatView extends ItemView {
     const header = root.createDiv({ cls: 'auto-scheduler-chat-header' });
     const configure = header.createEl('button', { text: 'Configure provider / API key' }); configure.disabled = this.busy;
     configure.addEventListener('click', () => this.plugin.openProvider(this.plugin.byok.providers.find(p => p.id === this.plugin.byok.activeProviderId)));
+    const undo = header.createEl('button', { text: 'Undo last operation' });
+    undo.disabled = this.busy || !this.plugin.state.undo;
+    undo.addEventListener('click', () => { void this.undoFromChat(); });
     const sessions=header.createDiv({cls:'auto-scheduler-conversations'});
     const start=sessions.createEl('button',{text:'New chat',attr:{'title':'Start a separate conversation. Saved schedules remain.'}});
     start.disabled=this.applying;start.addEventListener('click',()=>this.newChat());
@@ -120,7 +125,7 @@ export class ChatView extends ItemView {
     const log = root.createDiv({ cls: 'auto-scheduler-chat-log', attr: { 'aria-live': 'polite' } });
     for (const message of this.messages) {
       const row = log.createDiv({ cls: `auto-scheduler-message auto-scheduler-${message.role}` });
-      row.createEl('strong', { text: message.role === 'user' ? 'You' : 'Assistant' });
+      row.createEl('strong', { text: message.receipt ? 'Host result' : message.role === 'user' ? 'You' : 'Assistant' });
       row.createEl('p', { text: message.content });
       if (message.failed && message.content.includes('HTTP 429') && new URL(this.plugin.state.llm.baseUrl).hostname === 'api.openai.com') {
         row.createEl('a', {text:'Open API limits', href:'https://platform.openai.com/settings/organization/limits', attr:{target:'_blank',rel:'noopener noreferrer'}});
@@ -139,20 +144,41 @@ export class ChatView extends ItemView {
     }
     if (this.busy) log.createEl('p', { text: this.requestStatus || 'Reading and scheduling…' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
-    const input = composer.createEl('textarea', { attr: { placeholder: 'Describe a task, appointment or habit…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
+    const input = composer.createEl('textarea', { attr: { placeholder: 'Edit notes or ask to arrange time…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; this.saveConversation(); });
     input.disabled = this.busy;
     const actions = composer.createDiv({ cls: 'auto-scheduler-actions' });
-    const send = actions.createEl('button', { text: 'Send', cls: 'mod-cta' }); send.disabled = this.busy || !this.plugin.byok.providers.length;
+    const send = actions.createEl('button', { text: 'Send', cls: 'mod-cta' }); send.disabled = this.busy;
     send.addEventListener('click', () => { void this.send(input.value); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); void this.send(input.value); } });
     const clear = actions.createEl('button', { text: 'Clear', attr: {'aria-label':'Clear conversation and cancel pending request','title':'Clear conversation and cancel pending request. Saved schedules remain.'} });
     clear.addEventListener('click', () => this.clearChat());
     log.scrollTop = log.scrollHeight;
   }
+  private async undoFromChat(message?:string):Promise<void> {
+    if(this.busy||this.closed)return;
+    const conversationId=this.conversationId;
+    const job=++this.generation;this.activeJob=job;
+    const current=()=>!this.closed&&this.generation===job;
+    const undoKey=JSON.stringify(this.plugin.state.undo);
+    this.busy=true;this.applying=true;this.requestStatus='Undoing last operation…';
+    if(message){this.messages.push({role:'user',content:message});this.draftText='';}
+    this.render();
+    const publish=(entry:ChatEntry)=>{const messages=current()?this.messages:this.conversations.find(conversation=>conversation.id===conversationId)?.messages;messages?.push(entry);if(!this.closed&&this.conversationId===conversationId)this.render();};
+    try {
+      const result=await this.plugin.undoSchedule(undoKey);
+      publish({role:'assistant',content:result.text,notes:result.notes,receipt:result.receipt});
+    } catch(error) {
+      publish({role:'assistant',content:`Undo failed: ${(error as Error).message}`,failed:true});
+    } finally {
+      if(this.activeJob===job){this.activeJob=null;this.busy=false;this.applying=false;this.requestStatus='';this.saveConversation();if(!this.closed)this.render();}
+    }
+  }
   private async send(value: string): Promise<void> {
     if (this.busy || !value.trim() || this.closed) return;
-    const message = value.trim(); const config = { ...this.plugin.state.llm }; const settings = JSON.parse(JSON.stringify(this.plugin.state.settings));
+    const message = value.trim();
+    if(isUndoCommand(message)){await this.undoFromChat(message);return;}
+    const config = { ...this.plugin.state.llm }; const settings = JSON.parse(JSON.stringify(this.plugin.state.settings));
     const providerId = this.plugin.byok.activeProviderId;
     const configKey = JSON.stringify(config), settingsKey = JSON.stringify(settings);
     const job = ++this.generation; this.activeJob = job;
@@ -165,39 +191,37 @@ export class ChatView extends ItemView {
     if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
     const userMessage: ChatMessage & { failed?: boolean } = { role: 'user', content: message };
     this.draftText = ''; this.pendingUser=userMessage; this.messages.push(userMessage); this.busy = true; this.render();
+    const conversationId = this.conversationId;
     let modelFinished = false;
     try {
-      const reads = new Map<string, DailySnapshot>(); let habitRead:HabitIndexSnapshot|undefined;
-      const reply = await chat(config, token, this.messages.filter(m => !m.failed).map(({ role, content }) => ({ role, content })), settings, new Date(), async (url, headers, body) => {
-        const result = await requestUrl({ url, method: 'POST', headers, body, throw: false });
-        let json: unknown = {};
-        try { json = result.json; } catch { /* Non-JSON provider errors use status/headers. */ }
-        return { status: result.status, json, headers: result.headers };
-      }, 60000, async date => {
-        if (!current()) throw new Error('Chat was closed or cleared');
-        const snapshot = await this.plugin.readPlan(date, settingsKey); reads.set(date, snapshot); return snapshot.read;
-      }, async()=>{
-        if(!current())throw Error('Chat was closed or cleared');
-        habitRead=await this.plugin.readHabits(settingsKey);return habitRead.index;
-      }, { signal: controller.signal, cancelled: () => !current(), onRetry: (delay, retry) => {
-        this.requestStatus = `Provider rate limit. Retrying in ${Math.ceil(delay / 1000)}s (${retry}/2)…`; this.render();
-      } });
-      modelFinished = true;
-      if (!current()) return;
-      this.requestStatus = ''; this.render();
-      if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm) || settingsKey !== JSON.stringify(this.plugin.state.settings)) throw new Error('Provider or scheduling settings changed. Send your message again.');
-      if (reply.scheduleExistingHabits || reply.revision || reply.guidelines?.length || reply.tasks.length || reply.habits.length || reply.events.length) {
-        this.applying = true; this.render();
-        const mixed = [reply.tasks, reply.habits, reply.events].filter(a => a.length).length > 1;
-        const result = reply.scheduleExistingHabits ? await this.plugin.scheduleExistingHabits(habitRead!,settingsKey) : reply.revision ? await this.plugin.revisePlan(reads.get(reply.revision.date)!, reply.revision.edits, settingsKey, reply.guidelines, reply.guidelineFiles) : mixed || reply.guidelines?.length ? await this.plugin.schedulePlan(reply.tasks, reply.habits, reply.events, settingsKey, reply.guidelines, reply.guidelineFiles) : reply.events.length ? await this.plugin.scheduleEvents(reply.events, settingsKey) : reply.habits.length ? await this.plugin.scheduleHabits(reply.habits, settingsKey) : await this.plugin.scheduleAi(reply.tasks, settingsKey);
-        for (const task of reply.tasks) if(task.estimateBasis&&!task.rollingMinutes) result.text += `\n${task.title}: ${task.minutes} min — ${task.estimateBasis}`;
-        if (reply.defaultsUsed.length) result.text += `\nDefault duration (${settings.defaultEventDuration} min) used for: ${reply.defaultsUsed.join(', ')}.`;
-        if (current()) { this.messages.push({ role: 'assistant', content: result.text, notes: result.notes }); this.render(); }
-        if (current() && result.notes.length) {
-          try { await this.plugin.openScheduledNote(result.notes[0].path); }
-          catch (error) { if (current()) this.messages.push({ role: 'assistant', content: `Schedule saved, but the daily note could not be opened: ${(error as Error).message}` }); }
+      const session=await this.plugin.agentSession(settingsKey,()=>!current());
+      const options=agentSettings(this.plugin.state.agent);
+      let reported=0;
+      const publishReceipts=()=>{
+        for(const receipt of session.runtime.receipts.slice(reported)){
+          reported++;
+          const notes=receipt.changedFiles.filter(path=>/\/\d{4}-\d{2}-\d{2}\.md$/.test(path)).map(path=>({path,date:path.slice(-13,-3)}));
+          const messages = current() ? this.messages : this.conversations.find(conversation=>conversation.id===conversationId)?.messages;
+          messages?.push({role:'assistant',content:`${receipt.status}: ${receipt.summary}\nFiles: ${receipt.changedFiles.join(', ')||'none'}${receipt.stateChanges.length?'\nPlugin state: '+receipt.stateChanges.join(', '):''}${receipt.warnings.length?'\n'+receipt.warnings.join('\n'):''}`,notes,receipt,failed:['failed','conflict','partial'].includes(receipt.status)});
         }
-      } else this.messages.push({ role: 'assistant', content: reply.text });
+        if(!this.closed&&this.conversationId===conversationId)this.render();
+      };
+      const reply=await runAgent(config,token,this.messages.filter(m=>!m.failed).map(({role,content})=>({role,content})),session.instructions,session.runtime,async(url,headers,body)=>{
+        const result=await requestUrl({url,method:'POST',headers,body,throw:false});let json:unknown={};
+        try{json=result.json;}catch{/* Protocol adapter reports malformed provider responses. */}
+        return {status:result.status,json,headers:result.headers};
+      },{...options,feedback:{signal:controller.signal,cancelled:()=>!current(),onRetry:(delay,retry)=>{this.requestStatus=`Provider rate limit. Retrying in ${Math.ceil(delay/1000)}s (${retry}/2)…`;if(current())this.render();}},onTool:(name,phase)=>{
+        this.applying=phase==='start'&&['commit_changes','undo_operation'].includes(name);
+        this.requestStatus=phase==='start'?`Running ${name}…`:'Waiting for assistant…';
+        if(phase==='end')publishReceipts();else if(current())this.render();
+      }});
+      modelFinished=true;publishReceipts();
+      if(!current())return;
+      const changed=session.runtime.receipts.some(receipt=>receipt.status==='partial'||receipt.status==='committed'&&(receipt.changedFiles.length||receipt.stateChanges.length));
+      if(reply.error&&!changed){this.draftText=message;userMessage.failed=true;}
+      if(reply.text)this.messages.push({role:'assistant',content:reply.text});
+      if(reply.error)this.messages.push({role:'assistant',content:reply.error,failed:true});
+      if(!session.runtime.receipts.some(receipt=>receipt.changedFiles.length||receipt.status==='partial'))this.messages.push({role:'assistant',content:'Host result: No files changed in this turn.',failed:!!reply.error});
     } catch (error) {
       if (current()) {
         if (!modelFinished) { this.draftText = message; userMessage.failed = true; }

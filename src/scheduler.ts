@@ -1,4 +1,5 @@
 import { isHabit } from './habits';
+import { reserveEvent } from './event-tool';
 import { addDays, assertStableWeek, atDate, dateKey, epochMinute, gaps, GRID, localMinute, merge, overlap, clipped, total, validateSettings, workWindows } from './time';
 import type { Block, Diagnostic, Interval, ScheduleResult, Settings, Task } from './types';
 const compareText = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
@@ -9,24 +10,30 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
   const today = dateKey(now); const until = addDays(today, dayCount); const nowMinute = epochMinute(now);
   try { assertStableWeek(today); } catch (error) { errors.push({ path: 'timezone', line: 0, message: (error as Error).message }); return result; }
   const inRange = (block: Block): boolean => block.date >= today && block.date < until;
-  const protectedBlocks = previous.filter(b => inRange(b) && (b.locked || b.completed));
+  // A habit's locked flag preserves its preferred display time; it does not make
+  // an unchecked occurrence a hard commitment. Completed history and locked
+  // non-habit blocks remain protected.
+  const protectedBlocks = previous.filter(b => inRange(b) && (b.completed || (b.locked && !isHabit(b.taskId))));
+  const preferredHabits = previous.filter(b => inRange(b) && isHabit(b.taskId) && !b.completed)
+    .sort((a, b) => (b.priority ?? 3) - (a.priority ?? 3) || a.start - b.start || compareText(a.id, b.id));
   const taskMap = new Map(tasks.map(t => [t.id, t]));
   const lockedMinutes = new Map<string, number>();
-  const bufferedFixed = merge(fixed.map(i => ({ start: i.start - settings.fixedBuffer, end: i.end + settings.fixedBuffer })));
+  const bufferedFixed = merge(fixed.map(i => reserveEvent(i, settings.fixedBuffer)));
+  const blockReservation = (block: Block): Interval => isHabit(block.taskId)
+    ? { start: block.start, end: block.end }
+    : { start: block.start, end: block.end + settings.blockBuffer };
   for (const block of protectedBlocks) {
     const fail = (message: string): void => { errors.push({ path: settings.outputFile, line: 0, message: `Block ${block.id}: ${message}` }); };
     if (!taskMap.has(block.taskId)) fail('References an unknown task ID');
     if (!isHabit(block.taskId) && (block.start % GRID || block.end % GRID)) fail('Locked blocks must use the 15-minute grid');
-    if (bufferedFixed.some(i => overlap(block, i))) fail('Conflicts with a fixed event or its buffer');
+    if (bufferedFixed.some(i => overlap(blockReservation(block), i))) fail('Conflicts with a fixed event or its buffer');
     const task = taskMap.get(block.taskId);
     if (task && !task.completed && !block.completed && ((task.earliest !== undefined && block.start < task.earliest) || (task.due !== undefined && block.end > task.due))) fail('Violates the task earliest/due constraints');
     lockedMinutes.set(block.taskId, (lockedMinutes.get(block.taskId) ?? 0) + block.end - block.start);
   }
   for (let i = 0; i < protectedBlocks.length; i++) for (let j = i + 1; j < protectedBlocks.length; j++) {
     const a = protectedBlocks[i], b = protectedBlocks[j];
-    // Adjacent recurring activities can form a confirmed sequence (rest → walk → strength).
-    const buffer = isHabit(a.taskId) && isHabit(b.taskId) ? 0 : settings.blockBuffer;
-    if (overlap({ start: a.start, end: a.end + buffer }, { start: b.start, end: b.end + buffer })) errors.push({ path: settings.outputFile, line: 0, message: `Locked block or buffer conflict: ${a.id} / ${b.id}` });
+    if (overlap(blockReservation(a), blockReservation(b))) errors.push({ path: settings.outputFile, line: 0, message: `Locked block or buffer conflict: ${a.id} / ${b.id}` });
   }
   for (const task of tasks) {
     if(task.dailyMinutes!==undefined&&(!Number.isInteger(task.dailyMinutes)||task.dailyMinutes<task.min||task.dailyMinutes%GRID||!task.split))errors.push({path:task.path,line:task.line,message:'Invalid per-task daily effort limit'});
@@ -37,12 +44,33 @@ export function schedule(tasks: Task[], fixed: Interval[], previous: Block[], se
   }
   if (errors.length) return result;
   result.blocks = [...previous.filter(b => !inRange(b)), ...protectedBlocks];
+  const hardBlockReservations = protectedBlocks.map(blockReservation);
+  const acceptedHabitReservations: Interval[] = [];
+  for (const block of preferredHabits) {
+    let reason: string | undefined;
+    if (!taskMap.has(block.taskId)) {
+      errors.push({ path: settings.outputFile, line: 0, message: `Block ${block.id}: References an unknown habit task ID` });
+      continue;
+    }
+    if (bufferedFixed.some(interval => overlap(block, interval))) reason = 'Preferred habit time overlaps a fixed commitment or its reserved buffer';
+    else if (hardBlockReservations.some(interval => overlap(block, interval))) reason = 'Preferred habit time overlaps a completed or locked block';
+    else if (acceptedHabitReservations.some(interval => overlap(block, interval))) reason = 'Preferred habit time overlaps another habit occurrence selected first by priority and stable order';
+    if (reason) {
+      result.unscheduled.push({ taskId: block.taskId, title: block.title, remaining: block.end - block.start, reason });
+      continue;
+    }
+    result.blocks.push(block);
+    acceptedHabitReservations.push({ start: block.start, end: block.end });
+  }
+  if (errors.length) return result;
   const days = Array.from({ length: dayCount }, (_, i) => {
     const date = addDays(today, i); const windows = workWindows(date, settings);
-    const occupied = merge([...bufferedFixed, ...protectedBlocks.map(b => ({ start: b.start, end: b.end + settings.blockBuffer }))]);
+    const occupied = merge([...bufferedFixed, ...hardBlockReservations, ...acceptedHabitReservations]);
     return { date, windows, occupied };
   });
-  const ordered = tasks.filter(t => !t.completed).sort((a, b) => b.priority - a.priority || (a.due ?? Infinity) - (b.due ?? Infinity) || (a.earliest ?? -Infinity) - (b.earliest ?? -Infinity) || compareText(a.id, b.id));
+  // Habit occurrences are either kept at their declared time above or omitted.
+  // Ordinary allocation must not invent replacement times for them.
+  const ordered = tasks.filter(t => !t.completed && !isHabit(t.id)).sort((a, b) => b.priority - a.priority || (a.due ?? Infinity) - (b.due ?? Infinity) || (a.earliest ?? -Infinity) - (b.earliest ?? -Infinity) || compareText(a.id, b.id));
   for (const task of ordered) {
     let remaining = task.remaining - (lockedMinutes.get(task.id) ?? 0);
     if (!remaining) continue;

@@ -1,5 +1,7 @@
 import { calendarDate } from './calendar-format';
-import { END, START, parseOutput, renderOutput } from './output';
+import { END, START, parseOutput, renderOutput, displayTitle } from './output';
+import { parseEventMetadata } from './event-tool';
+import { parseMarkdownStructure } from './markdown-structure';
 import { visibleLines } from './parser';
 import { addDays, localMinute, endAfter } from './time';
 import type { Block, Diagnostic, Interval, OutputDocument, Settings } from './types';
@@ -41,13 +43,27 @@ export function renderDaily(document: OutputDocument, blocks: Block[], mode: Set
     .split(document.newline).filter(line => !/^## \d{4}-\d{2}-\d{2}$/.test(line)).join(document.newline);
   return document.prefix + rendered + document.suffix;
 }
-export function dailyInputs(path: string, content: string | null, defaultDuration = 30): { content: string; intervals: Interval[]; errors: Diagnostic[] } {
-  const text = content ?? '', part = dayPlannerSection(text); const intervals: Interval[] = [], errors: Diagnostic[] = [];
-  if (!part) return { content: '', intervals, errors };
+export interface DailyEventRow extends Interval {
+  sourceStart:number; sourceEnd:number; line:number; raw:string; title:string; body:string; reminder:string|null;
+  checkbox:boolean; completed:boolean; standalone:boolean; flexible:boolean;
+}
+export function isFlexibleDailyRow(row:DailyEventRow):boolean {
+  return row.flexible&&row.checkbox&&!row.completed&&row.standalone&&row.reminder!==null&&!!row.body;
+}
+/** Exact template identity; display decorations are not part of an activity title. */
+export function calendarTitle(title:string):string {
+  return displayTitle(title).replace(/\s+/g,' ').trim();
+}
+export function dailyInputs(path: string, content: string | null, defaultDuration = 30): { content: string; intervals: Interval[]; rows:DailyEventRow[]; errors: Diagnostic[] } {
+  const text = content ?? '', part = dayPlannerSection(text); const intervals: Interval[] = [], rows:DailyEventRow[] = [], errors: Diagnostic[] = [];
+  if (!part) return { content: '', intervals, rows, errors };
   const date = path.split('/').pop()!.slice(0, -3);
   const startLine = text.slice(0, part.start).split('\n').length;
   let managed = false;
   const selected: string[] = [];
+  const structure=parseMarkdownStructure(text), sourceLines=text.slice(part.start,part.end).split(/\r?\n/);
+  const offsets:number[]=[];let offset=part.start;
+  for(const line of sourceLines){offsets.push(offset);offset+=line.length+structure.newline.length;}
   for (const { text: line, line: number } of visibleLines(text.slice(part.start, part.end))) {
     if (line.trim() === START) { managed = true; selected.push(''); continue; }
     if (line.trim() === END) { managed = false; selected.push(''); continue; }
@@ -61,14 +77,28 @@ export function dailyInputs(path: string, content: string | null, defaultDuratio
       let interval: Interval | undefined;
       if (time) interval = { start: localMinute(date, time[1]), end: localMinute(date, time[2]) };
       else if (startOnly && !/<!--\s*as\s|%%\[as::/.test(line)) interval = { start: localMinute(date, startOnly[1]), end: localMinute(date, endAfter(startOnly[1], defaultDuration)) };
-      else if (!/<!--\s*as\s|%%\[as::/.test(line) && calendarStart !== undefined && calendarEnd !== undefined && /(?:\[(?:start|scheduled)::|[🛫⏳])\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(line) && /(?:\[due::|📅)\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}/u.test(line)) interval = { start: calendarStart, end: calendarEnd };
+      else if (!/<!--\s*as\s|%%\[as::/.test(line) && calendarStart !== undefined && calendarEnd !== undefined && /(?:\[(?:start|scheduled)::|[🛫⏳])\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/ui.test(line) && /(?:\[due::|📅)\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/ui.test(line)) interval = { start: calendarStart, end: calendarEnd };
       if (interval) {
         if (interval.end <= interval.start) throw new Error('A handwritten daily event must end after it starts');
+        const buffers=parseEventMetadata(line);
+        if(buffers)Object.assign(interval,buffers);
+        const flexibleMarkers=line.match(/<!--\s*as-flexible\b/g)??[];
+        if(flexibleMarkers.length&&(flexibleMarkers.length!==1||! /<!--\s*as-flexible\s*-->/.test(line)))throw Error('Invalid flexible calendar metadata');
+        if(buffers&&flexibleMarkers.length)throw Error('A calendar row cannot be both a fixed event and a flexible plan');
+        const sourceStart=offsets[number-1],sourceEnd=Math.min(offsets[number]??text.length,part.end);
+        const block=structure.blocks.find(block=>block.start===sourceStart);
+        const check=/^\s*(?:[-*+]|\d+[.)])\s+\[([ xX-])\]\s+/.exec(line);
+        const body=displayTitle(line.replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[.\]\s+)?/,'').replace(/^\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2})?\s*/,''));
+        const timedFields=/(?:\[(?:start|scheduled|due)::|[🛫⏳📅])\s*\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/ui.test(line);
+        const ownedDirective=/<!--\s*(?:as|as-block)(?:\s|-->)|%%\[(?:as|as-block)::/.test(line);
+        const reminder=(time||startOnly)&&!timedFields&&!ownedDirective?line.replace(/^(\s*(?:[-*+]|\d+[.)])\s+(?:\[.\]\s+)?)\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2})?\s*/,'$1'):null;
+        rows.push({...interval,sourceStart,sourceEnd,line:startLine+number-1,raw:line,title:calendarTitle(body),body,reminder,
+          checkbox:!!check,completed:!!check&&check[1]!==' ',standalone:!!block&&block.end===sourceEnd,flexible:!!flexibleMarkers.length});
         intervals.push(interval);
       }
     } catch (error) { errors.push({ path, line: startLine + number - 1, message: (error as Error).message }); }
   }
-  return { content: '\n'.repeat(startLine - 1) + selected.join('\n'), intervals, errors };
+  return { content: '\n'.repeat(startLine - 1) + selected.join('\n'), intervals, rows, errors };
 }
 
 /** Only the explicitly named task section is exposed to AI; journals remain private. */
@@ -85,7 +115,8 @@ export function appendTaskRows(text:string, rows:string[]):string {
   if(!rows.length)return text;
   const newline=text.includes('\r\n')?'\r\n':'\n',part=taskSection(text);
   if(part)return text.slice(0,part.end)+(text.slice(0,part.end).endsWith('\n')?'':newline)+rows.join(newline)+newline+text.slice(part.end);
-  return '# Tasks'+newline+newline+rows.join(newline)+newline+newline+text;
+  const frontmatter=/^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(text)?.[0]??'';
+  return frontmatter+(frontmatter&&!frontmatter.endsWith('\n')?newline:'')+'# Tasks'+newline+newline+rows.join(newline)+newline+newline+text.slice(frontmatter.length);
 }
 /** Move only standalone untimed checkboxes, retaining all other note bytes. */
 export function organizeDailyTasks(text:string,defaultDuration=30):string {

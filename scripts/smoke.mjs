@@ -1,36 +1,44 @@
-// Host API simulation only. Never reads or writes a real Obsidian vault.
+// Host API simulation only. Never reads or writes a real Obsidian vault or API.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { webcrypto } from 'node:crypto';
 import assert from 'node:assert/strict';
+
 process.env.TZ = 'Asia/Shanghai';
-const notices = []; let saved = null; let latestModal;
-let mockResponse; let mockStatus = 200; let mockHttp; const requests = []; const openedNotes = [];
+const fixedDate = '2026-10-01T08:00:00+08:00';
+class Clock extends Date {
+  constructor(...args) { super(...(args.length ? args : [fixedDate])); }
+  static now() { return new Date(fixedDate).getTime(); }
+}
+
+const notices = [], requests = [], openedNotes = [], clipboardCopies = [];
+let saved = null, latestModal, mockStatus = 200, mockHttp, activeFile = null;
+
 class Node {
   constructor(tag = '', options = {}) { this.tag = tag; this.options = options; this.children = []; this.events = {}; this.value = options.value ?? ''; }
-  createEl(tag, options) { const node = new Node(tag, options); this.children.push(node); return node; }
-  createDiv(options) { return this.createEl('div', options); }
-  createSpan(options) { return this.createEl('span', options); }
+  createEl(tag, options = {}) { const node = new Node(tag, options); this.children.push(node); return node; }
+  createDiv(options = {}) { return this.createEl('div', options); }
+  createSpan(options = {}) { return this.createEl('span', options); }
   addEventListener(name, callback) { this.events[name] = callback; }
   addClass() {}
   replaceChildren() { this.children = []; }
-  querySelectorAll() { return this.all().filter(n => ['input','select','textarea'].includes(n.tag)); }
+  querySelectorAll() { return this.all().filter(node => ['input', 'select', 'textarea'].includes(node.tag)); }
   empty() { this.children = []; }
   all() { return [this, ...this.children.flatMap(child => child.all())]; }
 }
 class Setting {
-  constructor(container) { this.node = container.createDiv({}); }
+  constructor(container) { this.node = container.createDiv(); }
   setName(name) { this.node.options.settingName = name; return this; }
   setDesc() { return this; }
-  control(tag, callback, prop) {
-    const node = this.node.createEl(tag, {});
-    const c = { [prop]: node, setValue(v) { node.value = v; return this; }, onChange(fn) { node.events.change = () => fn(node.value); return this; }, setDisabled(v) { node.disabled = v; return this; }, addOption(value, text) { node.createEl('option', {text,value}); return this; } };
-    callback(c); return this;
+  control(tag, callback, property) {
+    const node = this.node.createEl(tag);
+    const control = { [property]: node, setValue(value) { node.value = value; return this; }, onChange(fn) { node.events.change = () => fn(node.value); return this; }, setDisabled(value) { node.disabled = value; return this; }, addOption(value, text) { node.createEl('option', { value, text }); return this; } };
+    callback(control); return this;
   }
-  addDropdown(fn) { return this.control('select', fn, 'selectEl'); }
-  addText(fn) { return this.control('input', fn, 'inputEl'); }
-  addTextArea(fn) { return this.control('textarea', fn, 'inputEl'); }
-  addToggle(fn) { return this.control('input', fn, 'toggleEl'); }
+  addDropdown(callback) { return this.control('select', callback, 'selectEl'); }
+  addText(callback) { return this.control('input', callback, 'inputEl'); }
+  addTextArea(callback) { return this.control('textarea', callback, 'inputEl'); }
+  addToggle(callback) { return this.control('input', callback, 'toggleEl'); }
 }
 class TFile { constructor(path) { this.path = path; } }
 class TFolder { constructor(path) { this.path = path; } }
@@ -48,650 +56,307 @@ class Modal {
   open() { latestModal = this; this.onOpen(); }
   close() { this.onClose(); }
 }
-const fixedDate = '2026-10-01T08:00:00+08:00';
-class Clock extends Date {
-  constructor(...args) { super(...(args.length ? args : [fixedDate])); }
-  static now() { return new Date(fixedDate).getTime(); }
-}
-const clipboardCopies = [];
+
 const module = { exports: {} };
 vm.runInNewContext(await readFile('main.js', 'utf8'), {
   navigator: { clipboard: { writeText: async text => { clipboardCopies.push(text); } } },
-  module, exports: module.exports, Date: Clock, Intl, console, structuredClone, crypto: webcrypto, URL, AbortController, setTimeout, clearTimeout,
+  module, exports: module.exports, Date: Clock, Intl, console, structuredClone,
+  crypto: webcrypto, URL, AbortController, setTimeout, clearTimeout,
   require: name => {
     assert.equal(name, 'obsidian', 'Unexpected runtime dependency');
-    return { Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } }, TFile, TFolder, PluginSettingTab: class {}, Setting,
-      requestUrl: async request => { requests.push(request); if (mockHttp) return mockHttp(request); return { status: mockStatus, json: typeof mockResponse === 'function' ? mockResponse(request) : mockResponse }; },
-      Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path };
+    return {
+      Plugin, Modal, ItemView: class { constructor(leaf) { this.leaf = leaf; this.contentEl = new Node(); } },
+      TFile, TFolder, PluginSettingTab: class {}, Setting,
+      requestUrl: async request => { requests.push(request); if (mockHttp) return mockHttp(request); return { status: mockStatus, json: {} }; },
+      Notice: class { constructor(text) { notices.push(text); } }, normalizePath: path => path,
+    };
   },
 });
 const AutoScheduler = module.exports.default;
 assert.equal(typeof AutoScheduler, 'function');
-const original = '- [ ] 宿主演示 <!-- as id=host remaining=60 priority=3 -->';
-const files = new Map([['Tasks/Host.md', original]]);
-const folders = new Set(['Tasks']); let creates = 0, processes = 0;
-const app = { workspace: { getLeavesOfType: () => [], openLinkText: async () => {}, getLeaf: () => ({ openFile: async file => { openedNotes.push(file.path); } }) }, vault: {
-  getAbstractFileByPath: path => files.has(path) ? new TFile(path) : folders.has(path) ? new TFolder(path) : null,
-  getMarkdownFiles: () => [...files.keys()].map(path => new TFile(path)),
-  read: async file => files.get(file.path),
-  createFolder: async path => { folders.add(path); },
-  create: async (path, text) => { assert(!files.has(path)); files.set(path, text); creates++; },
-  process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
-} };
-const plugin = new AutoScheduler(app); await plugin.onload();
-assert.equal(plugin.commands.length, 9);
-mockStatus = 401;
-await plugin.checkApiConnection();
-assert.equal(requests.at(-1).method, 'GET');
-assert.equal(requests.at(-1).headers, undefined);
-assert.equal(requests.at(-1).body, undefined);
-assert(notices.some(text => text.includes('reached the server (HTTP 401)')));
-mockStatus = 200;
-plugin.commands.find(command => command.id === 'preview-week').callback();
-await plugin.operations.tail;
-assert(latestModal, 'Preview modal failed to open'); assert.equal(creates, 0);
-const apply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
-assert(apply); assert.equal(apply.disabled, false); apply.events.click(); await plugin.operations.tail;
-assert.equal(creates, 1); assert(files.get('Scheduler/Schedule.md').includes('task=host'));
-assert(saved.undo); assert.equal(files.get('Tasks/Host.md'), original);
-// Simulate restarting the plugin and restoring durable undo data.
-const restarted = new AutoScheduler(app); await restarted.onload();
+
+const files = new Map(), folders = new Set();
+let creates = 0, processes = 0;
+const app = {
+  workspace: {
+    getLeavesOfType: () => [], getActiveFile: () => activeFile, openLinkText: async () => {},
+    getLeaf: () => ({ openFile: async file => { openedNotes.push(file.path); } }),
+  },
+  vault: {
+    getAbstractFileByPath: path => files.has(path) ? new TFile(path) : folders.has(path) ? new TFolder(path) : null,
+    getMarkdownFiles: () => [...files.keys()].map(path => new TFile(path)), read: async file => files.get(file.path),
+    createFolder: async path => { folders.add(path); },
+    create: async (path, text) => { assert(!files.has(path)); files.set(path, text); creates++; },
+    process: async (file, callback) => { const text = callback(files.get(file.path)); files.set(file.path, text); processes++; return text; },
+  },
+};
+
+const call = (id, name, args) => ({ type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) });
+const prose = text => ({ status: 200, json: { status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text }] }] } });
+const postCount = () => requests.filter(request => request.method === 'POST').length;
+const toolResult = (body, id) => {
+  const item = [...body.input].reverse().find(value => value.type === 'function_call_output' && value.call_id === id);
+  assert(item, `Missing tool result ${id}`); return JSON.parse(item.output);
+};
+const modelList = request => request.method === 'GET' ? { status: 200, json: { data: [{ id: 'fixture' }, { id: 'fixture-pro' }] } } : null;
+const assistantMessages = view => view.messages.filter(message => message.role === 'assistant');
+
+// Offline commands, preview/apply, settings, restart, and local undo.
+// Use the public habit format here; generic note organization is covered below.
+const offlineHabit = '- 19:00-19:30 ⏫ Offline preview habit（每天）';
+files.set('Habits/Habit template.md', offlineHabit); folders.add('Habits');
+const plugin = new AutoScheduler(app); await plugin.onload(); assert.equal(plugin.commands.length, 9);
+mockStatus = 401; await plugin.checkApiConnection(); assert.equal(requests.at(-1).method, 'GET'); assert.equal(requests.at(-1).headers, undefined); assert(notices.some(text => text.includes('HTTP 401')));
+await plugin.updateSettings({ outputFile: 'Scheduler/Smoke.md' });
+plugin.commands.find(command => command.id === 'preview-week').callback(); await plugin.operations.tail;
+const apply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule'); assert(apply && !apply.disabled); apply.events.click(); await plugin.operations.tail;
+assert(files.get('Scheduler/Smoke.md').includes('Offline preview habit')); assert(saved.undo);
+const restarted = new AutoScheduler(app); await restarted.onload(); assert.equal(restarted.state.settings.outputFile, 'Scheduler/Smoke.md');
 restarted.commands.find(command => command.id === 'undo-last').callback(); await restarted.operations.tail;
-assert.equal(processes, 1); assert.equal(saved.undo, null);
-assert(!files.get('Scheduler/Schedule.md').includes('as-block')); assert.equal(files.get('Tasks/Host.md'), original);
-assert(notices.some(text => text.includes('Schedule saved'))); assert(notices.some(text => text.includes('Last schedule undone')));
-// A custom output may equal the DEFAULT fixed path when fixedFile is changed.
-// Undo path validation must be independent of today's/default settings.
-await restarted.updateSettings({ fixedFile: 'Scheduler/Meetings.md', outputFile: 'Scheduler/Fixed.md' });
-restarted.commands.find(command => command.id === 'preview-week').callback(); await restarted.operations.tail;
-const customApply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
-customApply.events.click(); await restarted.operations.tail; assert(saved.undo);
-const customRestart = new AutoScheduler(app); await customRestart.onload();
-assert(customRestart.state.undo, 'Custom path undo was discarded at restart');
-customRestart.commands.find(command => command.id === 'undo-last').callback(); await customRestart.operations.tail;
-assert.equal(saved.undo, null); assert(!files.get('Scheduler/Fixed.md').includes('as-block'));
-assert.equal(files.get('Tasks/Host.md'), original);
-// Daily batch survives restart and restores all files through public Vault methods.
-files.set('Tasks/Host.md', original.replace('remaining=60', 'remaining=360'));
-files.set('DailyNotes/2026-10-01.md', '# Day planner\n- [ ] 09:00 - 10:00 会议\n# 日记\n保留');
-const dailyOriginal = files.get('DailyNotes/2026-10-01.md');
-await customRestart.updateSettings({ outputLocation: 'daily', outputMode: 'gantt', weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 180, fixedBuffer: 0, blockBuffer: 0 });
-customRestart.commands.find(command => command.id === 'preview-week').callback(); await customRestart.operations.tail;
-const dailyApply = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
-assert.equal(dailyApply.disabled, false); dailyApply.events.click(); await customRestart.operations.tail;
-assert(saved.undo.entries.length >= 2); assert(files.get('DailyNotes/2026-10-01.md').includes('10:00 -')); assert(!files.get('DailyNotes/2026-10-01.md').includes('[start::')); assert(saved.tracking);
-const dailyRestart = new AutoScheduler(app); await dailyRestart.onload(); assert(dailyRestart.state.undo);
-dailyRestart.commands.find(command => command.id === 'undo-last').callback(); await dailyRestart.operations.tail;
-assert.equal(saved.undo, null); assert.equal(files.get('DailyNotes/2026-10-01.md'), dailyOriginal);
-assert(!files.get('DailyNotes/2026-10-02.md').includes('as-block'));
-console.log('PASS: CJS load, command registration, read-only preview, Vault create/process, durable restart undo, unchanged source, daily multi-file apply/restart/undo');
-// Exercise the new AI entry through the real bundle without a network request.
-const aiDraft = { title: '课程复习', minutes: 120, priority: 4, split: true, minMinutes: 30, due: null, earliest: null };
-const previousModal = latestModal;
-const aiResult = await dailyRestart.scheduleAi([aiDraft]);
-assert.equal(latestModal, previousModal, 'AI scheduling must not open a modal');
-assert(aiResult.text.includes('课程复习')); assert(aiResult.notes.length > 0);
-assert.equal(saved.aiTasks.length, 1); assert(!JSON.stringify(saved).includes('apiToken'));
-assert([...files.values()].some(text => text.includes('课程复习')));
-const aiRestart = new AutoScheduler(app); await aiRestart.onload(); assert.equal(aiRestart.state.aiTasks.length, 1);
-aiRestart.commands.find(command => command.id === 'undo-last').callback(); await aiRestart.operations.tail;
-assert.equal(saved.aiTasks.length, 0); assert(![...files.values()].some(text => text.includes('课程复习')));
-console.log('PASS: real bundle AI direct apply without modal, persistent task restart/undo, no durable API token');
+assert.equal(saved.undo, null); assert(!files.get('Scheduler/Smoke.md').includes('Offline preview habit')); assert.equal(files.get('Habits/Habit template.md'), offlineHabit);
+console.log('PASS: offline command registration, credential-free connection check, preview/apply, persisted config, restart, local undo');
 
-// Migrate 0.2.0 data with AI sources before the first durable BYOK save.
-await aiRestart.scheduleAi([aiDraft]);
-delete saved.byok;
-const migrated = new AutoScheduler(app); await migrated.onload();
-assert.equal(migrated.state.aiTasks.length, 1); assert.equal(saved.aiTasks.length, 1); assert(saved.byok);
-// Configure local providers with session credentials and retain model identity by provider.
-await migrated.saveProvider({ id: 'local-test', name: 'Local', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: ['local-test-model', 'local-fast'] }, 'fixture-token', 'local-fast');
-assert.equal(migrated.state.llm.model, 'local-fast'); assert(!JSON.stringify(saved).includes('fixture-token'));
-await assert.rejects(migrated.saveProvider({ id: 'local-test', name: 'Local', protocol: 'chat-completions', baseUrl: 'http://localhost:1234/v1', requiresKey: false, models: ['local-test-model', 'local-fast'] }, 'fixture-token', 'unknown-model'), /Select a model/);
-assert.equal(migrated.state.llm.model, 'local-fast');
-assert.equal(await migrated.getApiToken(), 'fixture-token');
-await migrated.selectModel('legacy', saved.byok.providers.find(p => p.id === 'legacy').models[0]);
-assert.equal(await migrated.getApiToken(), '');
-await migrated.removeProvider('local-test'); assert(!saved.byok.providers.some(p => p.id === 'local-test'));
-await migrated.selectModel('legacy', migrated.byok.providers[0].models[0]);
-migrated.commands.find(command => command.id === 'undo-last').callback(); await migrated.operations.tail; assert.equal(saved.aiTasks.length, 0);
-console.log('PASS: BYOK legacy migration preserves AI tasks/undo, provider/model routing, session credential isolation, removal, no serialized tokens');
+// Provider configuration keeps session credentials out of durable state and rolls back on save failure.
+await restarted.saveProvider({ id: 'fixture-provider', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture', 'fixture-pro'] }, 'session-token', 'fixture-pro');
+assert.equal(restarted.state.llm.model, 'fixture-pro'); assert.equal(await restarted.getApiToken(), 'session-token'); assert(!JSON.stringify(saved).includes('session-token'));
+const durableBeforeFailure = JSON.stringify(restarted.state), saveData = restarted.saveData.bind(restarted);
+restarted.saveData = async () => { throw new Error('disk unavailable'); };
+await assert.rejects(restarted.saveProvider({ id: 'rollback', name: 'Rollback', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: true, models: ['fixture'] }, 'new-secret'), /previous key was restored/);
+assert.equal(JSON.stringify(restarted.state), durableBeforeFailure); assert.equal(await restarted.credentials.get('rollback'), ''); restarted.saveData = saveData;
+console.log('PASS: provider/model configuration, session-only credential, durable-save rollback');
 
-const beforeFailedSave = JSON.stringify(migrated.state); const originalSaveData = migrated.saveData.bind(migrated);
-migrated.saveData = async () => { throw new Error('disk unavailable'); };
-await assert.rejects(migrated.saveProvider({ id: 'rollback-test', name: 'Rollback', protocol: 'chat-completions', baseUrl: 'https://example.test/v1', requiresKey: true, models: ['model'] }, 'fixture-new-token'), /previous key was restored/);
-assert.equal(JSON.stringify(migrated.state), beforeFailedSave); assert.equal(await migrated.credentials.get('rollback-test'), '');
-migrated.saveData = originalSaveData;
-console.log('PASS: provider save failure restores prior credential and leaves model configuration unchanged');
-
-// Exercise the actual chat UI with a fake provider transport: no network or real vault.
-saved = null; files.clear(); folders.clear(); folders.add('Tasks');
-const chatPlugin = new AutoScheduler(app); await chatPlugin.onload();
-await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture', 'fixture-pro'] }, '');
-await chatPlugin.updateSettings({ weekdays: [0,1,2,3,4,5,6], periods: ['09:00-12:00'], dailyCapacity: 60, fixedBuffer: 0, blockBuffer: 0 });
-const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen(); await chatView.modelLoad;
-const header = chatView.contentEl.children.find(node => node.options.cls === 'auto-scheduler-chat-header');
-assert.equal(header.children[0].options.text, 'Configure provider / API key');
-const modelSelect = header.all().find(node => node.tag === 'select' && node.options.attr?.['aria-label'] === 'Chat model');
-assert(modelSelect); assert(modelSelect.children.some(node => node.options.text === 'Fixture / fixture-pro'));
-modelSelect.value = JSON.stringify(['chat-fixture', 'fixture-pro']); modelSelect.events.change(); await chatPlugin.operations.tail;
-assert.equal(chatPlugin.state.llm.model, 'fixture-pro');
-const draft = { ...aiDraft, minutes: 600 };
-mockResponse = { output: [
-  { type: 'message', content: [{ type: 'output_text', text: '模型猜测：明天20点完成。' }] },
-  { type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [draft] }) },
-] };
-const modalBeforeChat = latestModal;
-await chatView.send('帮我安排课程复习，预计10小时');
-assert.equal(JSON.parse(requests.at(-1).body).model, 'fixture-pro');
-assert.equal(latestModal, modalBeforeChat); assert.equal(chatView.busy, false);
-const answer = chatView.messages.at(-1);
-assert(answer.content.includes('2026-10-01 09:00–10:00: 课程复习'));
-assert(answer.content.includes('remaining 180 min')); assert(!answer.content.includes('20点'));
-assert.equal(answer.notes.length, 7); assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
-assert([...files.values()].every(text => !text.includes('as-block') && !text.includes('scheduled::')));
-const dateLink = chatView.contentEl.all().find(node => node.tag === 'a' && node.options.text === 'Open 2026-10-02');
-dateLink.events.click({ preventDefault() {} }); await Promise.resolve();
-assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-02.md');
-mockResponse = { output: [{ type: 'message', content: [{ type: 'output_text', text: '有什么需要调整的？' }] }] };
-const filesBeforeConversation = JSON.stringify([...files]);
-await chatView.send('先讨论一下');
-assert.equal(chatView.messages.at(-1).content, '有什么需要调整的？'); assert.equal(JSON.stringify([...files]), filesBeforeConversation);
-assert(JSON.parse(requests.at(-1).body).input.every(message => Object.keys(message).sort().join(',') === 'content,role'), 'Local note links leaked to provider');
-// A navigation failure must keep the committed success report and durable undo.
-const openLeaf = app.workspace.getLeaf;
-app.workspace.getLeaf = () => ({ openFile: async () => { throw new Error('navigation failed'); } });
-await chatPlugin.updateSettings({ dailyCapacity: 180 });
-mockResponse = { output: [{ type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [aiDraft] }) }] };
-await chatView.send('再安排一门课程，两小时');
-assert(chatView.messages.at(-1).content.includes('Schedule saved, but the daily note could not be opened'));
-assert(chatView.messages.at(-2).content.includes('Saved to daily notes')); assert.equal(saved.aiTasks.length, 2);
-app.workspace.getLeaf = openLeaf;
-chatPlugin.commands.find(command => command.id === 'undo-last').callback(); await chatPlugin.operations.tail;
-assert.equal(saved.aiTasks.length, 1);
-// No-capacity and malformed source errors leave both files and settings unchanged.
-await chatPlugin.updateSettings({ dailyCapacity: 15 });
-const noCapacityState = JSON.stringify(saved), noCapacityFiles = JSON.stringify([...files]);
-await chatView.send('帮我安排另一个任务');
-assert(chatView.messages.at(-1).content.includes('No new tasks were created'));
-assert.equal(JSON.stringify(saved), noCapacityState); assert.equal(JSON.stringify([...files]), noCapacityFiles);
-await chatPlugin.updateSettings({ dailyCapacity: 180 });
-files.set('Tasks/Invalid.md', '- [ ] 错误 <!-- as id=invalid remaining=5 -->');
-const invalidState = JSON.stringify(saved);
-await chatView.send('安排新任务');
-assert(chatView.messages.at(-1).content.includes('Request failed')); assert.equal(JSON.stringify(saved), invalidState);
-files.delete('Tasks/Invalid.md');
-// A batch failure after the first write must report partial state, retain backup, and undo.
-const createFile = app.vault.create, processFile = app.vault.process;
-let writesBeforeFailure = 1;
-app.vault.create = async (...args) => { if (writesBeforeFailure-- <= 0) throw new Error('write unavailable'); return createFile(...args); };
-app.vault.process = async (...args) => { if (writesBeforeFailure-- <= 0) throw new Error('write unavailable'); return processFile(...args); };
-const partialFilesBefore = new Map(files);
-await chatView.send('安排新任务');
-assert(chatView.messages.at(-1).content.includes('some daily notes may have been written')); assert(saved.undo);
-app.vault.create = createFile; app.vault.process = processFile;
-chatPlugin.commands.find(command => command.id === 'undo-last').callback(); await chatPlugin.operations.tail;
-assert.equal(saved.aiTasks.length, 1);
-for (const [path, value] of partialFilesBefore) assert.equal(files.get(path), value);
-console.log('PASS: chat direct scheduling, exact cross-day times/links, partial capacity, no invented model times, no link metadata sent, navigation failure, invalid inputs, partial write recovery');
-// The actual bundle must load templates even without normal tasks or a provider.
-saved = null; files.clear();
-const habitPlugin = new AutoScheduler(app); await habitPlugin.onload();
-habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
-assert(!files.get('Habits/Habit template.md').includes('<!--'));
-assert(files.get('Habits/Habit template.md').includes('```markdown'));
-assert.equal(openedNotes.at(-1), 'Habits/Habit template.md');
-files.set('Habits/Habit template.md', '- 19:00-19:30 ⏫ 晚间习惯（每天）');
-habitPlugin.commands.find(c => c.id === 'create-habit-template').callback(); await habitPlugin.operations.tail;
-assert(files.get('Habits/Habit template.md').includes('晚间习惯'));
-habitPlugin.state.settings = { ...habitPlugin.state.settings, outputLocation: 'daily', outputMode: 'day-planner', cleanDaily: true };
-habitPlugin.commands.find(c => c.id === 'preview-week').callback(); await habitPlugin.operations.tail;
-assert.equal(latestModal.preview.result.errors.length, 0);
-assert.equal(latestModal.preview.result.blocks.length, 7);
-console.log('PASS: habit template command opens note, never overwrites, and generates seven fixed occurrences without tasks or LLM');
-const applyHabits = latestModal.contentEl.all().find(node => node.options.text === 'Apply schedule');
-applyHabits.events.click(); await habitPlugin.operations.tail;
-assert(files.get('DailyNotes/2026-10-01.md').includes('19:00 - 19:30 ⏫ 晚间习惯'));
-assert(!files.get('DailyNotes/2026-10-01.md').includes('as-block'));
-const habitRestart = new AutoScheduler(app); await habitRestart.onload();
-habitRestart.commands.find(c => c.id === 'preview-week').callback(); await habitRestart.operations.tail;
-assert.equal(latestModal.preview.diff.added.length, 0);
-assert.equal(latestModal.preview.diff.removed.length, 0);
-habitRestart.commands.find(c => c.id === 'undo-last').callback(); await habitRestart.operations.tail;
-assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
-assert(files.get('Habits/Habit template.md').includes('晚间习惯'));
-console.log('PASS: actual bundle clean habit output, restart deduplication, and undo without changing template');
-// Full chat -> skill/tool -> host -> template and schedule, without a real LLM.
-saved = null; files.clear(); folders.clear();
-const habitChat = new AutoScheduler(app); await habitChat.onload();
-await habitChat.saveProvider({ id: 'habit-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
-await habitChat.updateSettings({ habitFolder: 'Templates/Habits', fixedBuffer: 0, blockBuffer: 0 });
-const habitView = habitChat.views.get('auto-scheduler-chat')({}); await habitView.onOpen(); await habitView.modelLoad;
-const habitDraft = { title: '饭后慢走', start: '19:00', end: '19:30', days: [0,1,2,3,4,5,6], priority: 3 };
-mockResponse = { output: [{ type: 'function_call', name: 'create_habits', arguments: JSON.stringify({ habits: [habitDraft] }) }] };
-const oldModal = latestModal;
-await habitView.send('每天19点饭后慢走半小时');
-assert.equal(latestModal, oldModal); assert.equal(saved.aiTasks.length, 0);
-assert(files.get('Templates/Habits/饭后慢走.md').includes('19:00-19:30 🔼 饭后慢走 (Sun, Mon, Tue, Wed, Thu, Fri, Sat)'));
-assert(habitView.messages.at(-1).content.includes('2026-10-01 19:00–19:30: 饭后慢走'));
-assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
-assert(JSON.parse(requests.at(-1).body).instructions.includes('Templates/Habits/Habit template.md'));
-const copyButton = habitView.contentEl.all().find(n => n.options.attr?.['aria-label'] === 'Copy message');
-copyButton.events.click(); await Promise.resolve(); assert.equal(clipboardCopies.at(-1), '每天19点饭后慢走半小时');
-const css = await readFile('styles.css', 'utf8'); assert(css.includes('-webkit-user-select: text')); assert(css.includes('user-select: text'));
-const habitSaved = new AutoScheduler(app); await habitSaved.onload();
-habitSaved.commands.find(c => c.id === 'undo-last').callback(); await habitSaved.operations.tail;
-assert.equal(files.get('Templates/Habits/饭后慢走.md'), ''); assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
-console.log('PASS: actual chat habit tool uses configured path, writes recurring template and dates, copies messages, and undo restores both after restart');
-
-// Start-only exact events use a host default, open the note and share persistent undo.
-saved = null; files.clear(); folders.clear();
-const eventChat = new AutoScheduler(app); await eventChat.onload();
-await eventChat.saveProvider({ id: 'event-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture'] }, '');
-await eventChat.updateSettings({ defaultEventDuration: 45 });
-const eventView = eventChat.views.get('auto-scheduler-chat')({}); await eventView.onOpen(); await eventView.modelLoad;
-mockResponse = { output: [{ type: 'function_call', name: 'create_events', arguments: JSON.stringify({ events: [{ title: 'Evening exercise', date: '2026-10-01', start: '19:00', minutes: null }] }) }] };
-const eventModalBefore = latestModal;
-await eventView.send('Exercise today at 19:00');
-assert.equal(latestModal, eventModalBefore); assert.equal(saved.aiTasks.length, 0);
-assert(files.get('DailyNotes/2026-10-01.md').includes('- [ ] 19:00 - 19:45 Evening exercise'));
-assert(!files.get('DailyNotes/2026-10-01.md').includes('<!--'));
-assert(eventView.messages.at(-1).content.includes('default duration: 45 min'));
-assert.equal(openedNotes.at(-1), 'DailyNotes/2026-10-01.md');
-const eventRestart = new AutoScheduler(app); await eventRestart.onload();
-eventRestart.commands.find(c => c.id === 'undo-last').callback(); await eventRestart.operations.tail;
-assert.equal(files.get('DailyNotes/2026-10-01.md'), '# Day planner\n');
-console.log('PASS: actual chat start-only fixed events, configurable default, clean note, navigation, no preview modal and restart undo');
-
-// Ordinary tasks default locally, not only fixed appointments.
-mockResponse = { output: [{ type: 'function_call', name: 'create_tasks', arguments: JSON.stringify({ tasks: [{ title: 'Get a phone number', minutes: null, minMinutes: null, priority: 3, split: true, due: null, earliest: null }] }) }] };
-await eventView.send('Please schedule getting a phone number');
-assert(eventView.messages.at(-1).content.includes('Default duration (45 min) used for: Get a phone number'));
-assert.equal(saved.aiTasks[0].remaining, 45);
-// Discovery directly populates the dropdown and persists its choices; manual IDs are collapsed.
-eventChat.openProvider(eventChat.byok.providers.find(p => p.id === eventChat.byok.activeProviderId));
-let providerModal = latestModal;
-let advanced = providerModal.contentEl.all().find(n => n.tag === 'details');
-assert(advanced); assert(!advanced.open);
-mockResponse = { data: [{ id: 'discovered-fast' }, { id: 'discovered-pro' }] };
-await providerModal.test();
-let modelSetting = providerModal.contentEl.all().find(n => n.options.settingName === 'Model for chat');
-let dropdown = modelSetting.all().find(n => n.tag === 'select');
-assert(dropdown.children.some(n => n.options.value === 'discovered-pro'), providerModal.status);
-dropdown.value = 'discovered-pro'; dropdown.events.change();
-await providerModal.save();
-assert.equal(saved.byok.activeModel, 'discovered-pro');
-assert(saved.byok.providers.find(p => p.id === 'event-fixture').models.includes('discovered-fast'));
-// A legacy one-model OpenAI provider can select another preset directly from the sidebar.
-await eventChat.saveProvider({ id:'openai-fixture',name:'OpenAI',protocol:'responses',baseUrl:'https://api.openai.com/v1',requiresKey:false,models:['gpt-6-luna'] },'');
-eventView.refresh();
-const legacyPicker = eventView.contentEl.all().find(n => n.tag === 'select' && n.options.attr?.['aria-label'] === 'Chat model');
-assert(legacyPicker.children.some(n => n.options.text === 'OpenAI / gpt-6-sol'));
-await eventChat.selectModel('openai-fixture','gpt-6-sol');assert.equal(saved.byok.activeModel,'gpt-6-sol');
-console.log('PASS: flexible-task default reported, discovered-model dropdown save, collapsed manual fallback, legacy provider preset selection');
-
-saved = null; files.clear(); folders.clear();
-const mixedChat = new AutoScheduler(app); await mixedChat.onload();
-await mixedChat.saveProvider({id:'mixed-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-const mixedView = mixedChat.views.get('auto-scheduler-chat')({}); await mixedView.onOpen(); await mixedView.modelLoad;
-mockResponse = {output:[{type:'function_call',name:'create_plan',arguments:JSON.stringify({
-  tasks:[{title:'Phone number',minutes:null,minMinutes:null,priority:3,split:true,due:null,earliest:null}],
-  events:[{title:'Gym',date:null,start:'11:30',minutes:60}],
-  habits:[{title:'Read',start:'19:00',end:null,days:[0,1,2,3,4,5,6],priority:3}]
-})}]};
-await mixedView.send('Gym at 11:30 for an hour, get a phone number, and read every evening at 19:00');
-assert(mixedView.messages.at(-1).content.includes('default date: next occurrence'));
-assert(mixedView.messages.at(-1).content.includes('Default duration (30 min) used for: Phone number, Read'));
-assert(files.get('DailyNotes/2026-10-01.md').includes('11:30 - 12:30 Gym'));
-assert(files.get('DailyNotes/2026-10-02.md').includes('Phone number'));
-assert(!files.get('DailyNotes/2026-10-01.md').includes('Phone number')); // Avoid the day occupied by the exact gym event.
-assert(files.get('Habits/Read.md').includes('19:00-19:30'));
-assert.equal(saved.aiTasks[0].remaining,30);
-const mixedRestart = new AutoScheduler(app); await mixedRestart.onload();
-mixedRestart.commands.find(c => c.id === 'undo-last').callback(); await mixedRestart.operations.tail;
-assert.equal(saved.aiTasks.length,0);assert.equal(files.get('Habits/Read.md'),'');
-assert.equal(files.get('DailyNotes/2026-10-01.md'),'# Day planner\n');
-console.log('PASS: mixed plan preserves exact gym time, defaults phone task/habit durations and event date, writes all kinds together and undoes after restart');
-
-// Opening chat loads the actual provider catalog, including choices beyond the old 100 limit.
-const catalog = Array.from({length:127},(_,i)=> i === 0 ? 'fixture' : `gpt-fixture-${String(i).padStart(3, '0')}`);
-mockResponse = {data:catalog.map(id=>({id}))};
-const catalogPlugin = new AutoScheduler(app); await catalogPlugin.onload();
-const catalogView = catalogPlugin.views.get('auto-scheduler-chat')({}); await catalogView.onOpen(); await catalogView.modelLoad;
-assert.equal(requests.at(-1).method,'GET');assert(requests.at(-1).url.endsWith('/models'));
-assert.equal(catalogPlugin.byok.providers.find(p=>p.id==='mixed-fixture').models.filter(id=>catalog.includes(id)).length,127);
-let catalogSelect = catalogView.contentEl.all().find(n=>n.tag==='select' && n.options.attr?.['aria-label']==='Chat model');
-assert(catalogSelect.children.some(n=>n.options.text==='Fixture / gpt-fixture-126'));
-catalogSelect.value = JSON.stringify(['mixed-fixture','gpt-fixture-126']);catalogSelect.events.change(); await catalogPlugin.operations.tail;
-assert.equal(saved.byok.activeModel,'gpt-fixture-126');
-const modelStateBeforeFailure = JSON.stringify(catalogPlugin.byok);
-mockStatus = 403;await catalogView.loadModels();mockStatus = 200;
-assert.equal(JSON.stringify(catalogPlugin.byok),modelStateBeforeFailure);
-assert(catalogView.contentEl.all().some(n=>n.options.text?.includes('HTTP 403')));
-assert(catalogView.contentEl.all().some(n=>n.options.text==='Refresh models'));
-console.log('PASS: automatic GET catalog discovery, persistence of 127 choices, selecting beyond 100, sidebar refresh and failure preserves cached list/model');
-
-// Opening the chat itself runs in the operations queue. Discovery must not wait inside it.
-const queuedView = catalogPlugin.views.get('auto-scheduler-chat')({});
-mockResponse = {data:catalog.map(id=>({id}))};
-await Promise.race([catalogPlugin.action(()=>queuedView.onOpen()),new Promise((_,reject)=>setTimeout(()=>reject(new Error('Chat opening deadlocked with model refresh')),1000))]);
-await queuedView.modelLoad;
-assert(queuedView.contentEl.all().some(n=>n.options.text==='127 provider models loaded. Tool support depends on the model.'));
-console.log('PASS: queued sidebar opening releases the operation before automatic catalog persistence');
-
-// Actual bundle: read tool -> validated move -> open destination -> restart undo.
+// Start a clean compiled ChatView fixture with generic note tools.
 saved = null; files.clear(); folders.clear(); folders.add('DailyNotes');
-const editPlugin = new AutoScheduler(app); await editPlugin.onload();
-await editPlugin.saveProvider({id:'edit-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-await editPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00'],dailyCapacity:180,fixedBuffer:0,blockBuffer:0});
-const editSource = '# Habits and guidelines\n> Walk 30 minutes after lunch and dinner\n> Strength training Mon, Wed, Fri after the evening walk\n# Day planner\n- [ ] 10:00 Phone number 📅 2026-10-05\n- [x] Finished\n# Journal\nPRIVATE BODY MUST STAY LOCAL\n';
-files.set('DailyNotes/2026-10-01.md',editSource);
-mockResponse = {data:[{id:'fixture'}]};
-const editView = editPlugin.views.get('auto-scheduler-chat')({}); await editView.onOpen(); await editView.modelLoad;
-let editRounds = 0;
-mockResponse = request => {
-  const body = JSON.parse(request.body); assert(!request.body.includes('PRIVATE BODY MUST STAY LOCAL'));
-  editRounds++;
-  if (editRounds === 1) return {status:'completed',output:[{type:'function_call',name:'read_daily_plan',call_id:'read-plan',arguments:JSON.stringify({date:'2026-10-01'})}]};
-  const result = JSON.parse(body.input.at(-1).output); assert.equal(result.items[0].title,'Phone number'); assert.equal(result.items[1].completed,true); assert.equal(result.items[0].deadline,'2026-10-05'); assert(result.habitContext.includes('after lunch'));
-  return {status:'completed',output:[{type:'function_call',name:'revise_daily_tasks',call_id:'edit-plan',arguments:JSON.stringify({date:'2026-10-01',guidelines:['ACTION: Walk 30 minutes after lunch and dinner','ACTION: Strength training Mon, Wed, Fri after the evening walk'],edits:[{ref:result.items[0].ref,targetDate:'2026-10-02',title:null,minutes:null,priority:4}]})}]};
+const sourcePath = 'DailyNotes/2026-10-01.md';
+const source = '---\ntitle: today\n---\n# Journal\nprivate line\n## Focus\n- [ ] Alpha\n  keep nested detail\n## Other\nsource-only text\n';
+files.set(sourcePath, source);
+const targetDates = ['2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08'];
+const targetOriginals = new Map(targetDates.map(date => [`DailyNotes/${date}.md`, `# Existing\nkeep ${date}\n`]));
+for (const [path, text] of targetOriginals) files.set(path, text);
+
+const chatPlugin = new AutoScheduler(app); await chatPlugin.onload();
+await chatPlugin.saveProvider({ id: 'chat-fixture', name: 'Fixture', protocol: 'responses', baseUrl: 'https://example.test/v1', requiresKey: false, models: ['fixture', 'fixture-pro'] }, '', 'fixture');
+mockHttp = request => modelList(request) ?? prose('unexpected');
+const chatView = chatPlugin.views.get('auto-scheduler-chat')({}); await chatView.onOpen(); await chatView.modelLoad;
+
+// Discover, read, stage and commit a copy of an arbitrary section.
+let copyPhase = 0;
+mockHttp = request => {
+  const listed = modelList(request); if (listed) return listed;
+  const body = JSON.parse(request.body); assert(body.tools.every(tool => tool.strict === false), 'Responses tools must explicitly use strict:false');
+  if (copyPhase === 0) { copyPhase++; return { status: 200, json: { output: [call('discover-copy', 'discover_notes', { dates: ['2026-10-01', ...targetDates] })] } }; }
+  if (copyPhase === 1) {
+    const docs = toolResult(body, 'discover-copy').value.documents, sourceDoc = docs.find(doc => doc.path === sourcePath); assert(sourceDoc); copyPhase++;
+    return { status: 200, json: { output: [call('read-source', 'read_note', { documentRef: sourceDoc.documentRef, mode: 'document' })] } };
+  }
+  if (copyPhase === 2) {
+    const read = toolResult(body, 'read-source').value, focus = read.sections.find(section => section.title === 'Focus'); assert(focus);
+    const calls = [call('read-focus', 'read_note', { documentRef: read.documentRef, mode: 'section', ref: focus.sectionRef })], docs = toolResult(body, 'discover-copy').value.documents;
+    targetDates.forEach((date, index) => { const doc = docs.find(item => item.path === `DailyNotes/${date}.md`); calls.push(call(`read-target-${index}`, 'read_note', { documentRef: doc.documentRef, mode: 'document' })); });
+    copyPhase++; return { status: 200, json: { output: calls } };
+  }
+  if (copyPhase === 3) {
+    const content = toolResult(body, 'read-focus').value.content; assert(content.includes('## Focus') && content.includes('keep nested detail'));
+    const changes = targetDates.map((date, index) => ({ operation: 'insert', targetRef: toolResult(body, `read-target-${index}`).value.documentRef, position: 'end', content }));
+    copyPhase++; return { status: 200, json: { output: [call('stage-copy', 'stage_note_changes', { changes, summary: 'Copy Focus section to following seven dates' })] } };
+  }
+  if (copyPhase === 4) {
+    const staged = toolResult(body, 'stage-copy'); assert.equal(staged.ok, true); assert.equal(staged.value.changes.length, 7); copyPhase++;
+    return { status: 200, json: { output: [call('commit-copy', 'commit_changes', { changeSetRef: staged.value.changeSetRef })] } };
+  }
+  const committed = toolResult(body, 'commit-copy'); assert.equal(committed.ok, true); assert.equal(committed.receipt.status, 'committed'); assert.equal(committed.receipt.changedFiles.length, 7);
+  throw new Error('provider offline after commit');
 };
-const modalBeforeEdit = latestModal;
-await editView.send('Move today’s unfinished tasks to tomorrow');
-assert.equal(editRounds,2); assert.equal(latestModal,modalBeforeEdit);
-assert(!editView.messages.at(-1).content.includes('Request failed'),editView.messages.at(-1).content);
-assert(editView.messages.at(-1).content.includes('2026-10-02 09:00–09:30'));
-assert(editView.messages.at(-1).content.includes('Default duration (30 min)'));
-assert.equal(openedNotes.at(-1),'DailyNotes/2026-10-02.md');
-assert(!files.get('DailyNotes/2026-10-01.md').includes('Phone number'));
-assert(files.get('DailyNotes/2026-10-01.md').includes('- [x] Finished'));
-assert(files.get('DailyNotes/2026-10-01.md').includes('PRIVATE BODY MUST STAY LOCAL'));
-assert.equal(saved.aiTasks.length,1); assert(saved.aiTasks[0].due);
-assert(files.get('DailyNotes/2026-10-02.md').includes('📅 2026-10-05'));
-assert(!files.get('DailyNotes/2026-10-02.md').includes('ACTION: Walk 30 minutes after lunch and dinner'));
-assert(files.get('Habits/Walk 30 minutes after lunch and dinner.md').includes('- Walk 30 minutes after lunch and dinner'));
-assert(!files.get('Habits/Walk 30 minutes after lunch and dinner.md').includes('> ACTION:'));
-assert(files.get('Habits/Strength training.md').includes('Strength training Mon, Wed, Fri'));
-const editRestart = new AutoScheduler(app); await editRestart.onload();
-editRestart.commands.find(c=>c.id==='undo-last').callback(); await editRestart.operations.tail;
-assert.equal(files.get('DailyNotes/2026-10-01.md'),editSource); assert.equal(saved.aiTasks.length,0);
-assert.equal(saved.undo,null); assert.equal(files.get('Habits/Walk 30 minutes after lunch and dinner.md'),''); assert.equal(files.get('Habits/Strength training.md'),'');
-console.log('PASS: actual chat read/edit loop, section privacy, carry-over, default duration, deadline display, natural habit inheritance, destination navigation and restart undo');
+await chatView.send('复制今天的 Focus 段落到后面七天，保留源笔记和目标中的其他内容。');
+assert.equal(copyPhase, 5); assert.equal(files.get(sourcePath), source, 'Copy changed the source note');
+for (const [path, originalText] of targetOriginals) { const text = files.get(path); assert(text.startsWith(originalText)); assert(text.includes('## Focus')); assert(text.includes('- [ ] Alpha\n  keep nested detail')); }
+const committedMessage = assistantMessages(chatView).find(message => message.receipt?.status === 'committed'); assert(committedMessage, 'Committed host receipt was not shown');
+const postCommitError = assistantMessages(chatView).find(message => message.failed && message.content.includes('LLM request failed')); assert(postCommitError, 'Provider failure after commit was not shown');
+assert(!postCommitError.content.toLowerCase().includes('no tasks were written')); assert(!assistantMessages(chatView).some(message => message.content.includes('本轮未修改文件')));
+console.log('PASS: compiled generic discover/read/stage/commit copies an arbitrary section to seven dates, preserves source/layout, and retains receipt after provider failure');
 
-// Guideline-only requests must commit despite producing no scheduled blocks.
-const guidelineOnly = await editRestart.schedulePlan([],[],[],undefined,['Keep a regular three-meal routine']);
-assert.equal(guidelineOnly.notes.length,0); assert(guidelineOnly.text.includes('Decomposed habit/action list saved'));
-assert(!guidelineOnly.text.includes('09:00')); assert(files.get('Habits/Keep a regular three-meal routine.md').includes('regular three-meal routine')); assert.equal(Object.keys(files).filter(p=>p.startsWith('DailyNotes/')).length,0);
-const guidelineRestart=new AutoScheduler(app); await guidelineRestart.onload();
-guidelineRestart.commands.find(c=>c.id==='undo-last').callback(); await guidelineRestart.operations.tail;
-assert.equal(files.get('Habits/Keep a regular three-meal routine.md'),'');assert.equal(saved.undo,null);
-console.log('PASS: guideline-only host action commits without fabricated blocks and supports restart undo');
+// Exact local undo bypasses the provider and restores all targets.
+const postsBeforeUndo = postCount(); mockHttp = request => { if (request.method === 'POST') throw new Error('undo must remain local'); return modelList(request); };
+await chatView.send('/undo'); assert.equal(postCount(), postsBeforeUndo); assert.equal(files.get(sourcePath), source); for (const [path, text] of targetOriginals) assert.equal(files.get(path), text); assert.equal(saved.undo, null);
+console.log('PASS: exact local undo restores the generic multi-note copy without provider access');
 
-// Existing templates: fresh index -> apply -> dated navigation -> no duplicate template writes -> restart undo.
-saved=null;files.clear();folders.clear();folders.add('Templates');folders.add('Templates/Routines');
-const indexedPlugin=new AutoScheduler(app);await indexedPlugin.onload();
-await indexedPlugin.saveProvider({id:'habit-index-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-await indexedPlugin.updateSettings({habitFolder:'Templates/Routines',weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00'],dailyCapacity:180,fixedBuffer:0,blockBuffer:15});
-const customHabitSource='- 12:40-13:10 Lunch walk (every day)\n- 18:40-19:10 Dinner walk (every day)\n- 19:10-19:40 Strength (Mon, Wed, Fri)\n';
-files.set('Templates/Routines/My routine.md',customHabitSource);
-files.set('Journal/Private.md','PRIVATE DO NOT SEND');
-mockResponse={data:[{id:'fixture'}]};const indexedView=indexedPlugin.views.get('auto-scheduler-chat')({});await indexedView.onOpen();await indexedView.modelLoad;
-let indexedRounds=0;mockResponse=request=>{
-  const body=JSON.parse(request.body);assert(!request.body.includes('PRIVATE DO NOT SEND'));
-  if(indexedRounds++===0)return {status:'completed',output:[{type:'function_call',name:'read_habits',call_id:'index',arguments:'{}'}]};
-  const output=body.input.at(-1).output; const result=JSON.parse(output);assert.equal(result.files[0].path,'Templates/Routines/My routine.md');assert.equal(result.files[0].habits.length,3);
-  return {status:'completed',output:[{type:'function_call',name:'schedule_existing_habits',call_id:'apply-index',arguments:'{}'}]};
+// Text-only turns write nothing and display the authoritative host status.
+const filesBeforeText = JSON.stringify([...files]); mockHttp = request => modelList(request) ?? prose('只讨论，不修改。');
+await chatView.send('先讨论，不要修改文件'); assert.equal(JSON.stringify([...files]), filesBeforeText); assert.equal(chatView.messages.at(-1).content, 'Host result: No files changed in this turn.'); assert(assistantMessages(chatView).some(message => message.content === '只讨论，不修改。'));
+console.log('PASS: text-only model reply produces no writes and shows host no-files result');
+
+// Unknown effort is a persistent source plus a confirmed session budget. The
+// actual compiled model/tool loop must reject source loss after scheduling.
+chatView.newChat();
+const goalPath='DailyNotes/2026-10-12.md',calendarBefore=files.get('DailyNotes/2026-10-01.md');
+let goalPhase=0,goalDocument;
+mockHttp=request=>{
+  const listed=modelList(request);if(listed)return listed;const body=JSON.parse(request.body);
+  if(goalPhase===0){goalPhase++;return {status:200,json:{output:[call('goal-discover','discover_notes',{dates:['2026-10-12']})]}};}
+  if(goalPhase===1){goalDocument=toolResult(body,'goal-discover').value.documents[0].documentRef;goalPhase++;return {status:200,json:{output:[call('goal-stage','stage_note_changes',{changes:[{operation:'insert',targetRef:goalDocument,position:'end',content:'### Research queue\n- [ ] Unknown research effort\n'}]})]}};}
+  if(goalPhase===2){const staged=toolResult(body,'goal-stage');assert.equal(staged.ok,true);goalPhase++;return {status:200,json:{output:[call('goal-read','read_note',{documentRef:goalDocument,mode:'document',changeSetRef:staged.value.changeSetRef})]}};}
+  if(goalPhase===3){const note=toolResult(body,'goal-read').value;goalPhase++;return {status:200,json:{output:[call('goal-plan','plan_schedule',{mode:'add',changeSetRef:note.changeSetRef,habitRefs:[],events:[],tasks:[{id:null,sourceRef:note.blocks[0].blockRef,title:'Unknown research effort',minutes:null,priority:3,split:true,minMinutes:15,dailyMinutes:30,rollingMinutes:30,estimateBasis:null,due:null,earliest:null}]})]}};}
+  if(goalPhase===4){const planned=toolResult(body,'goal-plan');assert.equal(planned.ok,true,JSON.stringify(planned));assert.equal(planned.value.goals[0].totalMinutes,null);assert.equal(planned.value.goals[0].sessionBudgetMinutes,30);goalPhase++;return {status:200,json:{output:[call('goal-commit','commit_changes',{changeSetRef:planned.value.changeSetRef})]}};}
+  if(goalPhase===5){const committed=toolResult(body,'goal-commit');assert.equal(committed.ok,true);goalPhase++;return {status:200,json:{output:[call('goal-current','read_note',{documentRef:goalDocument,mode:'document'})]}};}
+  if(goalPhase===6){const note=toolResult(body,'goal-current').value;goalPhase++;return {status:200,json:{output:[call('goal-delete','stage_note_changes',{changes:[{operation:'delete',targetRef:note.blocks[0].blockRef}]})]}};}
+  const deletion=toolResult(body,'goal-delete');assert.equal(deletion.ok,false);assert(deletion.error.includes('Pending task sources'));return prose('The source stays open. One 30 minute session was scheduled; total effort is unknown.');
 };
-await indexedView.send('Add the existing habits to my schedule');
-assert(!indexedView.messages.at(-1).content.includes('Request failed'),indexedView.messages.at(-1).content);
-assert(indexedView.messages.at(-1).content.includes('2026-10-01 12:40–13:10'));
-assert(files.get('DailyNotes/2026-10-02.md').includes('19:10 - 19:40'));
-assert.equal(openedNotes.at(-1),'DailyNotes/2026-10-01.md');assert.equal(files.get('Templates/Routines/My routine.md'),customHabitSource);
-assert(!files.has('Templates/Routines/Habits.md'));
-const staleIndex=await indexedPlugin.readHabits(JSON.stringify(indexedPlugin.state.settings));files.set('Templates/Routines/My routine.md',customHabitSource+'\n');
-await assert.rejects(indexedPlugin.scheduleExistingHabits(staleIndex,JSON.stringify(indexedPlugin.state.settings)),/Habit templates changed/);
-files.set('Templates/Routines/My routine.md',customHabitSource);
-const indexedRestart=new AutoScheduler(app);await indexedRestart.onload();indexedRestart.commands.find(c=>c.id==='undo-last').callback();await indexedRestart.operations.tail;
-assert(!files.get('DailyNotes/2026-10-01.md').includes('Lunch walk'));assert.equal(files.get('Templates/Routines/My routine.md'),customHabitSource);
-console.log('PASS: all-file habit index, read/apply chat tools, exact times, adjacent sequences, dated navigation, unchanged templates, stale-read rejection and restart undo');
+await chatView.send('记录长期研究，在总工时未知时只安排一次30分钟工作，保留原任务。');
+assert.equal(goalPhase,7);assert(files.get(goalPath).includes('- [ ] Unknown research effort'));
+assert.equal(saved.aiTasks.length,1);assert.equal(saved.aiTasks[0].effort,'unknown');assert.equal(saved.aiTasks[0].completed,false);
+const goalPosts=postCount();mockHttp=request=>{if(request.method==='POST')throw new Error('goal undo must remain local');return modelList(request);};
+await chatView.send('/undo');assert.equal(postCount(),goalPosts);assert.equal(files.get(goalPath),'');assert.equal(files.get('DailyNotes/2026-10-01.md'),calendarBefore);assert.equal(saved.aiTasks.length,0);
+console.log('PASS: compiled ChatView stages a persistent unknown-effort goal and one confirmed session atomically, rejects later source deletion, and undoes source/calendar/state');
 
-// New guideline schema preserves specific file titles through the real chat host.
-saved=null;files.clear();folders.clear();
-const splitPlugin=new AutoScheduler(app);await splitPlugin.onload();
-await splitPlugin.saveProvider({id:'split-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-mockResponse={data:[{id:'fixture'}]};const splitView=splitPlugin.views.get('auto-scheduler-chat')({});await splitView.onOpen();await splitView.modelLoad;
-mockResponse={output:[{type:'function_call',name:'save_habit_guidelines',arguments:JSON.stringify({habits:[{title:'午餐后快走',actions:['午餐结束后休息10分钟，再快走30分钟'],conditions:[]},{title:'晚餐后快走',actions:['晚餐结束后休息10分钟，再快走30分钟'],conditions:[]},{title:'饮食规则',actions:[],conditions:['白水不限']}]})}]};
-await splitView.send('Save separate habit lists');
-assert(!splitView.messages.at(-1).content.includes('Request failed'),splitView.messages.at(-1).content);
-for(const title of ['午餐后快走','晚餐后快走','饮食规则'])assert(files.get(`Habits/${title}.md`).startsWith(`# ${title}\n`));
-assert(!files.has('Habits/Habits.md'));assert(!files.has('Habits/AI-Habits.md'));
-assert([...files.keys()].filter(p=>p.startsWith('DailyNotes/')).length===0);
-const splitRestart=new AutoScheduler(app);await splitRestart.onload();splitRestart.commands.find(c=>c.id==='undo-last').callback();await splitRestart.operations.tail;
-for(const title of ['午餐后快走','晚餐后快走','饮食规则'])assert.equal(files.get(`Habits/${title}.md`),'');
-console.log('PASS: named habit guideline documents through actual chat, per-habit filenames/headings, no aggregate/daily prose and restart undo');
+// Runtime skill files are re-read for each send.
+folders.add('Skills'); files.set('Skills/Runtime.md', '# Runtime\nUse runtime format A.'); await chatPlugin.updateAgentSettings({ skillFiles: ['Skills/Runtime.md'] });
+mockHttp = request => { const listed = modelList(request); if (listed) return listed; const body = JSON.parse(request.body); assert(body.instructions.includes('Use runtime format A.')); return prose('A loaded'); };
+await chatView.send('读取运行时规则 A'); files.set('Skills/Runtime.md', '# Runtime\nUse runtime format B.');
+mockHttp = request => { const listed = modelList(request); if (listed) return listed; const body = JSON.parse(request.body); assert(body.instructions.includes('Use runtime format B.')); assert(!body.instructions.includes('Use runtime format A.')); return prose('B loaded'); };
+await chatView.send('重新读取运行时规则');
+console.log('PASS: runtime skill edits are observed by the next compiled ChatView request');
 
-// Confirmed anchors saved through guideline tools must become actual timed habits, survive restart, and not prompt again.
-await splitRestart.updateSettings({defaultEventDuration:45,fixedBuffer:0,blockBuffer:15});
-mockResponse={data:[{id:'fixture'}]};const timedView=splitRestart.views.get('auto-scheduler-chat')({});await timedView.onOpen();await timedView.modelLoad;
-mockResponse={output:[{type:'function_call',name:'save_habit_guidelines',arguments:JSON.stringify({habits:[
-  {title:'午餐后快走',actions:['午餐12:30结束，休息10分钟，再快走30分钟'],conditions:[],schedule:{start:'12:40',end:'13:10',days:[0,1,2,3,4,5,6],priority:3}},
-  {title:'晚餐后快走',actions:['晚餐18:30结束，休息10分钟，再快走30分钟'],conditions:[],schedule:{start:'18:40',end:'19:10',days:[0,1,2,3,4,5,6],priority:3}},
-  {title:'力量训练',actions:['每周一三五在晚间快走后训练'],conditions:[],schedule:{start:'19:10',end:null,days:[1,3,5],priority:3}}
-]})}]};
-await timedView.send('Lunch ends 12:30, dinner 18:30, rest 10 minutes. Save the exact times.');
-assert(!timedView.messages.at(-1).content.includes('Request failed'),timedView.messages.at(-1).content);
-assert(timedView.messages.at(-1).content.includes('2026-10-01 12:40–13:10'));
-assert(timedView.messages.at(-1).content.includes('Default duration (45 min) used for: 力量训练'));
-assert(!timedView.messages.at(-1).content.includes('What time do lunch'));
-assert(files.get('Habits/力量训练.md').includes('19:10-19:55'));
-const timedRestart=new AutoScheduler(app);await timedRestart.onload();
-const timedIndex=await timedRestart.readHabits(JSON.stringify(timedRestart.state.settings));
-assert.equal(timedIndex.index.files.flatMap(f=>f.habits).length,3);
-const reapplied=await timedRestart.scheduleExistingHabits(timedIndex,JSON.stringify(timedRestart.state.settings));
-assert(reapplied.text.includes('already present'));assert(files.get('DailyNotes/2026-10-02.md').includes('19:10 - 19:55'));
-console.log('PASS: guideline schedules persist exact meal anchors, report configured default, produce actual dated blocks, and survive restart without asking again');
-
-// Actual bundle: a legacy book session becomes a durable paced project via read/revise tools.
-saved=null;files.clear();folders.clear();folders.add('DailyNotes');
-const bookPlugin=new AutoScheduler(app);await bookPlugin.onload();
-await bookPlugin.saveProvider({id:'book-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-await bookPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00','14:00-18:00'],dailyCapacity:360,fixedBuffer:0,blockBuffer:0});
-const bookSource='# Day planner\n- [ ] 10:30 - 11:00 🔼 《AI Infra》\n';
-files.set('DailyNotes/2026-10-01.md',bookSource);
-mockResponse={data:[{id:'fixture'}]};
-const bookView=bookPlugin.views.get('auto-scheduler-chat')({});await bookView.onOpen();await bookView.modelLoad;
-let bookRounds=0;
-mockResponse=request=>{
-  const body=JSON.parse(request.body);bookRounds++;
-  assert(body.instructions.includes('targetDate must be TODAY'));
-  if(bookRounds===1)return {status:'completed',output:[{type:'function_call',name:'read_daily_plan',call_id:'read-book',arguments:JSON.stringify({date:'2026-10-01'})}]};
-  const read=JSON.parse(body.input.at(-1).output);assert.equal(read.items[0].minutes,30);assert(read.availability.workingDay);
-  return {status:'completed',output:[{type:'function_call',name:'revise_daily_tasks',call_id:'plan-book',arguments:JSON.stringify({date:'2026-10-01',guidelines:[],edits:[{ref:read.items[0].ref,targetDate:'2026-10-01',title:null,minutes:600,priority:null,estimateBasis:'Provisional 300 pages at 30 pages/hour = 10 hours',dailyMinutes:60}]})}]};
+// A rejected staging call cannot create a receipt or false host success.
+const beforeRejectedEdit = JSON.stringify([...files]); let rejectedPhase = 0;
+mockHttp = request => {
+  const listed = modelList(request); if (listed) return listed; const body = JSON.parse(request.body);
+  if (rejectedPhase++ === 0) return { status: 200, json: { output: [call('bad-stage', 'stage_note_changes', { changes: [{ operation: 'insert', targetRef: 'invented', position: 'end', content: 'must not appear' }] })] } };
+  const failed = toolResult(body, 'bad-stage'); assert.equal(failed.ok, false); return prose('The edit was not saved because staging failed.');
 };
-await bookView.send('Plan the whole book starting with today’s remaining time, one hour per day.');
-assert(!bookView.messages.at(-1).content.includes('Request failed'),bookView.messages.at(-1).content);
-assert(bookView.messages.at(-1).content.includes('600 min'));assert(bookView.messages.at(-1).content.includes('60 min/day'));
-assert.equal(openedNotes.at(-1),'DailyNotes/2026-10-01.md');
-assert.equal(saved.aiTasks.length,1);assert.equal(saved.aiTasks[0].remaining,600);assert.equal(saved.aiTasks[0].dailyMinutes,60);
-const bookRestart=new AutoScheduler(app);await bookRestart.onload();
-const bookRead=await bookRestart.readPlan('2026-10-02',JSON.stringify(bookRestart.state.settings));
-assert.equal(bookRead.read.items[0].totalMinutes,600);assert.equal(bookRead.read.items[0].minutes,60);
-bookRestart.commands.find(c=>c.id==='undo-last').callback();await bookRestart.operations.tail;
-assert.equal(files.get('DailyNotes/2026-10-01.md'),bookSource);assert.equal(saved.aiTasks.length,0);
-console.log('PASS: whole-book estimate, today-first read/revise, per-day pace, durable total vs session duration, restart and undo');
+await chatView.send('执行一个会失败的编辑'); assert.equal(JSON.stringify([...files]), beforeRejectedEdit); assert.equal(chatView.messages.at(-1).content, 'Host result: No files changed in this turn.'); assert(!assistantMessages(chatView).some(message => message.receipt?.summary?.includes('must not appear')));
+console.log('PASS: tool failure stays a real failure and cannot produce a false host success');
 
-// Actual bundle enforces balanced dates, independent of proposed model clock times.
-saved=null;files.clear();folders.clear();
-const balancedPlugin=new AutoScheduler(app);await balancedPlugin.onload();
-await balancedPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00'],dailyCapacity:180,fixedBuffer:0,blockBuffer:0});
-const balancedReply=await balancedPlugin.scheduleAi(Array.from({length:7},(_,i)=>({title:`Balanced task ${i+1}`,minutes:30,priority:3,split:true,minMinutes:30,due:null,earliest:null})));
-assert.equal(balancedReply.notes.length,7);assert(saved.settings.balanceLoad);
-for(const note of balancedReply.notes)assert.equal((files.get(note.path).match(/Balanced task/g)||[]).length,1);
-const balancedRestart=new AutoScheduler(app);await balancedRestart.onload();assert(balancedRestart.state.settings.balanceLoad);
-console.log('PASS: seven AI tasks distributed over seven free dates, balanced policy persists after restart');
+// Partial commit is visible, durable across restart, and locally undoable.
+const originalCreate = app.vault.create, originalProcess = app.vault.process; let writesAllowed = 1;
+app.vault.create = async (...args) => { if (writesAllowed-- <= 0) throw new Error('fixture write unavailable'); return originalCreate(...args); };
+let partialPhase = 0; const partialDates = ['2026-10-09', '2026-10-10'];
+mockHttp = request => {
+  const listed = modelList(request); if (listed) return listed; const body = JSON.parse(request.body);
+  if (partialPhase === 0) { partialPhase++; return { status: 200, json: { output: [call('discover-partial', 'discover_notes', { dates: partialDates })] } }; }
+  if (partialPhase === 1) {
+    const docs = toolResult(body, 'discover-partial').value.documents; partialPhase++;
+    return { status: 200, json: { output: [call('stage-partial', 'stage_note_changes', { changes: docs.map((doc, index) => ({ operation: 'insert', targetRef: doc.documentRef, position: 'end', content: `partial ${index}` })), summary: 'Partial fixture' })] } };
+  }
+  if (partialPhase === 2) { const staged = toolResult(body, 'stage-partial'); partialPhase++; return { status: 200, json: { output: [call('commit-partial', 'commit_changes', { changeSetRef: staged.value.changeSetRef })] } }; }
+  const committed = toolResult(body, 'commit-partial'); assert.equal(committed.ok, false); assert.equal(committed.receipt.status, 'partial'); return prose('The commit stopped after a partial write. Undo is required before another write.');
+};
+await chatView.send('触发部分写入夹具');
+const partialReceipt = assistantMessages(chatView).find(message => message.receipt?.status === 'partial'); assert(partialReceipt && partialReceipt.failed); assert(saved.undo && saved.undo.status === 'partial');
+assert.equal(files.get('DailyNotes/2026-10-09.md'), 'partial 0'); assert(!files.has('DailyNotes/2026-10-10.md')); assert(!assistantMessages(chatView).some(message => message.receipt?.status === 'committed' && message.receipt.summary === 'Partial fixture'));
 
-// Completion dates added by Tasks must not block a read/revise transaction.
-saved=null;files.clear();folders.clear();
-const completedHabitPlugin=new AutoScheduler(app);await completedHabitPlugin.onload();
-await completedHabitPlugin.updateSettings({weekdays:[0,1,2,3,4,5,6],periods:['09:00-12:00','14:00-18:00'],dailyCapacity:360,fixedBuffer:0,blockBuffer:0});
-await completedHabitPlugin.scheduleHabits([{title:'Lunch walk',start:'12:40',end:'13:10',days:[0,1,2,3,4,5,6],priority:3},{title:'Dinner walk',start:'18:40',end:'19:10',days:[0,1,2,3,4,5,6],priority:3}]);
-const completedPath='DailyNotes/2026-10-01.md';
-files.set(completedPath,files.get(completedPath).replace(/^- \[ \] (.*)$/gm,'- [x] $1 ✅ 2026-10-01')+'- [ ] 10:30 - 11:00 Read AI Infra\n');
-const completedSource=files.get(completedPath);
-const completedRead=await completedHabitPlugin.readPlan('2026-10-01',JSON.stringify(completedHabitPlugin.state.settings));
-assert.equal(completedRead.read.items.filter(i=>i.completed).length,2);
-const ordinary=completedRead.read.items.find(i=>i.title==='Read AI Infra');assert(ordinary?.editable);
-const completedReply=await completedHabitPlugin.revisePlan(completedRead,[{ref:ordinary.ref,targetDate:'2026-10-01',title:null,minutes:600,priority:null,dailyMinutes:60,estimateBasis:'Provisional 10 hours'}],JSON.stringify(completedHabitPlugin.state.settings));
-assert(completedReply.text.includes('600 min'));assert.equal((files.get(completedPath).match(/✅ 2026-10-01/g)||[]).length,2);
-const completedRestart=new AutoScheduler(app);await completedRestart.onload();
-await completedRestart.readPlan('2026-10-01',JSON.stringify(completedRestart.state.settings));
-completedRestart.commands.find(c=>c.id==='undo-last').callback();await completedRestart.operations.tail;
-assert.equal(files.get(completedPath),completedSource);
-console.log('PASS: Tasks-completed habits plus handwritten book can read/revise, preserving completion dates, restart and exact undo');
+app.vault.create = originalCreate; app.vault.process = originalProcess;
+const partialRestart = new AutoScheduler(app); await partialRestart.onload(); mockHttp = request => modelList(request) ?? (() => { throw new Error('restart undo must remain local'); })();
+const partialView = partialRestart.views.get('auto-scheduler-chat')({}); await partialView.onOpen(); await partialView.modelLoad;
+const postsBeforePartialUndo = postCount(); await partialView.send('undo'); assert.equal(postCount(), postsBeforePartialUndo); assert.equal(files.get('DailyNotes/2026-10-09.md'), ''); assert.equal(saved.undo, null);
+console.log('PASS: partial receipt is visible and durable, restart restores recovery, exact local undo completes without provider');
 
-// Provider errors retain diagnostics without exposing prose; retries write only once.
-saved=null;files.clear();folders.clear();
-const ratePlugin=new AutoScheduler(app);await ratePlugin.onload();
-await ratePlugin.saveProvider({id:'rate-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-const rateView=ratePlugin.views.get('auto-scheduler-chat')({});
-mockResponse={data:[{id:'fixture'}]};await rateView.onOpen();await rateView.modelLoad;
-const rateState=JSON.stringify(saved),rateFiles=JSON.stringify([...files]);
-let quotaRequests=0;
-mockHttp=()=>{quotaRequests++;return {status:429,json:{error:{code:'insufficient_quota',message:'DO-NOT-EXPOSE-PROVIDER-BODY'}}};};
-await rateView.send('Schedule a 30-minute task');
-assert.equal(quotaRequests,1);assert.equal(JSON.stringify(saved),rateState);assert.equal(JSON.stringify([...files]),rateFiles);
-assert(rateView.messages.at(-1).content.includes('quota or credit balance'));assert(!rateView.messages.at(-1).content.includes('DO-NOT-EXPOSE'));
-assert.equal(rateView.draftText,'Schedule a 30-minute task');
-let retries=0;const retryBodies=[];
-mockHttp=request=>{retryBodies.push(request.body);retries++;return retries<=2?{status:429,json:{error:{code:'rate_limit_exceeded'}},headers:{'Retry-After':'0'}}:{status:200,json:{output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'Rate recovered task',minutes:30}]})}]}};};
-await rateView.send(rateView.draftText);mockHttp=null;
-assert.equal(retries,3);assert(retryBodies.every(b=>b===retryBodies[0]));
-const resentInput=JSON.parse(retryBodies[0]).input;assert.equal(resentInput.length,1);assert.equal(resentInput[0].content,'Schedule a 30-minute task');
-assert.equal(saved.aiTasks.length,1);assert(!rateView.messages.at(-1).content.includes('Request failed'));
-assert.equal([...files.values()].join('\n').match(/Rate recovered task/g).length,1);
-assert.equal(rateView.busy,false);assert.equal(rateView.requestStatus,'');
-console.log('PASS: quota failure makes no writes and restores prompt; two 429 retries resend identical request, exclude failed chat context and schedule exactly once');
+// Retry remains bounded and transparent, with no writes.
+let retries = 0;
+mockHttp = request => { const listed = modelList(request); if (listed) return listed; retries++; if (retries === 1) return { status: 429, headers: { 'retry-after-ms': '0' }, json: { error: { code: 'rate_limit_exceeded', message: 'requests per minute' } } }; return prose('Retry succeeded without edits.'); };
+await partialView.send('测试限流重试'); assert.equal(retries, 2); assert.equal(partialView.messages.at(-1).content, 'Host result: No files changed in this turn.');
+console.log('PASS: provider 429 retry completes within budget and performs no writes');
 
-// Clear cancels a pending host request and prevents its late reply from writing.
-const beforeClearState=JSON.stringify(saved),beforeClearFiles=JSON.stringify([...files]);
-let lateReply;
-mockHttp=()=>new Promise(resolve=>{lateReply=resolve;});
-const staleSend=rateView.send('This request will be cleared');
-for(let i=0;i<20&&!lateReply;i++)await Promise.resolve();assert(lateReply,'Pending fixture request did not start');
-const clearButton=rateView.contentEl.all().find(n=>n.options.text==='Clear');assert(clearButton);assert(!clearButton.disabled);
-clearButton.events.click();assert.equal(rateView.messages.length,0);assert.equal(rateView.draftText,'');assert.equal(rateView.busy,false);
-await staleSend;
-lateReply({status:200,json:{output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'MUST NOT BE WRITTEN',minutes:30}]})}]}});
-await Promise.resolve();await Promise.resolve();
-assert.equal(JSON.stringify(saved),beforeClearState);assert.equal(JSON.stringify([...files]),beforeClearFiles);assert.equal(rateView.messages.length,0);
-mockHttp=()=>({status:200,json:{output:[{type:'message',content:[{type:'output_text',text:'Fresh conversation'}]}]}});
-await rateView.send('New conversation');mockHttp=null;
-assert.equal(rateView.messages.length,2);assert.equal(rateView.messages.at(-1).content,'Fresh conversation');
-const freshBody=JSON.parse(requests.at(-1).body);assert.equal(freshBody.input.length,1);assert.equal(freshBody.input[0].content,'New conversation');
-ratePlugin.app.workspace.getLeavesOfType=()=>[{view:rateView}];
-ratePlugin.commands.find(c=>c.id==='clear-chat').callback();assert.equal(rateView.messages.length,0);
-assert.equal(JSON.stringify([...files]),beforeClearFiles);
-console.log('PASS: Clear remains enabled while busy, cancels pending request immediately, ignores late scheduling reply, preserves saved notes, starts fresh context and works from command palette');
+// Quota failure before any tool restores the draft and is excluded from the next request.
+const receiptsBeforeQuota = partialView.messages.filter(message => message.receipt).length;
+mockHttp = request => modelList(request) ?? { status: 429, json: { error: { code: 'insufficient_quota', message: 'fixture exhausted' } } };
+await partialView.send('Quota-before-tool draft');
+assert.equal(partialView.draftText, 'Quota-before-tool draft');
+assert(partialView.messages.some(message => message.failed && message.content.includes('quota or credit balance exhausted')));
+assert.equal(partialView.messages.filter(message => message.receipt).length, receiptsBeforeQuota, 'Quota failure produced a new host receipt');
+mockHttp = request => {
+  const listed = modelList(request); if (listed) return listed;
+  const input = JSON.parse(request.body).input;
+  assert(!input.some(message => message.content?.includes('Quota-before-tool draft')));
+  return prose('Fresh request excluded the failed draft.');
+};
+await partialView.send('Fresh request after quota');
+assert(partialView.messages.some(message => message.content === 'Fresh request excluded the failed draft.'));
+console.log('PASS: quota failure before tools restores the draft/error and failed input is excluded from the next model context');
 
-// Real compiled chat creates an open-ended goal, separately from its weekly sessions.
-saved=null;files.clear();folders.clear();
-const studyPlugin=new AutoScheduler(app);await studyPlugin.onload();
-await studyPlugin.saveProvider({id:'study-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-const studyView=studyPlugin.views.get('auto-scheduler-chat')({});mockResponse={data:[{id:'fixture'}]};await studyView.onOpen();await studyView.modelLoad;
-const studyPath='DailyNotes/2026-10-01.md';
-files.set(studyPath,'# Day planner\n- [ ] 🔼 Website project\n# Journal\nKeep private text\n');
-mockResponse={output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'Study AI Infra',minutes:180,dailyMinutes:60,rollingMinutes:180,estimateBasis:'Three provisional study sessions; total unknown'}]})}]};
-await studyView.send('Help me learn this book; total duration unknown');
-assert.equal(saved.aiTasks.length,1);assert.equal(saved.aiTasks[0].rollingMinutes,180);
-assert(files.get(studyPath).includes('# Tasks\n'));assert(files.get(studyPath).includes('- [ ] 🔼 Website project'));
-assert(files.get(studyPath).includes('- [ ] ⏫ Study AI Infra'));assert(files.get(studyPath).includes('# Journal\nKeep private text'));
-assert(studyView.messages.at(-1).content.includes('Total effort and finish date remain unknown'));
-assert.equal([...files.values()].join('\n').match(/\d\d:\d\d - \d\d:\d\d ⏫ Study AI Infra/g).length,3);
-const studyRestart=new AutoScheduler(app);await studyRestart.onload();assert.equal(studyRestart.state.aiTasks[0].rollingMinutes,180);
-studyRestart.commands.find(c=>c.id==='undo-last').callback();await studyRestart.operations.tail;
-assert.equal(files.get(studyPath),'# Day planner\n- [ ] 🔼 Website project\n# Journal\nKeep private text\n');
-console.log('PASS: compiled chat saves unknown-effort study goal in Tasks, allocates three paced sessions, preserves journal, persists on restart and undoes exactly');
+const commitResponder = (prefix, date, marker) => {
+  let phase = 0;
+  return request => {
+    const listed = modelList(request); if (listed) return listed;
+    const body = JSON.parse(request.body);
+    if (phase === 0) { phase++; return { status: 200, json: { output: [call(`${prefix}-discover`, 'discover_notes', { dates: [date] })] } }; }
+    if (phase === 1) {
+      const doc = toolResult(body, `${prefix}-discover`).value.documents[0]; phase++;
+      return { status: 200, json: { output: [call(`${prefix}-read`, 'read_note', { documentRef: doc.documentRef, mode: 'document' })] } };
+    }
+    if (phase === 2) {
+      const doc = toolResult(body, `${prefix}-read`).value; phase++;
+      return { status: 200, json: { output: [call(`${prefix}-stage`, 'stage_note_changes', { changes: [{ operation: 'insert', targetRef: doc.documentRef, position: 'end', content: marker }], summary: marker })] } };
+    }
+    if (phase === 3) {
+      const staged = toolResult(body, `${prefix}-stage`); phase++;
+      return { status: 200, json: { output: [call(`${prefix}-commit`, 'commit_changes', { changeSetRef: staged.value.changeSetRef })] } };
+    }
+    throw new Error(`${prefix} provider failed after commit`);
+  };
+};
+const gateProcess = path => {
+  const base = app.vault.process;
+  let announce, release;
+  const started = new Promise(resolve => { announce = resolve; });
+  const allowed = new Promise(resolve => { release = resolve; });
+  app.vault.process = async (file, callback) => {
+    if (file.path === path) { announce(); await allowed; }
+    return base(file, callback);
+  };
+  return { started, release, restore: () => { app.vault.process = base; } };
+};
 
-// Explicit recovery backs up before releasing ownership, and never edits notes.
-saved=null;files.clear();folders.clear();
-const recoveryPlugin=new AutoScheduler(app);await recoveryPlugin.onload();
-await recoveryPlugin.scheduleAi([{...aiDraft,title:'Original goal',minutes:60}],JSON.stringify(recoveryPlugin.state.settings));
-const recoveryPath=Object.keys(saved.tracking).find(p=>p.endsWith('/2026-10-01.md'));
-assert(recoveryPath);
-const editedDaily='# Tasks\n- [ ] Keep deadline 📅 2026-10-20\n# Day planner\n- [x] 10:30 - 12:00 Algorithms ✅ 2026-10-01\n# Journal\nKeep private text\n';
-files.set(recoveryPath,editedDaily);
-const oldOwnership=JSON.stringify(recoveryPlugin.state.tracking),oldTasks=JSON.stringify(recoveryPlugin.state.aiTasks),oldUndo=JSON.stringify(recoveryPlugin.state.undo);
-const recoveryBackups=new Map();let backupFailure=true;
-app.vault.configDir='.obsidian';recoveryPlugin.manifest={id:'auto-scheduler'};
-app.vault.adapter={write:async(path,text)=>{if(backupFailure)throw Error('backup failed');recoveryBackups.set(path,text);},read:async path=>recoveryBackups.get(path)};
-await assert.rejects(recoveryPlugin.readPlan('2026-10-01',JSON.stringify(recoveryPlugin.state.settings)),/DailyNotes\/2026-10-01.md: backup failed/);
-assert.equal(JSON.stringify(recoveryPlugin.state.tracking),oldOwnership);assert.equal(files.get(recoveryPath),editedDaily);
-backupFailure=false;
-const recoveredRead=await recoveryPlugin.readPlan('2026-10-01',JSON.stringify(recoveryPlugin.state.settings));
-assert(recoveredRead.read.items.some(i=>i.title==='Algorithms'&&i.completed));
-const recoveryBackup=[...recoveryBackups.keys()][0];
-assert.equal((await recoveryPlugin.recoverTrackingConflicts()).length,0);
-assert.equal(recoveryBackups.size,1);
-assert(recoveryBackup.startsWith('.obsidian/plugins/auto-scheduler/tracking-recovery-'));
-const recoveryData=JSON.parse(recoveryBackups.get(recoveryBackup));
-assert.equal(recoveryData.note,editedDaily);assert.deepEqual(recoveryData.tracking,JSON.parse(oldOwnership)[recoveryPath]);
-assert(!('byok' in recoveryData));assert(!('llm' in recoveryData));
-assert.equal(recoveryPlugin.state.tracking[recoveryPath],undefined);assert.equal(files.get(recoveryPath),editedDaily);
-assert.equal(JSON.stringify(recoveryPlugin.state.aiTasks),oldTasks);assert.equal(JSON.stringify(recoveryPlugin.state.undo),oldUndo);
-const recoveryRestart=new AutoScheduler(app);await recoveryRestart.onload();assert.equal(recoveryRestart.state.tracking[recoveryPath],undefined);
-await recoveryRestart.scheduleAi([{...aiDraft,title:'Presentation after recovery',minutes:120}],JSON.stringify(recoveryRestart.state.settings));
-assert(files.get(recoveryPath).includes('- [x] 10:30 - 12:00 Algorithms ✅ 2026-10-01'));
-assert(files.get(recoveryPath).includes('# Journal\nKeep private text'));
-assert(!files.get(recoveryPath).includes('auto-scheduler:start'));
-recoveryRestart.commands.find(c=>c.id==='undo-last').callback();await recoveryRestart.operations.tail;
-assert.equal(files.get(recoveryPath),editedDaily);
-// A future note conflict must not prevent a valid read of today's handwritten plan.
-recoveryRestart.manifest={id:'auto-scheduler'};
-const futureRecoveryPath='DailyNotes/2026-10-07.md';
-recoveryRestart.state.tracking[futureRecoveryPath]=JSON.parse(oldOwnership)[recoveryPath];
-files.set(futureRecoveryPath,editedDaily);
-const beforeFutureRead=files.get(recoveryPath);
-const futureRead=await recoveryRestart.readPlan('2026-10-01',JSON.stringify(recoveryRestart.state.settings));
-assert(futureRead.read.items.some(i=>i.title==='Algorithms'));
-assert.equal(recoveryRestart.state.tracking[futureRecoveryPath],undefined);
-assert.equal(files.get(futureRecoveryPath),editedDaily);
-assert.equal(files.get(recoveryPath),beforeFutureRead);
-assert.equal(recoveryBackups.size,2);
-console.log('PASS: automatic tracking recovery on read requires a durable backup, preserves note/goals/undo, survives restart and permits scheduling with exact undo');
+// Clear during a commit cancels model continuation but preserves the real receipt in its owning conversation.
+const clearPath = 'DailyNotes/2026-10-02.md', clearBefore = files.get(clearPath), clearGate = gateProcess(clearPath);
+mockHttp = commitResponder('clear-mid-commit', '2026-10-02', 'clear-mid-commit marker');
+const clearOwner = partialRestart.chatHistory.activeId, clearPending = partialView.send('Commit while Clear is pressed');
+await clearGate.started; partialView.clearChat(); clearGate.release(); await clearPending; clearGate.restore();
+const clearConversation = partialRestart.chatHistory.sessions.find(conversation => conversation.id === clearOwner);
+assert(files.get(clearPath).includes('clear-mid-commit marker'));
+assert(clearConversation.messages.some(message => message.receipt?.status === 'committed' && message.receipt.summary === 'clear-mid-commit marker'));
+assert(!clearConversation.messages.some(message => /draft is available|save was already in progress/i.test(message.content)));
+assert.equal(clearConversation.draft, '');
+const postsBeforeClearUndo = postCount(); mockHttp = request => { if (request.method === 'POST') throw new Error('clear undo must remain local'); return modelList(request); };
+await partialView.send('undo'); assert.equal(postCount(), postsBeforeClearUndo); assert.equal(files.get(clearPath), clearBefore);
+console.log('PASS: Clear during commit preserves truthful host receipt in the owning conversation without a duplicate resend prompt');
 
-// Conversations have separate histories/drafts; pending calls cannot cross them.
-saved=null;files.clear();folders.clear();
-const conversationPlugin=new AutoScheduler(app);await conversationPlugin.onload();
-await conversationPlugin.saveProvider({id:'conversation-fixture',name:'Fixture',protocol:'responses',baseUrl:'https://example.test/v1',requiresKey:false,models:['fixture']},'');
-const conversationView=conversationPlugin.views.get('auto-scheduler-chat')({});mockResponse={data:[{id:'fixture'}]};await conversationView.onOpen();await conversationView.modelLoad;
-const proseReply=text=>({status:200,json:{output:[{type:'message',content:[{type:'output_text',text}]}]}});
-mockHttp=()=>proseReply('Alpha response');await conversationView.send('Alpha context');
-const alphaId=conversationPlugin.chatHistory.activeId;
-const newChatButton=conversationView.contentEl.all().find(n=>n.options.text==='New chat');assert(newChatButton);newChatButton.events.click();
-assert.equal(conversationView.messages.length,0);assert.notEqual(conversationPlugin.chatHistory.activeId,alphaId);
-mockHttp=request=>{const input=JSON.parse(request.body).input;assert.equal(input.length,1);assert.equal(input[0].content,'Beta context');return proseReply('Beta response');};
-await conversationView.send('Beta context');const betaId=conversationPlugin.chatHistory.activeId;
-let selector=conversationView.contentEl.all().find(n=>n.options.attr?.['aria-label']==='Conversation');selector.value=alphaId;selector.events.change();
-assert.equal(conversationView.messages[0].content,'Alpha context');assert.equal(conversationView.messages.at(-1).content,'Alpha response');
-const composer=conversationView.contentEl.all().find(n=>n.options.attr?.['aria-label']==='Task conversation');composer.value='Alpha draft';composer.events.input();
-await conversationView.onClose();
-const reopenedConversation=conversationPlugin.views.get('auto-scheduler-chat')({});mockHttp=null;mockResponse={data:[{id:'fixture'}]};await reopenedConversation.onOpen();await reopenedConversation.modelLoad;
-assert.equal(reopenedConversation.draftText,'Alpha draft');assert.equal(reopenedConversation.messages[0].content,'Alpha context');
-reopenedConversation.clearChat();assert.equal(reopenedConversation.messages.length,0);
-selector=reopenedConversation.contentEl.all().find(n=>n.options.attr?.['aria-label']==='Conversation');selector.value=betaId;selector.events.change();
-assert.equal(reopenedConversation.messages[0].content,'Beta context');
-let lateConversationReply;mockHttp=()=>new Promise(resolve=>{lateConversationReply=resolve;});
-const pendingConversation=reopenedConversation.send('Cancelled beta request');
-for(let i=0;i<20&&!lateConversationReply;i++)await Promise.resolve();assert(lateConversationReply);
-reopenedConversation.newChat();await pendingConversation;
-lateConversationReply({status:200,json:{output:[{type:'function_call',name:'create_tasks',arguments:JSON.stringify({tasks:[{...aiDraft,title:'MUST NOT CROSS CHATS'}]})}]}});
-await Promise.resolve();await Promise.resolve();assert.equal(files.size,0);assert.equal(reopenedConversation.messages.length,0);
-selector=reopenedConversation.contentEl.all().find(n=>n.options.attr?.['aria-label']==='Conversation');selector.value=betaId;selector.events.change();
-assert.equal(reopenedConversation.draftText,'Cancelled beta request');
-mockHttp=request=>{const input=JSON.parse(request.body).input;assert(!input.some(m=>m.content.includes('Alpha')));assert(!input.some(m=>m.content==='Cancelled beta request'));return proseReply('Beta continued');};
-await reopenedConversation.send('Continue beta');mockHttp=null;
-assert(!JSON.stringify(saved).includes('Alpha context'));assert(!JSON.stringify(saved).includes('Beta context'));
-const idBeforeSave=conversationPlugin.chatHistory.activeId;reopenedConversation.applying=true;reopenedConversation.refresh();assert(reopenedConversation.contentEl.all().find(n=>n.options.text==='New chat').disabled);reopenedConversation.newChat();assert.equal(conversationPlugin.chatHistory.activeId,idBeforeSave);reopenedConversation.applying=false;
-app.workspace.getLeavesOfType=()=>[{view:reopenedConversation}];app.workspace.revealLeaf=async()=>{};
-conversationPlugin.commands.find(c=>c.id==='new-chat').callback();await conversationPlugin.operations.tail;
-assert.equal(reopenedConversation.messages.length,0);assert.notEqual(conversationPlugin.chatHistory.activeId,idBeforeSave);
-console.log('PASS: New chat isolates context, retains selectable histories/drafts across sidebar close, Clear affects one chat, cancellation suppresses late writes, write guard and command work');
+// Closing during commit has the same ownership guarantee after reopening the sidebar.
+partialView.newChat();
+const closePath = 'DailyNotes/2026-10-03.md', closeBefore = files.get(closePath), closeGate = gateProcess(closePath);
+mockHttp = commitResponder('close-mid-commit', '2026-10-03', 'close-mid-commit marker');
+const closeOwner = partialRestart.chatHistory.activeId, closePending = partialView.send('Commit while sidebar closes');
+await closeGate.started; await partialView.onClose(); closeGate.release(); await closePending; closeGate.restore();
+const closeConversation = partialRestart.chatHistory.sessions.find(conversation => conversation.id === closeOwner);
+assert(files.get(closePath).includes('close-mid-commit marker'));
+assert(closeConversation.messages.some(message => message.receipt?.status === 'committed' && message.receipt.summary === 'close-mid-commit marker'));
+assert(!closeConversation.messages.some(message => /draft is available|save was already in progress/i.test(message.content)));
+assert.equal(closeConversation.draft, '');
+mockHttp = request => modelList(request) ?? prose('unused');
+const continuedView = partialRestart.views.get('auto-scheduler-chat')({}); await continuedView.onOpen(); await continuedView.modelLoad;
+assert(continuedView.messages.some(message => message.receipt?.summary === 'close-mid-commit marker'));
+const postsBeforeCloseUndo = postCount(); await continuedView.send('/undo'); assert.equal(postCount(), postsBeforeCloseUndo); assert.equal(files.get(closePath), closeBefore);
+console.log('PASS: onClose during commit retains actual host result for the original conversation and avoids duplicate resend state');
+
+// Cancellation prevents a late tool call from crossing into a cleared conversation.
+let resolveLate;
+mockHttp = request => { const listed = modelList(request); if (listed) return listed; return new Promise(resolve => { resolveLate = resolve; }); };
+const beforeCancel = JSON.stringify([...files]), pending = continuedView.send('稍后取消');
+for (let index = 0; index < 30 && !resolveLate; index++) await Promise.resolve(); assert(resolveLate); continuedView.clearChat(); await pending;
+resolveLate({ status: 200, json: { output: [call('late-write', 'stage_note_changes', { changes: [{ operation: 'insert', targetRef: 'late', position: 'end', content: 'late' }] })] } }); await Promise.resolve();
+assert.equal(JSON.stringify([...files]), beforeCancel); assert.equal(continuedView.messages.length, 0);
+console.log('PASS: cancellation suppresses late provider tool calls and leaves files unchanged');
+
+// Conversations keep independent histories and drafts across sidebar close/reopen.
+mockHttp = request => modelList(request) ?? prose('Alpha response'); await continuedView.send('Alpha context'); const alphaId = partialRestart.chatHistory.activeId;
+continuedView.newChat();
+mockHttp = request => { const listed = modelList(request); if (listed) return listed; const input = JSON.parse(request.body).input; assert(!input.some(message => message.content?.includes('Alpha context'))); return prose('Beta response'); };
+await continuedView.send('Beta context'); const betaId = partialRestart.chatHistory.activeId; assert.notEqual(alphaId, betaId);
+continuedView.switchConversation(alphaId); assert(continuedView.messages.some(message => message.content === 'Alpha context'));
+const composer = continuedView.contentEl.all().find(node => node.options.attr?.['aria-label'] === 'Task conversation'); composer.value = 'Alpha draft'; composer.events.input(); await continuedView.onClose();
+mockHttp = request => modelList(request) ?? prose('unused'); const reopened = partialRestart.views.get('auto-scheduler-chat')({}); await reopened.onOpen(); await reopened.modelLoad;
+assert.equal(reopened.draftText, 'Alpha draft'); assert(reopened.messages.some(message => message.content === 'Alpha response')); reopened.switchConversation(betaId); assert(reopened.messages.some(message => message.content === 'Beta response'));
+assert(!JSON.stringify(saved).includes('Alpha context')); assert(!JSON.stringify(saved).includes('Beta context'));
+console.log('PASS: conversation histories and drafts remain isolated in memory across sidebar close/reopen');
+
+assert(creates > 0 && processes > 0); assert(!JSON.stringify(saved).includes('session-token'));
+console.log('Smoke test complete: no real vault, provider, API key, or personal note was accessed.');

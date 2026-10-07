@@ -1,0 +1,22 @@
+{
+  "installedAt": "2026-10-07T14:19:15.132276+08:00",
+  "target": "Configured local Obsidian vault plugin directory (private path omitted)",
+  "backup": "Original runtime files retained locally (private path omitted)",
+  "version": "0.6.0",
+  "files": [
+    "main.js",
+    "manifest.json",
+    "styles.css"
+  ],
+  "previousChecksums": {
+    "main.js": "e1ff7438dd76ffd04c8b46b26248bd7216b456d371c233aa618234ce6a469c92",
+    "manifest.json": "9ebe8c2c60d43d6851b6849e62b17f9389275fe5c9fa582f50cb94d9b0177764",
+    "styles.css": "ee843255192ecd00c2bb810eebf96f3ffaba3241ebdf4537c055d607dc0f5def"
+  },
+  "installedChecksums": {
+    "main.js": "3e1a853ed5f1df18caf48dbe9f0d9a670e92f70ea8900123484c88cd86f9fed5",
+    "manifest.json": "9ebe8c2c60d43d6851b6849e62b17f9389275fe5c9fa582f50cb94d9b0177764",
+    "styles.css": "ee843255192ecd00c2bb810eebf96f3ffaba3241ebdf4537c055d607dc0f5def"
+  },
+  "result": "runtime installed and checksums matched"
+}

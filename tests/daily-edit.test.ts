@@ -4,6 +4,7 @@ import { chat, materializeTasks } from '../src/llm';
 import { DEFAULT_LLM } from '../src/types';
 import type { Task, Tracking, UndoRecord, LlmSettings } from '../src/types';
 import { applyPreview, createPreview, undoLast } from '../src/transaction';
+import { dayPlannerSection } from '../src/daily';
 import { config, MemoryVault, now } from './helpers';
 class EditVault extends MemoryVault {
   aiTasks: Task[] = [];
@@ -14,6 +15,7 @@ class EditVault extends MemoryVault {
 }
 const settings = config({ outputLocation: 'daily', cleanDaily: true, outputMode: 'day-planner', dailyCapacity: 120, periods: ['09:00-11:00'] });
 const source = 'DailyNotes/2026-10-01.md';
+const planner = (text:string) => { const part=dayPlannerSection(text)!; return text.slice(part.start,part.end); };
 const edits = (ref: string, patch = {}) => [{ ref, targetDate: '2026-10-02', title: null, minutes: null, priority: null, ...patch }];
 async function read(v: EditVault, date = '2026-10-01', time = now) { return readDailyPlan(v, settings, v.tracking, v.aiTasks, date, time); }
 async function revise(v: EditVault, changes = edits('row_4'), time = now) {
@@ -34,7 +36,7 @@ describe('daily plan reading and revision', () => {
     expect(preview.result.errors).toEqual([]); expect(defaults).toEqual(['Phone']);
     expect(preview.result.blocks).toHaveLength(1); expect(preview.result.blocks[0].date).toBe('2026-10-02');
     await applyPreview(v, v, preview, settings, now);
-    expect(v.files[source]).toContain('- [x] Done'); expect(v.files[source]).not.toContain('Phone');
+    expect(v.files[source]).toContain('- [x] Done'); expect(v.files[source]).toContain('- [ ] ⏫ Phone number'); expect(planner(v.files[source])).not.toContain('Phone');
     expect(v.files[source]).toContain('# Private\nkeep'); expect(v.files[source]).toContain('# Journal\nretain');
     expect(v.files['DailyNotes/2026-10-02.md']).toContain('09:00 - 09:30 ⏫ Phone number');
     expect(v.files['DailyNotes/2026-10-02.md']).not.toMatch(/as-block|auto-scheduler:|scheduled::/);
@@ -54,7 +56,7 @@ describe('daily plan reading and revision', () => {
     expect(preview.result.blocks.filter(b => !b.completed).reduce((n,b) => n+b.end-b.start,0)).toBe(180);
     expect(preview.result.blocks.filter(b => b.completed)).toHaveLength(1);
     await applyPreview(v,v,preview,settings,now);
-    expect(v.files[source]).toContain('- [x]'); expect(v.files[source]).not.toMatch(/- \[ \].*Long project/);
+    expect(v.files[source]).toContain('- [x]'); expect(v.files[source]).toContain('- [ ] ⏫ Long project'); expect(planner(v.files[source])).not.toMatch(/- \[ \].*Long project/);
     await undoLast(v,v,v.undo); expect(v.files[source]).toBe(before[source]);
     // Restored tracking must still recognize the completed checkbox.
     expect((await read(v)).read.items.find(i => i.ref === id)?.minutes).toBe(60);
@@ -63,7 +65,7 @@ describe('daily plan reading and revision', () => {
     const v = new EditVault(); v.files = {};
     const added = materializeTasks([{title:'Project',minutes:300,priority:4,split:true,minMinutes:30,earliest:null,due:null}],settings,now,'past');
     const p = await createPreview(v,settings,now,{},false,[],added); await applyPreview(v,v,p,settings,now);
-    v.files[source] = v.files[source].replace('- [ ]','- [x]');
+    v.files[source] = v.files[source].replace('- [ ] 09:00','- [x] 09:00');
     const later = new Date('2026-10-02T08:00:00+08:00');
     const snap = await read(v,'2026-10-02',later);
     const {preview} = await previewDailyEdits(v,settings,v.tracking,v.aiTasks,snap,[{ref:v.aiTasks[0].id,targetDate:'2026-10-03',title:null,minutes:null,priority:null}],later,'next');
@@ -127,7 +129,7 @@ describe('revision constraints and recovery', () => {
     const ordinary = r.read.items.find(i=>i.title==='Review')!;
     const {preview} = await previewDailyEdits(v,settings,v.tracking,[],r,edits(ordinary.ref),now,'test');
     expect(preview.result.errors).toEqual([]); await applyPreview(v,v,preview,settings,now);
-    expect(v.files[source]).toContain('Exercise'); expect(v.files[source]).not.toContain('Review');
+    expect(v.files[source]).toContain('Exercise'); expect(v.files[source]).toContain('Review'); expect(planner(v.files[source])).not.toContain('Review');
     expect(v.files['Habits/Routine.md']).toBe('# Habits\n- 19:00 - 19:30 Exercise (Every day)\n');
   });
   it('refuses to silently discard deadlines when postponing an existing AI task', async () => {
@@ -142,7 +144,7 @@ describe('revision constraints and recovery', () => {
     const {preview} = await revise(v,edits('row_4',{minutes:300,targetDate:'2026-10-07'}));
     expect(preview.result.errors).toEqual([]); expect(preview.result.unscheduled[0].remaining).toBe(180);
     await applyPreview(v,v,preview,settings,now); expect(v.aiTasks[0].remaining).toBe(300);
-    expect(v.files['DailyNotes/2026-10-07.md']).toContain('Review'); expect(v.files[source]).not.toContain('Review');
+    expect(v.files['DailyNotes/2026-10-07.md']).toContain('Review'); expect(v.files[source]).toContain('Review'); expect(planner(v.files[source])).not.toContain('Review');
   });
   it('can migrate yesterday handwritten rows and restore exact CRLF bytes', async () => {
     const v = new EditVault(); const past = 'DailyNotes/2026-09-30.md';
@@ -160,7 +162,7 @@ describe('handwritten calendar compatibility during carry-over', () => {
     const {preview} = await revise(v);
     expect(preview.result.errors).toEqual([]); expect(preview.aiTasksAfter[0].priority).toBe(4);
     expect(preview.aiTasksAfter[0].due).toBeDefined(); expect(preview.aiTasksAfter[0].title).toBe('Review');
-    await applyPreview(v,v,preview,settings,now); expect(v.files[source]).not.toContain('Review');
+    await applyPreview(v,v,preview,settings,now); expect(v.files[source]).toContain('Review'); expect(planner(v.files[source])).not.toContain('Review');
     expect(v.files['DailyNotes/2026-10-02.md']).toContain('Review');
   });
   it('rejects carry-over beyond a handwritten deadline', async () => {

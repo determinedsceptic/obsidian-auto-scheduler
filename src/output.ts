@@ -70,12 +70,13 @@ export function blockLine(block: Block, mode: Settings['outputMode'], ganttFilte
   const priorityDisplay = mode === 'gantt' ? `[priority:: ${({ 1: 'lowest', 2: 'low', 3: 'normal', 4: 'high', 5: 'highest' } as Record<number, string>)[priority]}]` : prioritySymbol(priority);
   const body = `${priorityDisplay} ${displayTitle(block.title)} [[${link}]]`;
   const metadata = `<!-- as-block id=${block.id} task=${block.taskId} locked=${block.locked} -->`;
+  const checkbox=block.completed?'x':' ';
   if (mode === 'gantt') {
     const stamp = (minute: number): string => `${dateKey(atDate(minute))} ${clock(minute)}`;
-    return `- [ ] ${ganttFilter ? ganttFilter.trim() + ' ' : ''}${clock(block.start)} - ${endClock(block)} ${body} %%[as-block:: id=${block.id} task=${block.taskId} locked=${block.locked}]%% [start:: ${stamp(block.start)}] [scheduled:: ${stamp(block.start)}] [due:: ${stamp(block.end)}]`;
+    return `- [${checkbox}] ${ganttFilter ? ganttFilter.trim() + ' ' : ''}${clock(block.start)} - ${endClock(block)} ${body} %%[as-block:: id=${block.id} task=${block.taskId} locked=${block.locked}]%% [start:: ${stamp(block.start)}] [scheduled:: ${stamp(block.start)}] [due:: ${stamp(block.end)}]`;
   }
   return mode === 'day-planner'
-    ? `- [ ] ${clock(block.start)} - ${endClock(block)} ${body} [scheduled:: ${block.date}] ${metadata}`
+    ? `- [${checkbox}] ${clock(block.start)} - ${endClock(block)} ${body} [scheduled:: ${block.date}] ${metadata}`
     : `- ${block.date} ${clock(block.start)}-${endClock(block)} ${body} ${metadata}`;
 }
 export function renderOutput(document: OutputDocument, blocks: Block[], mode: Settings['outputMode'], ganttFilter = '🎯'): string {

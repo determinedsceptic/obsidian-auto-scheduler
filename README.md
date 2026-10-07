@@ -1,77 +1,68 @@
 # Auto Scheduler
 
-Turn tasks and recurring habits into a seven-day plan in your Obsidian daily notes.
+Auto Scheduler edits Obsidian notes through a tool-driven assistant and turns explicitly selected work into a seven-day Day planner schedule. The scheduler itself is local and deterministic; AI chat is optional and uses a provider you configure.
 
-Describe what you need to do, give an estimated duration, and let the local scheduler find time around your events, habits, and daily capacity. Use the optional AI assistant with your own provider, or schedule Markdown tasks entirely offline.
-
-![AI-created study plan in Obsidian](docs/screenshots/study-plan.png)
+Desktop only; minimum Obsidian version **1.6.6**.
 
 ## What it does
 
-- **Chat to schedule.** Create tasks, exact one-off events, or fixed-time recurring habits. The reply lists actual saved times and opens the corresponding daily note.
-- **Plan locally.** Priority, deadlines, working hours, fixed events, buffers, and daily capacity determine the schedule. A model cannot choose file paths or overwrite arbitrary notes.
-- **Read and revise plans.** Ask about a dated plan, move unfinished work to tomorrow, or change a task title/priority. Completed records and recurring habits remain intact; one undo restores the entire revision.
-- **Keep readable notes.** Time-based checkboxes appear under `# Day planner` in `YYYY-MM-DD.md`, without hidden management comments in clean daily mode.
-- **Reserve habits first.** Daily, weekday, weekend, or selected-day habits can also occur outside working hours.
-- **Preview and undo.** Manual scheduling previews file changes. AI actions apply directly after validation. The last operation can be undone across a plugin restart.
-- **Bring your own model.** OpenAI Responses, OpenAI-compatible Chat Completions (including DeepSeek), Anthropic Messages, and Google Gemini; local Ollama and LM Studio endpoints are supported when the model implements tool calling.
-
-Desktop only; minimum Obsidian version **1.6.6**. The interface and documentation default to English. AI conversations can use your own language; existing Chinese habit templates remain supported.
+- **Edit ordinary Markdown without prescribing its layout.** Chat can discover authorized notes, read a document, heading or block, stage exact changes, inspect them, and commit them. A heading such as `## Research`, `# Tasks`, or `## 待办` is user data rather than a host requirement.
+- **Schedule only when requested.** `plan_schedule` turns explicit task constraints, exact events and selected habit rows into compatible `# Day planner` clock entries. Active chat does not create a `# Tasks` section, move ordinary checkboxes, or reorganize source notes.
+- **Fixed appointments take precedence.** Exact events and their own before/after buffers override unfinished habits and movable sessions. Habit templates and task sources remain intact; completed records and other fixed commitments remain protected.
+- **Return verifiable results.** The host reports staged changes and durable commit receipts. A model's prose cannot mark an operation successful. If a later model request fails after a commit, the committed receipt remains visible.
+- **Protect concurrent edits.** Every commit rechecks the note versions and plugin state that were read. Multi-file writes have a durable recovery record, including state-only scheduling changes.
+- **Undo the latest operation.** The sidebar and command palette work offline. Exact chat commands `undo` and `/undo` also run locally; natural-language rollback requests go through the assistant tools.
+- **Keep legacy local scheduling.** The manual preview command still scans configured task, habit and fixed-event sources and schedules the current local day plus six more days.
 
 ## Installation
 
-The project is preparing its first community-directory submission; it is **not yet listed** in Obsidian's Community plugins browser.
+The project is preparing its first community-directory submission and is not yet listed in Obsidian's Community plugins browser.
 
-For now, build from source or install the three plugin files from a published [GitHub release](https://github.com/determinedsceptic/obsidian-auto-scheduler/releases) when available:
+Build from source or install `main.js`, `manifest.json`, and `styles.css` from a published [GitHub release](https://github.com/determinedsceptic/obsidian-auto-scheduler/releases):
 
 1. Create `<vault>/.obsidian/plugins/auto-scheduler/`.
-2. Put `main.js`, `manifest.json`, and `styles.css` in that folder.
+2. Copy the three plugin files into that folder.
 3. Reload Obsidian and enable **Auto Scheduler** under **Settings → Community plugins**.
-4. Try it in a separate vault before using existing notes. Back up plugin data along with your notes.
+4. Try it in a separate vault and back up plugin data with your notes.
 
-Do not install GitHub's source-code ZIP as a plugin; it does not contain the built `main.js`.
+GitHub's source-code ZIP is not an installable plugin because it does not contain the built `main.js`.
 
 ## Quick start
 
-1. Click the calendar-clock ribbon icon, or run **Auto Scheduler: Open AI assistant**.
-2. In **Settings → Community plugins → Auto Scheduler**, choose **Add provider**. Select its endpoint and a tool-capable model, then enter your own key if required. Provider models load automatically when you open the assistant or edit a saved provider; a newly entered key loads its list when you leave the key field. Choose from the list, or use **Refresh models** in the sidebar / **Refresh model list** in configuration to refresh it. Manual IDs are an optional advanced fallback. The sidebar's **Configure provider / API key** button edits the active provider.
+1. Click the calendar-clock ribbon icon or run **Auto Scheduler: Open AI assistant**.
+2. Add a provider in plugin settings, enter a key if the endpoint requires one, and select a tool-capable model. The included provider templates come from the installed code. Model discovery reads the configured provider's model list when supported; a manual model ID remains available as a fallback.
+3. Open the note you want to work with. By default, chat can access that current note and valid dated notes in the configured daily-note folder. Add other vault-relative folders explicitly under **Additional note folders**.
+4. Try: **“Under my Research heading, add two review items. Then schedule 90 minutes for the first one.”** The assistant should show a staged change, commit it, and return links to changed notes.
+5. Use **Undo last operation**, `undo`, or `/undo` to restore the latest committed operation if the affected files have not changed since it ran.
 
-3. Try: **“Review two courses, two hours each, high priority. Please schedule them.”**
-4. Use the **Model** selector above the conversation to switch between saved providers and models. Read the assistant's saved time slots. The first scheduled daily note opens automatically; links in the answer open other dates.
-5. Replan with **Preview weekly schedule**. Use **Undo last schedule** to restore the last write.
+Chat follows a generic transaction loop:
 
-For DeepSeek, choose **Add provider → DeepSeek** in plugin settings. It fills the official API address and offers `deepseek-flash` and `deepseek-v4-pro`; enter a DeepSeek API key and choose **Model for chat** before saving. You can switch models later in the sidebar, discover more models, or enter model IDs manually. See [DeepSeek's API documentation](https://api-docs.deepseek.com/quick_start/pricing/).
+```text
+discover -> read -> stage -> commit -> host receipt
+                         \
+                          plan_schedule -> same change set and receipt
+```
 
-The OpenAI template offers `gpt-6-luna` and `gpt-6-sol` for the same API key. Available models depend on the provider account; use model discovery or edit the IDs if your account offers a different set.
+Discovery does not send an entire vault to the model. Content leaves the vault only when an authorized note or structure is read. References are tied to the bytes read, so stale edits are rejected.
 
-For offline scheduling, configure **Output location → Daily notes: Day planner**, **Output format → Day Planner**, and **Clean daily lists**, then add estimated tasks in `Tasks/`:
+## Runtime skills
+
+The plugin ships default note-editing and scheduling instructions. **Runtime skill files** accepts up to eight vault-relative Markdown files. When this list is non-empty, those files replace the bundled defaults and are reloaded on every send, so changing them requires no rebuild or restart.
+
+Skills guide the model's choices but cannot enlarge file scope, bypass snapshot checks, or create a successful receipt. Their contents are sent to the selected provider as instructions; ordinary note contents remain untrusted data.
+
+## Manual offline scheduling
+
+Local scheduling needs no provider, account, key, or network connection. Configure the task folder, habit folder, fixed-events file, work windows, capacity and output settings, then run **Preview weekly schedule** and **Apply schedule**.
+
+Estimated source tasks use the compatibility metadata format:
 
 ```markdown
 - [ ] Prepare a report <!-- as id=report remaining=120 priority=4 split=true min=30 -->
 - [ ] Review the slides <!-- as id=slides remaining=45 priority=3 split=false -->
 ```
 
-Run **Preview weekly schedule**, inspect the result, then select **Apply schedule**. Ordinary tasks without explicit IDs and estimates are left alone.
-
-A start-only request such as **“Exercise tomorrow at 19:00”** reserves **19:00–19:30** by default. Change **Default duration (minutes)** in plugin settings. The answer reports that assumption; an explicit duration takes precedence. Flexible tasks without an estimate also use this default and report the assumption. An undated appointment uses the next occurrence of its start time. Mixed requests schedule every kind in one operation. Handwritten start-only daily rows and habit templates use the same setting. Conflicts or cross-midnight ranges require a correction. See [usage](docs/usage.md#events-with-only-a-start-time).
-
-## Examples
-
-Screenshots below are real Obsidian captures using synthetic notes and a deterministic localhost API fixture. They demonstrate the actual plugin interface and scheduler; **no paid model was called**. See [reproduce the examples](examples/README.md).
-
-### 1. A study plan that fits around events
-
-Prompt: “Review Linear Algebra and Statistics, two hours each, high priority.” The host schedules the work, reports actual times, and opens the day containing the first block.
-
-![Study request and saved daily note](docs/screenshots/study-plan.png)
-
-### 2. Habits that repeat without clutter
-
-Prompt: “Every day, walk from 19:00 to 19:30, normal priority.” The host saves a readable habit template and creates independent occurrences for the next seven days.
-
-![Recurring habit and its saved schedule](docs/screenshots/recurring-habit.png)
-
-You can also edit `Habits/Template.md` directly:
+Habit templates remain plain Markdown:
 
 ```markdown
 - 19:00-19:30 Evening walk (every day)
@@ -79,59 +70,56 @@ You can also edit `Habits/Template.md` directly:
 - 22:00-22:15 🔽 Read a book (weekends)
 ```
 
-No recurrence suffix means every day. Default template examples are inside a code fence and inactive; copy a line outside the fence to enable it. No IDs or HTML comments are needed. Habit names and source paths identify occurrences; keep them unchanged when editing times if you want to preserve completion associations.
+The manual scheduler retains the existing Tasks/Dataview, habit, fixed-event, Day Planner and Gantt compatibility schemas. These compatibility parsers do not make `# Tasks` a requirement for active chat.
 
-### 3. A preview before changing a busy week
+## Transactions and recovery
 
-Manual preview shows daily occupied capacity, additions and removals, errors, and remaining unscheduled work. A full day does not cause work to overlap events or silently disappear.
+The model first stages concrete file and state changes. `commit_changes` then checks every dependency, validates scheduler time assumptions, saves a durable undo record, and performs compare-and-write updates. File edits and an explicit schedule can share one change set and one undo operation.
 
-![Weekly capacity preview](docs/screenshots/weekly-preview.png)
+Obsidian has no atomic multi-file write API. If a later file fails, the operation is recorded as partial and further commits are blocked until recovery. Restart preserves committed, state-only and partial-operation recovery data. Undo refuses to overwrite later user edits.
 
-### 4. A provider you control
-
-Use hosted APIs or a compatible local service. Changing the endpoint or protocol requires a new key; saved keys are never silently forwarded to a different endpoint.
-
-![Provider configuration without a saved API key](docs/screenshots/provider-settings.png)
+When an operation created a note that did not exist, undo restores an empty note. It does not delete the file.
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | Open AI assistant | Open the chat sidebar. |
-| Start new AI conversation | Start an independent context; use the Conversation selector to return to earlier chats during this plugin session. |
-| Clear AI conversation | Clear messages/draft and cancel a pending model request; preserve saved schedules and provider settings. |
-| Create habits template | Create and open an example template without replacing an existing one. |
-| Preview weekly schedule | Preview today plus six days, then apply manually. |
-| Clean daily schedule format | Remove legacy display metadata from existing tracked daily output without replanning. |
-| Recover edited daily schedule tracking | Back up an edited dated note and its old tracking, then preserve its current rows as handwritten events. Saved AI goals and habit templates remain active. |
-| Undo last schedule | Restore the latest template and schedule write, if the files are unchanged. |
+| Start new AI conversation | Start a separate in-memory conversation. |
+| Clear AI conversation | Cancel local waiting and clear the selected messages and draft. |
+| Preview weekly schedule | Preview the offline scheduler's seven-day result. |
+| Clean daily schedule format | Remove legacy display metadata from tracked daily output. |
+| Recover edited daily schedule tracking | Preserve current rows as handwritten occupied time after a verified backup. |
+| Undo last operation | Restore the latest durable file and state transaction when safe. |
 
-## Privacy, payments, and accounts
+## Privacy and provider access
 
-**Local scheduling needs no account, API key, or network connection.** Optional AI chat requires a provider that supports tool calling; hosted providers may require an account and charge API fees independently of this plugin. An existing ChatGPT or Codex subscription does not itself provide an API key.
+Optional chat sends conversation messages, selected runtime skills, host context, and content returned by explicit read tools to the configured endpoint. The current open note is in scope by default but is not sent merely because it is open. Additional note folders must be configured explicitly. Scheduler dependencies such as configured fixed-event inputs may be checked locally without being exposed to the model.
 
-The plugin sends chat messages, local date/time, scheduling constraints, the bundled habits skill, and configured **vault-relative** habit/daily-note paths to your selected endpoint. When the assistant calls `read_daily_plan`, it sends checkbox task summaries from the requested date’s `Day planner` section to that provider (title, completion, duration, deadline, priority and edit reference). The explicitly named habits section (Habits and guidelines / 习惯与计划) may also be included for habit inheritance. The `read_habits` tool sends parsed fixed-time habits and guideline lists from every Markdown template in the configured habits folder, including their vault-relative filenames. Unrelated sections and absolute filesystem paths stay local. Existing plans are not included automatically in every chat request. Opening the assistant or editing a saved provider automatically queries that same provider's `/models` endpoint; entering a new key triggers discovery after leaving the field. Manual refresh is also available. These requests load model metadata and do not generate text. Your provider's own retention and billing policies apply.
+Opening provider configuration or the assistant may query that provider's model-list endpoint. These metadata requests do not run text generation. Provider retention, access and billing policies apply.
 
-There is no plugin telemetry, advertising, remote code execution, automatic self-update, or access to files outside the vault. Keys are stored in the host's **Obsidian Keychain** when its public API is available; otherwise keys stay in memory until reload. Keys are not written to Markdown, plugin `data.json`, logs, or Git. Chat history is in memory and clears when the panel closes.
+There is no plugin telemetry, advertising, remote code execution, automatic self-update, or access outside the vault. Keys use Obsidian Keychain when available; otherwise they remain in memory until reload. Chat history is in memory and resets when the plugin reloads or Obsidian restarts.
 
-Read [privacy and recovery](docs/privacy.md) before using AI with private text.
+Read [privacy and recovery](docs/privacy.md) before using AI with private notes.
 
-## Scheduling rules and limits
+## Scheduling behavior and limits
 
-- The plan covers the current local day plus six days. New ordinary work starts in the future; habits record their confirmed fixed time, including an elapsed time today.
-- Flexible tasks, working hours and one-off events use a **15-minute grid**. Recurring habits support exact minutes (for example, 12:40 after a 10-minute rest), ordinary parentheses in titles, and adjacent activity sequences. Habits must fit within one day; an end at `24:00` is supported.
-- Ordinary tasks are allocated by priority, then deadline, earliest start, and stable ID. The greedy schedule is deterministic, not globally optimal; some work may remain unscheduled.
-- Events and habits reserve time before ordinary work. Buffers count toward capacity within working hours. Habit conflicts reject the write rather than move a fixed activity.
-- No monthly/yearly habits, overnight intervals, external calendar sync, ICS import, or background monitoring of other plugins' newly created notes.
-- Weeks containing a local daylight-saving transition are rejected. Mobile is not supported; native UI validation currently covers macOS. Windows/Linux host UI validation remains open.
-- Clean lists support completion checkboxes and edits outside the generated region. Editing generated titles or times can invalidate tracking; undo before changing them.
-- Multi-file writes are not atomic. A durable backup is saved first, and partial writes can be recovered with undo. Only the most recent operation is retained.
+- Active chat scheduling always writes Day planner-compatible daily notes, independent of legacy single-file/manual output settings.
+- The horizon is the current local day plus six days. Flexible work and exact events use a 15-minute grid; habits support exact minutes.
+- Priority, deadlines, earliest starts, capacity, work windows, fixed events, habits and buffers constrain a deterministic greedy schedule. Work may remain unscheduled and is reported.
+- Exact events and newly added flexible blocks are rechecked immediately before commit so a staged start cannot silently pass while waiting.
+- Monthly/yearly recurrence, overnight intervals, external calendar sync, ICS import and background monitoring are not supported.
+- Weeks containing a local daylight-saving transition are rejected.
 
-For task fields, settings, fixed events, and calendar formats, see [usage](docs/usage.md) and [compatibility](docs/compatibility.md).
+## Historical screenshots
+
+Images under `docs/screenshots/` and the `examples/` fixtures document the pre-refactor specialized chat flow. They remain useful as historical UI and calendar-format records, but their prompts and automatic file-routing behavior are not a promise that the current generic harness reproduces those examples exactly.
+
+![Historical pre-refactor study-plan fixture](docs/screenshots/study-plan.png)
 
 ## Development
 
-Node **22 or 24** and npm are recommended. The lockfile and `.npmrc` fix dependency resolution.
+Node **22 or 24** and npm are recommended.
 
 ```sh
 npm ci --ignore-scripts
@@ -142,48 +130,10 @@ npm run release:check
 npm run package
 ```
 
-The three installation files are generated in `dist/auto-scheduler/`. `npm run dev` rebuilds on source changes. It does not install the plugin or launch Obsidian.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md), [architecture](docs/architecture.md), and [release preparation](docs/releasing.md). Historical design decisions and validation records remain in [docs/development](docs/development/README.md).
+The installation files are generated in `dist/auto-scheduler/`. See [usage](docs/usage.md), [architecture](docs/architecture.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [release preparation](docs/releasing.md).
 
 ## License and acknowledgements
 
 [MIT](LICENSE), copyright 2026 Alex Hu. This is an independent community project, not an official Obsidian product.
 
-[Day Planner](https://github.com/ivan-lednev/obsidian-day-planner) and [Gantt Calendar](https://github.com/sustcsugar/obsidian-gantt-calendar) informed the Markdown interoperability design. [Copilot](https://github.com/logancyang/obsidian-copilot) informed the provider-configuration workflow. Their implementations are not bundled or vendored. See [acknowledgements](docs/acknowledgements.md).
-
-## Read and carry over existing work
-
-Try: “Read today’s plan. Move unfinished ordinary tasks to tomorrow, keep completed records, and continue long-term work over the following days.” Or: “In tomorrow’s plan, raise Review to priority 4.”
-
-The assistant reads `YYYY-MM-DD.md` under the configured daily-note folder before requesting changes. It can read the past 30 days and the next seven local dates. The host moves selected unfinished tasks, preserves existing AI task IDs and completed effort, and schedules from the target date within its seven-day window. Plain handwritten checkbox tasks can be imported with the configured default duration; explicit time ranges preserve their duration. Reports list actual saved slots, defaults, and work that remains unscheduled. The first destination note opens automatically. Run **Undo last schedule** to restore both notes and task state.
-
-Completed tasks, recurring habits, locked blocks, source-managed task rows, nested items, and rows with links are protected from chat edits. Existing AI tasks preserve their total effort and deadlines; their duration cannot currently be edited through chat. Edit the original source/template for those protected cases.
-
-Plain handwritten Tasks/Dataview date and priority fields are accepted on carry-over. Their deadlines and earliest-start constraints are retained; moving beyond the existing deadline is rejected. Management comments and source links remain protected.
-
-## Natural-language habits and visible deadlines
-
-A deadline-only task uses **Default duration** while retaining its original deadline. Clean daily rows show `📅 YYYY-MM-DD` (and a time when applicable); chat reads and saved-slot reports also include that deadline. Carry-over never replaces the deadline with the new scheduled date.
-
-Try: “Save these habits: walk 30 minutes after lunch and dinner, resting 10–20 minutes first; do strength training on Monday, Wednesday and Friday after the evening walk; keep my dietary rules as written.” The assistant decomposes the routine into separate actions and non-time rules, then stores each distinct habit in a separate Markdown file named after its specific title in the configured habits folder. Generated daily schedule notes contain timed blocks, not repeated source prose. Relative routines and conditional rules remain guidelines until you confirm their clock times and a rest duration; strength training uses the configured default duration when none is given. the assistant asks for meal/anchor times to create timed blocks. It lists the decomposed actions and marks missing times for confirmation; it does not invent meal times. Whole-plan inheritance can save the action list and move tasks in one undoable action. Existing habit sections are preserved; an absent section is created as **Habits and guidelines**.
-
-Confirmed habit anchors are persisted as fixed time rows in the individual habit file, not just relative descriptions. The `save_habit_guidelines` document schema includes `schedule` (start, end, weekdays, priority); a null end applies Default duration. Null schedule is reserved for non-time constraints or genuinely unknown anchors. Later reads use the stored start/end directly.
-
-### Habit reuse and effort estimates
-
-Before creating a routine, the assistant reads all habit templates and reuses the canonical title for an equivalent activity. Identical timed routines are idempotent; conflicting times and ambiguous existing duplicates are rejected for clarification. Lunch and dinner walks remain separate. Descriptive rules are merged into the existing document rather than generating a file per sentence.
-
-For projects such as reading a book, the assistant estimates total effort before scheduling and reports its calculation and assumptions. For example, a provisional 300-page book at 30 pages/hour requires 600 minutes, split across available days. This is an adjustable estimate, not a confirmed fact about your book. Short atomic errands can still use the configured default duration.
-
-### Calendar interoperability
-
-Liam Cain's Calendar needs the core Daily Notes folder set to `DailyNotes` and format `YYYY-MM-DD`; enable Calendar under Community plugins. Calendar opens dated notes and displays note activity; it does not render hourly task blocks.
-
-Clean daily output is a concise Day Planner list, for example `- [ ] 12:40 - 13:10 🔼 Lunch walk`. Only genuine task deadlines use `📅`; a habit's fixed end is not a deadline. Calendar opens these notes by their filename. Unmodified Gantt Calendar does not infer precise intervals from a bare clock range. The opt-in [Gantt Calendar compatibility build](integrations/gantt-calendar/README.md) reads the note date and clocks while preserving real deadlines and completion; full date-field output is also available for manual scheduling. Day Planner's Multi-Day View reads the compact format natively; a three-day range keeps today visible. Compact daily notes do not append duplicate start/end metadata merely to populate the Gantt view.
-
-A dated reading block is one session, not the effort required to finish a book. The assistant reads the existing task before expanding it into a project and keeps the same task ID, deadline and completed history. Revised estimates include their calculation and assumptions. Reading/study estimates default to a limit of 60 minutes per day, which can be changed in conversation; the host enforces that pace across days and persists it after restart. Reads distinguish the displayed day's session minutes from total and remaining project effort.
-
-Unless you explicitly request a later start, replanning uses today as the earliest date and considers remaining gaps after the current time alongside the other six dates. AI scheduling balances existing daily loads rather than packing the earliest day; equally loaded candidates use the earlier time. Configured working days/hours, existing commitments, capacity, minimum blocks and buffers still apply. The reply explains why no session fits today. The rolling plan covers seven dates; any unallocated project effort stays saved for later replanning rather than disappearing.
-
-AI requests use seven-day load balancing in the local scheduler. Fixed events, handwritten occupied periods, habits, completed/locked work and buffers contribute to the load within working hours. Flexible work is allocated in sessions of up to 60 minutes (or its larger configured minimum block), repeatedly choosing the feasible day with the smallest projected occupied time. Priority, true deadlines, earliest starts, daily capacity and project pace remain enforced. Unsplittable tasks keep one continuous block. This is a deterministic greedy heuristic, not a globally optimal calendar solver.
+[Day Planner](https://github.com/ivan-lednev/obsidian-day-planner), [Gantt Calendar](https://github.com/sustcsugar/obsidian-gantt-calendar), and [Copilot](https://github.com/logancyang/obsidian-copilot) informed interoperability and provider-configuration work. Their implementations are not bundled or vendored. See [acknowledgements](docs/acknowledgements.md).

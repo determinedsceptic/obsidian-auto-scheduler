@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { applyPreview, createPreview, undoLast } from '../src/transaction';
 import { END, START, emptyManagedFile, parseOutput } from '../src/output';
+import { dailyDocument, renderDaily } from '../src/daily';
+import type { Block, Task } from '../src/types';
 import { config, MemoryVault, now } from './helpers';
 describe('预览、应用、撤销', () => {
   it('预览只读，应用与预览一致且不改源任务', async () => {
@@ -84,5 +86,72 @@ describe('预览、应用、撤销', () => {
     const preview = await createPreview(vault, settings, now); expect(preview.result.errors).toEqual([]);
     await applyPreview(vault, vault, preview, settings, now); expect(vault.files['Tasks/Schedule.md'].startsWith('前言\n')).toBe(true); expect(vault.files['Tasks/Schedule.md'].endsWith('\n尾注')).toBe(true);
     expect((await createPreview(vault, settings, now)).result.errors).toEqual([]);
+  });
+});
+
+describe('persistent source task progress',()=>{
+  const settings=config({outputLocation:'daily',outputMode:'day-planner',dailyFolder:'DailyNotes',cleanDaily:false,periods:['09:00-12:00'],dailyCapacity:180});
+  const sourceTask=(id:string,patch:Partial<Task>={}):Task=>({id,title:'长期目标',path:'Research/Goals.md',line:0,remaining:30,priority:3,split:true,min:30,completed:false,effort:'known',sourceText:'- [ ] 长期目标\n',sourceOccurrence:0,sourceCount:1,sourceStatus:'open',sessionPaths:[],completedSessions:{},completedMinutes:0,needsReview:false,...patch});
+
+  it('keeps identical source blocks independently addressable by occurrence',async()=>{
+    const vault=new MemoryVault();vault.files={'Research/Goals.md':'## 任意标题\n- [ ] 长期目标\n  - 相同子项\n- [x] 长期目标\n  - 相同子项\n'};
+    const sourceText='- [ ] 长期目标\n  - 相同子项\n';
+    const tasks=[sourceTask('ai_same_1',{sourceText,sourceOccurrence:0,sourceCount:2}),sourceTask('ai_same_2',{sourceText,sourceOccurrence:1,sourceCount:2})];
+    const preview=await createPreview(vault,settings,now,{},false,tasks,[],{},[],{dailyUpdates:{},aiTasksAfter:tasks},{preserveLayout:true,explicitSources:true});
+    expect(preview.result.errors).toEqual([]);
+    expect(preview.aiTasksAfter.map(task=>task.sourceStatus)).toEqual(['open','completed']);
+    expect(preview.aiTasksAfter.map(task=>task.completed)).toEqual([false,true]);
+    expect(preview.result.blocks.filter(block=>!block.completed).map(block=>block.taskId)).toEqual(['ai_same_1']);
+  });
+
+  it('retains an open finite goal for review when its estimated sessions are exhausted',async()=>{
+    const vault=new MemoryVault();vault.files={'Research/Goals.md':'## 项目\n- [ ] 长期目标\n'};
+    const task=sourceTask('ai_review',{completedSessions:{done:30},completedMinutes:30});
+    const preview=await createPreview(vault,settings,now,{},false,[task],[],{},[],{dailyUpdates:{},aiTasksAfter:[task]},{preserveLayout:true,explicitSources:true});
+    expect(preview.result.errors).toEqual([]);
+    expect(preview.aiTasksAfter[0]).toMatchObject({completed:false,sourceStatus:'open',completedMinutes:30,needsReview:true});
+    expect(preview.result.unscheduled).toContainEqual(expect.objectContaining({taskId:'ai_review',remaining:0,reason:expect.stringContaining('effort is exhausted')}));
+  });
+
+  it.each(['completed','cancelled'] as const)('retains %s task history after its explicitly retired source is deleted',async sourceStatus=>{
+    const vault=new MemoryVault();vault.files={'Research/Goals.md':'## Archive\n'};
+    const task=sourceTask(`ai_${sourceStatus}`,{sourceStatus,completed:true});
+    const preview=await createPreview(vault,settings,now,{},false,[task],[],{},[],{dailyUpdates:{},aiTasksAfter:[task]},{preserveLayout:true,explicitSources:true});
+    expect(preview.result.errors).toEqual([]);
+    expect(preview.aiTasksAfter[0]).toMatchObject({sourceStatus,completed:true,needsReview:false});
+    expect(preview.result.blocks).toEqual([]);
+  });
+
+  it('does not revive a retired legacy task when identical source text is created later',async()=>{
+    const vault=new MemoryVault();vault.files={'DailyNotes/2026-10-01.md':'# Tasks\n- [ ] 🔼 长期目标\n\n# Day planner\n'};
+    const retired=sourceTask('ai_retired',{path:'DailyNotes/2026-10-01.md',sourceText:undefined,sourceOccurrence:undefined,sourceCount:undefined,sourceStatus:'completed',sourceRetired:true,completed:true});
+    const replacement=sourceTask('ai_replacement',{path:'DailyNotes/2026-10-01.md',sourceText:undefined,sourceOccurrence:undefined,sourceCount:undefined});
+    const preview=await createPreview(vault,settings,now,{},false,[retired,replacement]);
+    expect(preview.result.errors).toEqual([]);
+    expect(preview.aiTasksAfter.find(task=>task.id==='ai_retired')).toMatchObject({sourceRetired:true,sourceStatus:'completed',completed:true});
+    expect(preview.aiTasksAfter.find(task=>task.id==='ai_replacement')).toMatchObject({sourceStatus:'open',completed:false});
+    expect(preview.result.blocks.filter(block=>!block.completed).map(block=>block.taskId)).toEqual(['ai_replacement']);
+  });
+
+  it('persists checked session progress through sessionPaths when clean tracking is disabled',async()=>{
+    const vault=new MemoryVault();
+    const prior:Block={id:'b_progress',taskId:'ai_progress',title:'长期目标',path:'Research/Goals.md',date:'2026-10-01',start:new Date('2026-10-01T09:00:00+08:00').getTime()/60000,end:new Date('2026-10-01T09:30:00+08:00').getTime()/60000,locked:false,completed:true};
+    vault.files={'Research/Goals.md':'## 项目\n- [ ] 长期目标\n','DailyNotes/2026-10-01.md':renderDaily(dailyDocument('# Day planner\n'),[prior],'day-planner').replace('- [ ] 09:00','- [x] 09:00')};
+    const task=sourceTask('ai_progress',{remaining:60,sessionPaths:['DailyNotes/2026-10-01.md']});
+    const preview=await createPreview(vault,settings,new Date('2026-10-02T08:00:00+08:00'),{},false,[task],[],{},[],{dailyUpdates:{},aiTasksAfter:[task]},{preserveLayout:true,explicitSources:true});
+    expect(preview.result.errors).toEqual([]);
+    expect(preview.historyPaths).toContain('DailyNotes/2026-10-01.md');
+    expect(preview.aiTasksAfter[0]).toMatchObject({completed:false,completedSessions:{b_progress:30},completedMinutes:30,needsReview:false});
+    expect(preview.result.blocks.filter(block=>!block.completed).reduce((sum,block)=>sum+block.end-block.start,0)).toBe(30);
+  });
+
+  it('treats completed rolling sessions as budget progress rather than goal completion',async()=>{
+    const vault=new MemoryVault();vault.files={'Research/Goals.md':'## 学习\n- [ ] 长期目标\n'};
+    const task=sourceTask('ai_unknown',{remaining:60,effort:'unknown',rollingMinutes:60,dailyMinutes:30,completedSessions:{old:60},completedMinutes:60});
+    const preview=await createPreview(vault,settings,now,{},false,[task],[],{},[],{dailyUpdates:{},aiTasksAfter:[task]},{preserveLayout:true,explicitSources:true});
+    expect(preview.result.errors).toEqual([]);
+    expect(preview.aiTasksAfter[0]).toMatchObject({completed:false,sourceStatus:'open',needsReview:false});
+    expect(preview.result.blocks.filter(block=>!block.completed).reduce((sum,block)=>sum+block.end-block.start,0)).toBe(60);
+    expect(preview.result.notes?.join('\n')).toContain('total effort is unknown');
   });
 });

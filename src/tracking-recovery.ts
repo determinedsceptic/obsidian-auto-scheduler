@@ -13,7 +13,7 @@ export function releaseEditedTracking(path: string, text: string, tracking: Trac
   parseBoundary(path.slice(-13, -3));
   if (!dayPlannerSection(text) || text.includes(START) || text.includes(END)) throw Error('Recovery requires one plain Day planner section without managed markers');
   const pair = tracking[path];
-  if (!pair?.after && !pair?.before) throw Error('This note has no generated schedule tracking to recover');
+  if (!pair?.after && !pair?.before&&!pair?.eventRecords?.length) throw Error('This note has no generated schedule tracking to recover');
   let conflict = false;
   try { rehydrate(text, pair); } catch { conflict = true; }
   if (!conflict) throw Error('The tracked schedule still matches; recovery is unnecessary');
