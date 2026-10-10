@@ -8,14 +8,26 @@ import type { OperationReceipt } from './agent-types';
 import { modelChoices } from './providers';
 import type { ChatMessage } from './llm';
 import type { ScheduledNote } from './ai-result';
+import { renderChatMarkdown } from './chat-markdown';
 export const CHAT_VIEW = 'auto-scheduler-chat';
-type ChatEntry = ChatMessage & { notes?: ScheduledNote[]; failed?: boolean; receipt?:OperationReceipt };
+type ChatEntry = ChatMessage & { notes?: ScheduledNote[]; failed?: boolean; cancelled?:boolean; receipt?:OperationReceipt; internal?:boolean; sourcePath?:string };
 export interface ChatConversation { id:string; messages:ChatEntry[]; draft:string }
+function hasWrite(receipt:OperationReceipt):boolean {
+  return receipt.status==='partial'||receipt.status==='committed'&&(receipt.changedFiles.length>0||receipt.stateChanges.length>0);
+}
+function visibleMessage(message:ChatEntry):boolean {
+  return !message.internal && !(message.role==='assistant'&&message.content==='Host result: No files changed in this turn.')
+    && !(message.receipt && /^(committed|noop|conflict|partial|failed):/.test(message.content));
+}
+function failureDetail(error:string):string {
+  return error.split(/\r?\n/).find(line=>line.trim())?.trim()||'Unknown error';
+}
 export class ChatView extends ItemView {
   private messages: ChatEntry[] = [];
   private conversations: ChatConversation[];
   private conversationId: string;
   private pendingUser?: ChatEntry;
+  private pendingReceipts:OperationReceipt[]=[];
   private draftText = '';
   private busy = false;
   private requestStatus = '';
@@ -45,9 +57,11 @@ export class ChatView extends ItemView {
   }
   private cancelPending(restoreDraft=false): void {
     if(restoreDraft && this.pendingUser){
-      this.pendingUser.failed=true;
-      if(this.applying)this.messages.push({role:'assistant',content:'A commit is already in progress. Its host result will be kept in this conversation.',failed:true});
-      else {this.draftText=this.pendingUser.content;this.messages.push({role:'assistant',content:'Request cancelled. The draft is available to resend.',failed:true});}
+      if(!this.applying&&!this.pendingReceipts.some(hasWrite)){
+        this.pendingUser.failed=true;
+        this.pendingUser.cancelled=true;
+        this.draftText=this.pendingUser.content;
+      }
     }
     this.pendingUser=undefined;
     this.generation++;
@@ -67,6 +81,7 @@ export class ChatView extends ItemView {
     this.messages=target.messages;this.draftText=target.draft;this.render();
   }
   clearChat(): void {
+    if(this.applying){new Notice('Wait for the current operation to finish');return;}
     this.cancelPending();this.messages=[];this.draftText='';this.saveConversation();this.render();
   }
   refresh(): void { this.render(); }
@@ -74,8 +89,8 @@ export class ChatView extends ItemView {
     if (this.closed || this.modelBusy || !this.plugin.byok.providers.length) return;
     this.modelBusy = true; this.modelStatus = 'Loading provider models…'; this.render();
     try {
-      const count = await this.plugin.refreshModels(this.plugin.byok.activeProviderId);
-      this.modelStatus = `${count} provider models loaded. Tool support depends on the model.`;
+      await this.plugin.refreshModels(this.plugin.byok.activeProviderId);
+      this.modelStatus = '';
     } catch (error) { this.modelStatus = `Model list not refreshed: ${(error as Error).message}`; }
     finally { this.modelBusy = false; this.render(); }
   }
@@ -124,9 +139,12 @@ export class ChatView extends ItemView {
     }
     const log = root.createDiv({ cls: 'auto-scheduler-chat-log', attr: { 'aria-live': 'polite' } });
     for (const message of this.messages) {
+      if(!visibleMessage(message))continue;
       const row = log.createDiv({ cls: `auto-scheduler-message auto-scheduler-${message.role}` });
-      row.createEl('strong', { text: message.receipt ? 'Host result' : message.role === 'user' ? 'You' : 'Assistant' });
-      row.createEl('p', { text: message.content });
+      row.createDiv({ text: message.role === 'user' ? 'You' : 'Assistant', cls:'auto-scheduler-message-role' });
+      const body=row.createDiv({cls:'auto-scheduler-message-content markdown-rendered'});
+      try{renderChatMarkdown(this.app,message.content,body,message.sourcePath??this.app.workspace.getActiveFile()?.path??'');}
+      catch{body.empty();body.createEl('p',{text:message.content,cls:'auto-scheduler-message-plain'});}
       if (message.failed && message.content.includes('HTTP 429') && new URL(this.plugin.state.llm.baseUrl).hostname === 'api.openai.com') {
         row.createEl('a', {text:'Open API limits', href:'https://platform.openai.com/settings/organization/limits', attr:{target:'_blank',rel:'noopener noreferrer'}});
       }
@@ -134,15 +152,8 @@ export class ChatView extends ItemView {
       copy.addEventListener('click', () => {
         void navigator.clipboard.writeText(message.content).then(() => { copy.textContent = 'Copied'; }, () => new Notice('Could not copy. Select the text and use your system copy shortcut.'));
       });
-      if (message.notes?.length) {
-        const links = row.createDiv({ cls: 'auto-scheduler-note-links' });
-        for (const note of message.notes) {
-          const link = links.createEl('a', { text: `Open ${note.date}`, href: '#', cls: 'internal-link' });
-          link.addEventListener('click', e => { e.preventDefault(); void this.plugin.openScheduledNote(note.path).catch(error => new Notice(`Could not open daily note: ${(error as Error).message}`)); });
-        }
-      }
     }
-    if (this.busy) log.createEl('p', { text: this.requestStatus || 'Reading and scheduling…' });
+    if (this.busy) log.createEl('p', { text: this.requestStatus || 'Working…',cls:'auto-scheduler-muted' });
     const composer = root.createDiv({ cls: 'auto-scheduler-composer' });
     const input = composer.createEl('textarea', { attr: { placeholder: 'Edit notes or ask to arrange time…', 'aria-label': 'Task conversation', rows: '3', maxlength: '12000' } });
     input.value = this.draftText; input.addEventListener('input', () => { this.draftText = input.value; this.saveConversation(); });
@@ -152,6 +163,7 @@ export class ChatView extends ItemView {
     send.addEventListener('click', () => { void this.send(input.value); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.isComposing) { e.preventDefault(); void this.send(input.value); } });
     const clear = actions.createEl('button', { text: 'Clear', attr: {'aria-label':'Clear conversation and cancel pending request','title':'Clear conversation and cancel pending request. Saved schedules remain.'} });
+    clear.disabled=this.applying;
     clear.addEventListener('click', () => this.clearChat());
     log.scrollTop = log.scrollHeight;
   }
@@ -167,7 +179,8 @@ export class ChatView extends ItemView {
     const publish=(entry:ChatEntry)=>{const messages=current()?this.messages:this.conversations.find(conversation=>conversation.id===conversationId)?.messages;messages?.push(entry);if(!this.closed&&this.conversationId===conversationId)this.render();};
     try {
       const result=await this.plugin.undoSchedule(undoKey);
-      publish({role:'assistant',content:result.text,notes:result.notes,receipt:result.receipt});
+      const chinese=/\p{Script=Han}/u.test(message??this.messages.filter(entry=>entry.role==='user').slice(-1)[0]?.content??'');
+      publish({role:'assistant',content:result.receipt?(chinese?'已撤销上次操作。':'Last operation undone.'):result.text,notes:result.notes,receipt:result.receipt,sourcePath:this.app.workspace.getActiveFile()?.path??''});
     } catch(error) {
       publish({role:'assistant',content:`Undo failed: ${(error as Error).message}`,failed:true});
     } finally {
@@ -189,10 +202,41 @@ export class ChatView extends ItemView {
     catch (error) { if (current()) { this.busy = false; this.activeJob = null; new Notice((error as Error).message); } return; }
     if (!current()) return;
     if (providerId !== this.plugin.byok.activeProviderId || configKey !== JSON.stringify(this.plugin.state.llm)) { this.busy = false; new Notice('Model settings changed. Send your message again.'); this.render(); return; }
-    const userMessage: ChatMessage & { failed?: boolean } = { role: 'user', content: message };
-    this.draftText = ''; this.pendingUser=userMessage; this.messages.push(userMessage); this.busy = true; this.render();
+    const sourcePath=this.app.workspace.getActiveFile()?.path??'';
+    const userMessage: ChatEntry = { role: 'user', content: message,sourcePath };
+    this.draftText = ''; this.pendingUser=userMessage;this.pendingReceipts=[]; this.messages.push(userMessage); this.busy = true; this.render();
     const conversationId = this.conversationId;
-    let modelFinished = false;
+    const chinese=/\p{Script=Han}/u.test(message);
+    const say=(zh:string,en:string)=>chinese?zh:en;
+    let receipts:OperationReceipt[]=[];
+    const unresolvedProblem=()=>{
+      let lastCommit=-1,lastFailure=-1;
+      for(const [index,receipt] of receipts.entries()){
+        if(receipt.status==='committed')lastCommit=index;
+        if(['partial','failed','conflict'].includes(receipt.status))lastFailure=index;
+      }
+      return lastFailure>lastCommit?receipts[lastFailure]:undefined;
+    };
+    const publish=(entry:ChatEntry)=>{
+      const messages=this.conversations.find(conversation=>conversation.id===conversationId)?.messages;
+      messages?.push({...entry,sourcePath});
+      if(!this.closed&&this.conversationId===conversationId)this.render();
+    };
+    const stopped=(error?:string)=>{
+      // A stopped model request cannot undo a tool that already changed local state.
+      const changed=receipts.some(hasWrite);
+      const partial=receipts.some(receipt=>receipt.status==='partial')&&this.plugin.state.undo?.status==='partial';
+      const problem=unresolvedProblem();
+      if(partial||problem){
+        const prefix=partial||problem?.status==='partial'?say('部分修改未完成，请先撤销上次操作。','Changes are incomplete. Undo the last operation before retrying.'):
+          changed?say('部分操作已执行，后续操作失败。','Some operations ran; a later operation failed.'):say('操作未完成。','The operation did not complete.');
+        const detail=problem?.warnings[0]||problem?.summary;
+        return detail?`${prefix} ${failureDetail(detail)}`:prefix;
+      }
+      const prefix=changed?say('操作已执行，回复未完成。','The operation ran, but the reply did not finish.'):
+        say('请求失败。','Request failed.');
+      return error?`${prefix} ${failureDetail(error)}`:prefix;
+    };
     try {
       const session=await this.plugin.agentSession(settingsKey,()=>!current());
       const options=agentSettings(this.plugin.state.agent);
@@ -200,35 +244,41 @@ export class ChatView extends ItemView {
       const publishReceipts=()=>{
         for(const receipt of session.runtime.receipts.slice(reported)){
           reported++;
-          const notes=receipt.changedFiles.filter(path=>/\/\d{4}-\d{2}-\d{2}\.md$/.test(path)).map(path=>({path,date:path.slice(-13,-3)}));
-          const messages = current() ? this.messages : this.conversations.find(conversation=>conversation.id===conversationId)?.messages;
-          messages?.push({role:'assistant',content:`${receipt.status}: ${receipt.summary}\nFiles: ${receipt.changedFiles.join(', ')||'none'}${receipt.stateChanges.length?'\nPlugin state: '+receipt.stateChanges.join(', '):''}${receipt.warnings.length?'\n'+receipt.warnings.join('\n'):''}`,notes,receipt,failed:['failed','conflict','partial'].includes(receipt.status)});
+          receipts.push(receipt);
+          // Keep execution evidence for recovery without displaying it as assistant prose.
+          publish({role:'assistant',content:receipt.summary,receipt,internal:true});
         }
-        if(!this.closed&&this.conversationId===conversationId)this.render();
+        if(this.activeJob===job)this.pendingReceipts=receipts;
       };
-      const reply=await runAgent(config,token,this.messages.filter(m=>!m.failed).map(({role,content})=>({role,content})),session.instructions,session.runtime,async(url,headers,body)=>{
+      const reply=await runAgent(config,token,this.messages.filter(m=>visibleMessage(m)&&!m.cancelled).map(({role,content})=>({role,content})),session.instructions,session.runtime,async(url,headers,body)=>{
         const result=await requestUrl({url,method:'POST',headers,body,throw:false});let json:unknown={};
         try{json=result.json;}catch{/* Protocol adapter reports malformed provider responses. */}
         return {status:result.status,json,headers:result.headers};
-      },{...options,feedback:{signal:controller.signal,cancelled:()=>!current(),onRetry:(delay,retry)=>{this.requestStatus=`Provider rate limit. Retrying in ${Math.ceil(delay/1000)}s (${retry}/2)…`;if(current())this.render();}},onTool:(name,phase)=>{
-        this.applying=phase==='start'&&['commit_changes','undo_operation'].includes(name);
-        this.requestStatus=phase==='start'?`Running ${name}…`:'Waiting for assistant…';
-        if(phase==='end')publishReceipts();else if(current())this.render();
+      },{...options,feedback:{signal:controller.signal,cancelled:()=>!current(),onRetry:()=>{if(current()){this.requestStatus=say('稍后重试…','Retrying shortly…');this.render();}}},onTool:(name,phase)=>{
+        if(this.activeJob===job){
+          this.applying=phase==='start'&&['commit_changes','undo_operation'].includes(name);
+          this.requestStatus=this.applying?say('保存中…','Saving…'):say('处理中…','Working…');
+        }
+        if(phase==='end')publishReceipts();
+        if(current())this.render();
       }});
-      modelFinished=true;publishReceipts();
-      if(!current())return;
-      const changed=session.runtime.receipts.some(receipt=>receipt.status==='partial'||receipt.status==='committed'&&(receipt.changedFiles.length||receipt.stateChanges.length));
-      if(reply.error&&!changed){this.draftText=message;userMessage.failed=true;}
-      if(reply.text)this.messages.push({role:'assistant',content:reply.text});
-      if(reply.error)this.messages.push({role:'assistant',content:reply.error,failed:true});
-      if(!session.runtime.receipts.some(receipt=>receipt.changedFiles.length||receipt.status==='partial'))this.messages.push({role:'assistant',content:'Host result: No files changed in this turn.',failed:!!reply.error});
-    } catch (error) {
-      if (current()) {
-        if (!modelFinished) { this.draftText = message; userMessage.failed = true; }
-        this.messages.push({ role: 'assistant', content: `Request failed: ${(error as Error).message}`, failed: true });
+      publishReceipts();
+      receipts=reply.receipts;
+      if(!current()){
+        if(receipts.some(hasWrite))publish({role:'assistant',content:stopped(),failed:this.plugin.state.undo?.status==='partial'});
+        return;
       }
+      const changed=receipts.some(hasWrite);
+      if(reply.error&&!changed){this.draftText=message;userMessage.failed=true;}
+      const problem=unresolvedProblem();
+      if(problem||reply.error)publish({role:'assistant',content:stopped(reply.error),failed:!changed||this.plugin.state.undo?.status==='partial'});
+      else if(reply.text)publish({role:'assistant',content:reply.text});
+    } catch (error) {
+      const changed=receipts.some(hasWrite);
+      if(current()&&!changed){this.draftText=message;userMessage.failed=true;}
+      if(current()||changed)publish({role:'assistant',content:stopped((error as Error).message),failed:!changed||this.plugin.state.undo?.status==='partial'});
     } finally {
-      if (this.activeJob === job) { this.activeJob = null; this.pendingUser=undefined; this.busy = false; this.applying = false; this.requestStatus = ''; if (this.requestAbort === controller) this.requestAbort = undefined; this.render(); }
+      if (this.activeJob === job) { this.activeJob = null; this.pendingUser=undefined;this.pendingReceipts=[]; this.busy = false; this.applying = false; this.requestStatus = ''; if (this.requestAbort === controller) this.requestAbort = undefined; this.render(); }
     }
   }
 }

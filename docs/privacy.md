@@ -8,7 +8,7 @@ Plugin `data.json` holds settings, AI task records, clean-list tracking, and the
 
 The plugin does not use Git or submit vault notes to GitHub. The development repository contains plugin code, documentation and synthetic compatibility fixtures; personal daily folders, hidden vault configuration and plugin state are separate. Schedule metadata is an optional local hint, not a content lock. Current note bytes take precedence over obsolete records, and ordinary edits require no tracking recovery.
 
-Conversations and drafts are held in memory until the plugin reloads. Closing and reopening the sidebar preserves them; **Clear** clears the selected conversation. There is no telemetry or background inference. Opening configuration or the assistant can query provider model metadata. Temporary rate limits can retry at most twice, within the request budget.
+Conversations and drafts are held in memory until the plugin reloads. Closing and reopening the sidebar preserves them; **Clear** clears the selected conversation. Chat Markdown does not invoke other plugins' executable Markdown processors; raw HTML is escaped and images require an explicit link click. There is no telemetry or background inference. Opening configuration or the assistant can query provider model metadata. Temporary rate limits can retry at most twice, within the request budget.
 
 ## Optional AI requests
 
@@ -28,6 +28,6 @@ Keys are bound to plugin namespace, provider, protocol, and endpoint. Host Secre
 
 Tool parameters are input data, not executable code. Reads and writes are scope checked. References identify the actual read snapshot; changes to source files, destinations, or plugin state invalidate staged work. Generic tools can edit every authorized section, including calendar rows; explicit time allocation uses the scheduling adapter.
 
-The host saves recovery data before modifying notes. Multi-file writes can be interrupted. A partial operation locks further commits until recovery; that lock survives restart, including interrupted undo. The sidebar shows actual host receipts independently of model prose and retains them even if the next provider request fails or the view closes during commit.
+The host saves recovery data before modifying notes. Multi-file writes can be interrupted. A partial operation locks further commits until recovery; that lock survives restart, including interrupted undo. The sidebar retains actual host receipts internally and shows a brief execution outcome if a request fails after writing or leaves an incomplete operation, including if the view closes during commit. Routine receipts and no-change diagnostics are hidden from chat.
 
 **Undo last operation**, `/undo`, and exact `undo` work without an API call. Natural-language undo uses `undo_operation` through the tool loop. Undo refuses to overwrite later manual edits or changed task/tracking state. The plugin retains one undoable operation; it is not a version-history replacement. Newly created notes are restored to empty contents on undo rather than removed. Maintain independent backups.

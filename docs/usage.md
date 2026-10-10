@@ -12,7 +12,9 @@ The assistant uses host tools rather than special phrases or fixed note headings
 6. `commit_changes` checks every read dependency and plugin-state version, then writes and returns a durable receipt.
 7. `undo_operation` restores the latest identified operation when its current files and state still match.
 
-A staged result is not a commit. The sidebar derives success, changed files, state changes, warnings, links, and undo availability from the host receipt. Model text cannot manufacture these facts. If the model request fails after a commit, the receipt remains visible.
+A staged result is not a commit. The host retains authoritative receipts and derives undo availability from actual execution. Chat renders Markdown and defaults to 1–3 short sentences or at most 3 short bullets. Routine host receipts, file lists, and no-change diagnostics are hidden. If an operation fails, is incomplete, or the model stops after writing, a brief execution outcome remains in the conversation.
+
+Markdown supports headings, emphasis, lists, tables, code blocks, and note links. Code blocks are displayed as text without invoking other plugins' Markdown processors. Raw HTML is escaped, and images are shown as links that require a click.
 
 ### Note structure
 

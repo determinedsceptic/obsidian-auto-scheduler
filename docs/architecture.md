@@ -9,7 +9,7 @@ The generic harness described in [the accepted refactor](development/harness-ref
 | Module | Responsibility |
 | --- | --- |
 | `main.ts` | Plugin lifecycle, commands, settings, active-note scope, vault adapter, durable state, and serialized operations. |
-| `chat-view.ts`, `provider-modal.ts` | Sidebar conversation, host result display, note links, and BYOK configuration. |
+| `chat-view.ts`, `provider-modal.ts` | Sidebar conversation, Markdown display, concise execution fallback, and BYOK configuration. |
 | `agent-harness.ts`, `agent-protocol.ts` | Provider-independent tool loop, protocol encoding, bounded execution, and tool-result feedback. |
 | `plugin-agent.ts`, `runtime-skills.ts` | Per-send scope/context, runtime skill loading, generic tools, and scheduling registration. |
 | `note-workspace.ts`, `markdown-structure.ts` | Discovery, version-bound document/section/block references, staged Markdown edits, commit receipts, and undo. |
@@ -36,11 +36,13 @@ flowchart LR
   C --> T[Snapshot and state checks]
   T --> B[Durable recovery record]
   B --> W[Compare and write]
-  W --> Q[Host receipt and note links]
+  W --> Q[Internal host receipt and concise reply]
   Q --> H
 ```
 
-Every tool result is returned to the model, including validation failures, conflicts, partial writes, and successful receipts. A committed receipt is stored and displayed independently of subsequent model output, so a provider error after commit cannot erase or rewrite the operation status.
+Every tool result is returned to the model, including validation failures, conflicts, partial writes, and successful receipts. Receipts are retained internally rather than shown as technical chat messages. If the model stops after a write, or execution is incomplete, the sidebar publishes a brief authoritative outcome to the original conversation, including after cancellation or closing the view. Ordinary replies use the model's final text. Hidden receipt entries are excluded from later conversation prompts.
+
+`chat-markdown.ts` parses CommonMark/GFM with a dedicated Marked instance and appends Obsidian-sanitized DOM. It does not invoke the global Obsidian Markdown processor registry. Raw HTML is escaped; images become explicit links. Internal links open through the workspace API. Copy preserves the original Markdown.
 
 The model may stage several generic edits before commit. `plan_schedule` can consume a staged change set through an overlay vault, schedule against the proposed bytes, and create a combined change set. The final commit uses original read snapshots as dependencies and writes the union of ordinary note edits and final Day planner bytes. One receipt and one undo record cover the composition.
 

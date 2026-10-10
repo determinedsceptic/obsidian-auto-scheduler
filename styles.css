@@ -13,8 +13,32 @@
 .auto-scheduler-chat-model select { width: 100%; min-width: 0; color: var(--text-normal); }
 .auto-scheduler-chat-log { flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; overscroll-behavior: contain; }
 .auto-scheduler-message { padding: 12px; margin-bottom: 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary); }
-.auto-scheduler-message strong { display: block; font-size: var(--font-smallest); font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
-.auto-scheduler-message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: var(--font-small); line-height: 1.65; }
+.auto-scheduler-message-role { display: block; font-size: var(--font-smallest); font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+.auto-scheduler-message-content.markdown-rendered { min-width: 0; overflow-wrap: anywhere; font-size: var(--font-small); line-height: 1.65; }
+.auto-scheduler-message-content.markdown-rendered > :first-child { margin-top: 0; }
+.auto-scheduler-message-content.markdown-rendered > :last-child { margin-bottom: 0; }
+.auto-scheduler-message-content.markdown-rendered p { margin: 0 0 0.75em; }
+.auto-scheduler-message-content.markdown-rendered .auto-scheduler-message-plain { white-space: pre-wrap; }
+.auto-scheduler-message-content.markdown-rendered ul,
+.auto-scheduler-message-content.markdown-rendered ol { margin: 0.5em 0 0.75em; padding-inline-start: 1.8em; }
+.auto-scheduler-message-content.markdown-rendered li { margin-block: 0.2em; }
+.auto-scheduler-message-content.markdown-rendered li > p { margin-bottom: 0.35em; }
+.auto-scheduler-message-content.markdown-rendered strong { font-weight: 700; }
+.auto-scheduler-message-content.markdown-rendered h1,
+.auto-scheduler-message-content.markdown-rendered h2,
+.auto-scheduler-message-content.markdown-rendered h3,
+.auto-scheduler-message-content.markdown-rendered h4,
+.auto-scheduler-message-content.markdown-rendered h5,
+.auto-scheduler-message-content.markdown-rendered h6 { margin: 0.8em 0 0.4em; line-height: 1.3; }
+.auto-scheduler-message-content.markdown-rendered blockquote { margin: 0.75em 0; padding-inline-start: 1em; border-inline-start: 3px solid var(--background-modifier-border); color: var(--text-muted); }
+.auto-scheduler-message-content.markdown-rendered pre { max-width: 100%; margin: 0.75em 0; padding: 0.75em; overflow-x: auto; white-space: pre; border-radius: 6px; background: var(--code-background); }
+.auto-scheduler-message-content.markdown-rendered pre code { padding: 0; white-space: inherit; background: transparent; }
+.auto-scheduler-message-content.markdown-rendered :not(pre) > code { padding: 0.1em 0.3em; border-radius: 3px; background: var(--code-background); }
+.auto-scheduler-message-content.markdown-rendered table { display: block; max-width: 100%; margin: 0.75em 0; overflow-x: auto; border-collapse: collapse; }
+.auto-scheduler-message-content.markdown-rendered th,
+.auto-scheduler-message-content.markdown-rendered td { padding: 0.35em 0.6em; border: 1px solid var(--background-modifier-border); white-space: nowrap; }
+.auto-scheduler-message-content.markdown-rendered a { overflow-wrap: anywhere; }
+.auto-scheduler-message-content.markdown-rendered .auto-scheduler-inert-link { color: var(--text-muted); }
 .auto-scheduler-user { background: var(--background-secondary); }
 .auto-scheduler-composer { flex: none; padding-top: 12px; border-top: 1px solid var(--background-modifier-border); }
 .auto-scheduler-composer textarea { display: block; width: 100%; min-height: 84px; max-height: 200px; resize: vertical; margin: 0; padding: 10px 12px; border-radius: 8px; box-shadow: none; background: var(--background-primary); font-size: var(--font-small); line-height: 1.5; }
@@ -27,8 +51,8 @@
 .auto-scheduler-note-links { display: flex; flex-wrap: wrap; gap: 0.5em 1em; padding-top: 10px; font-size: var(--font-small); }
 
 .auto-scheduler-chat .auto-scheduler-message,
-.auto-scheduler-chat .auto-scheduler-message p,
-.auto-scheduler-chat .auto-scheduler-message strong { user-select: text; -webkit-user-select: text; cursor: text; }
+.auto-scheduler-chat .auto-scheduler-message-content,
+.auto-scheduler-chat .auto-scheduler-message-role { user-select: text; -webkit-user-select: text; cursor: text; }
 .auto-scheduler-message-copy { display: block; margin: 8px 0 0 auto; font-size: var(--font-smallest); box-shadow: none; }
 
 .auto-scheduler-conversations { display: flex; gap: 8px; align-items: center; margin-top: 10px; margin-bottom: 12px; }

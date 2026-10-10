@@ -37,5 +37,8 @@
   "bugs": {
     "url": "https://github.com/determinedsceptic/obsidian-auto-scheduler/issues"
   },
-  "homepage": "https://github.com/determinedsceptic/obsidian-auto-scheduler#readme"
+  "homepage": "https://github.com/determinedsceptic/obsidian-auto-scheduler#readme",
+  "dependencies": {
+    "marked": "18.1.0"
+  }
 }
